@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Lock, CheckCircle, Circle, BookOpen, Target, Users, Zap, Award, MessageSquare, Tag, Brain, Search, PenTool, Coins, Network, Shield, RefreshCw, CheckCircle2, Megaphone, Eye, Globe, Crown, Gem, Library } from 'lucide-react';
+import { ArrowLeft, Lock, CheckCircle, BookOpen, Target, Users, Zap, Award, MessageSquare, Tag, Brain, Search, PenTool, Coins, Network, Shield, RefreshCw, CheckCircle2, Megaphone, Eye, Globe, Crown, Gem, Library } from 'lucide-react';
 import { api } from '../services/api';
 
 export default function EvolutionTree() {

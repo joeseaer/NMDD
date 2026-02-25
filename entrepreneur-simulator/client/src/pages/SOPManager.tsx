@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { 
   BookOpen, Plus, Tag, Search, X, 
   MoreHorizontal, Share2, Trash2, FileText, Activity, Clock, 
@@ -132,7 +132,7 @@ export default function SOPManager() {
   });
 
   // Calculate hot tags
-  const hotTags = React.useMemo(() => {
+  const hotTags = useMemo(() => {
     const tagCounts = sops.flatMap(s => s.tags || []).reduce((acc, tag) => {
       acc[tag] = (acc[tag] || 0) + 1;
       return acc;
