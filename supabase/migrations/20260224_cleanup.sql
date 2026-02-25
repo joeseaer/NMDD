@@ -1,0 +1,1 @@
+DELETE FROM sops WHERE title = '未命名方法论';

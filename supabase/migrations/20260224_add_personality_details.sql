@@ -1,0 +1,5 @@
+
+ALTER TABLE people_profiles 
+ADD COLUMN IF NOT EXISTS current_mood TEXT DEFAULT '平稳',
+ADD COLUMN IF NOT EXISTS triggers TEXT[] DEFAULT '{}',
+ADD COLUMN IF NOT EXISTS pleasers TEXT[] DEFAULT '{}';
