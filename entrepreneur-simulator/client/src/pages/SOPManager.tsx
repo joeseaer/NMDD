@@ -7,18 +7,20 @@ import {
   Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder, Menu, Image as ImageIcon, PanelLeft
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
+import { InputRule } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
-  import Image from '@tiptap/extension-image';
-  import TaskList from '@tiptap/extension-task-list';
-  import TaskItem from '@tiptap/extension-task-item';
-  import Placeholder from '@tiptap/extension-placeholder';
-  import Heading from '@tiptap/extension-heading';
-  import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
-  import MarkdownIt from 'markdown-it';
+import Image from '@tiptap/extension-image';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import Placeholder from '@tiptap/extension-placeholder';
+import Heading from '@tiptap/extension-heading';
+import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
+import MarkdownIt from 'markdown-it';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import { api } from '../services/api';
+import { ColumnList, Column } from '../components/TiptapExtensions';
 
 // --- Types ---
 
@@ -278,7 +280,7 @@ export default function SOPManager() {
           category: 'people',
           tags: [],
           version: 'V1.0',
-          content: '# 未命名方法论\n\n开始输入你的内容...',
+          content: '# 未命名方法论\n',
           related: { scenes: [], people: [], sops: [] }, 
           history: [{ version: 'V1.0', date: new Date().toISOString().split('T')[0], note: '初始创建' }],
           stats: { use_count: 0, avg_score: 0, last_used: '-', related_scenes_count: 0 },
@@ -540,14 +542,19 @@ function SOPDetailView({ sop, allScenes, allPeople, isSaving, onBack, onUpdate, 
   
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newTitle = e.target.value;
-      let newContent = sop.content;
+      let newContent = sop.content || '';
       
       // Update H1 in content if it exists
       if (newContent) {
+          // Look for H1 or H2 at the start of the file or after a newline
+          // We prioritize H1 (#) but also handle H2 (##) if that's what's there
           if (/^#\s+(.+)$/m.test(newContent)) {
               newContent = newContent.replace(/^#\s+(.+)$/m, () => `# ${newTitle}`);
+          } else if (/^##\s+(.+)$/m.test(newContent)) {
+              // If user is using H2 as title (like in the screenshot), update it
+               newContent = newContent.replace(/^##\s+(.+)$/m, () => `## ${newTitle}`);
           } else {
-              // Prepend H1 if not exists
+              // Prepend H1 if no heading found
               newContent = `# ${newTitle}\n\n${newContent}`;
           }
       } else {
@@ -572,12 +579,16 @@ function SOPDetailView({ sop, allScenes, allPeople, isSaving, onBack, onUpdate, 
   };
 
   const handleContentUpdate = (newContent: string) => {
-      // Auto-extract title: Find first H1
+      // Auto-extract title: Find first H1 or H2
       const h1Match = newContent.match(/^#\s+(.+)$/m);
+      const h2Match = newContent.match(/^##\s+(.+)$/m);
       let newTitle = sop.title;
       
       if (h1Match) {
           newTitle = h1Match[1].trim();
+      } else if (h2Match) {
+          // If no H1, use H2
+          newTitle = h2Match[1].trim();
       }
 
       const updatedSop = { 
