@@ -4,7 +4,7 @@ import {
   MoreHorizontal, Share2, Trash2, FileText, Activity, Clock, 
   ArrowLeft, List, Link as LinkIcon, Code, 
   CheckSquare, Bold, Italic, Type, RotateCcw,
-  Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder, Menu, Image as ImageIcon
+  Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder, Menu, Image as ImageIcon, PanelLeft
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -278,7 +278,7 @@ export default function SOPManager() {
           category: 'people',
           tags: [],
           version: 'V1.0',
-          content: '## 新方法论标题\n\n开始输入你的内容...',
+          content: '# 未命名方法论\n\n开始输入你的内容...',
           related: { scenes: [], people: [], sops: [] }, 
           history: [{ version: 'V1.0', date: new Date().toISOString().split('T')[0], note: '初始创建' }],
           stats: { use_count: 0, avg_score: 0, last_used: '-', related_scenes_count: 0 },
@@ -330,7 +330,7 @@ export default function SOPManager() {
       <div className={`
         fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-100 p-6 transform transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 lg:bg-gray-50/50 lg:block
         ${showMobileSidebar ? 'translate-x-0' : '-translate-x-full'}
-        ${viewMode !== 'list' ? 'hidden lg:block' : ''}
+        ${viewMode === 'detail' ? 'hidden lg:hidden' : (viewMode !== 'list' ? 'hidden lg:block' : '')}
       `}>
         <div className="flex justify-between items-center mb-6">
             <h2 className="text-lg font-bold text-gray-900 flex items-center">
@@ -545,7 +545,7 @@ function SOPDetailView({ sop, allScenes, allPeople, isSaving, onBack, onUpdate, 
       // Update H1 in content if it exists
       if (newContent) {
           if (/^#\s+(.+)$/m.test(newContent)) {
-              newContent = newContent.replace(/^#\s+(.+)$/m, `# ${newTitle}`);
+              newContent = newContent.replace(/^#\s+(.+)$/m, () => `# ${newTitle}`);
           } else {
               // Prepend H1 if not exists
               newContent = `# ${newTitle}\n\n${newContent}`;
@@ -873,6 +873,8 @@ function SOPDetailView({ sop, allScenes, allPeople, isSaving, onBack, onUpdate, 
 }
 
 const TiptapEditor = ({ content, onChange }: { content: string, onChange: (content: string) => void }) => {
+    const [showTOC, setShowTOC] = useState(true);
+
     const uploadImage = useCallback(async (file: File) => {
         try {
             const { url } = await api.uploadImage(file);
@@ -1019,15 +1021,36 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
 
     return (
         <div className="flex h-full min-h-[500px] relative">
-            {/* Outline / Table of Contents (Left Side) - Simplified */}
-            <div className="hidden xl:block w-48 sticky top-0 h-full overflow-y-auto pr-4 border-r border-gray-100 py-4 mr-4">
-                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 pl-2">大纲</h4>
-                <TableOfContents editor={editor} />
-            </div>
+            {/* Outline / Table of Contents (Left Side) */}
+            {showTOC && (
+                <div className="hidden xl:flex flex-col w-64 sticky top-0 h-full border-r border-gray-100 bg-gray-50/30 flex-shrink-0 transition-all duration-300">
+                    <div className="p-4 border-b border-gray-100 flex justify-between items-center">
+                         <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center">
+                            <ListOrdered className="w-3 h-3 mr-2" /> 
+                            大纲
+                         </h4>
+                         <button 
+                            onClick={() => setShowTOC(false)} 
+                            className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded"
+                            title="隐藏大纲"
+                         >
+                            <X className="w-3 h-3" />
+                         </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                        <TableOfContents editor={editor} />
+                    </div>
+                </div>
+            )}
 
-            <div className="flex-1 flex flex-col min-w-0">
-                <EditorToolbar editor={editor} onAddImage={addImage} />
-                <div className="flex-1 bg-white cursor-text p-8" onClick={() => editor.chain().focus().run()}>
+            <div className="flex-1 flex flex-col min-w-0 transition-all duration-300">
+                <EditorToolbar 
+                    editor={editor} 
+                    onAddImage={addImage} 
+                    showTOC={showTOC} 
+                    onToggleTOC={() => setShowTOC(!showTOC)} 
+                />
+                <div className="flex-1 bg-white cursor-text p-8 sm:p-12 max-w-5xl mx-auto w-full" onClick={() => editor.chain().focus().run()}>
                     <EditorContent editor={editor} />
                 </div>
             </div>
@@ -1064,18 +1087,20 @@ const TableOfContents = ({ editor }: { editor: any }) => {
         };
     }, [editor]);
 
-    if (headings.length === 0) return <div className="text-xs text-gray-300 pl-2">暂无标题</div>;
+    if (headings.length === 0) return <div className="text-xs text-gray-400 pl-2 italic">暂无标题，请使用 H1-H6 添加</div>;
 
     return (
-        <ul className="space-y-1">
+        <ul className="space-y-1 font-sans">
             {headings.map((heading, index) => (
                 <li 
                     key={index} 
                     className={`
-                        text-xs cursor-pointer hover:text-primary transition-colors truncate
-                        ${heading.level === 1 ? 'font-bold text-gray-800 pl-0' : ''}
-                        ${heading.level === 2 ? 'font-medium text-gray-600 pl-2' : ''}
-                        ${heading.level >= 3 ? 'text-gray-500 pl-4' : ''}
+                        text-sm py-1.5 pr-2 rounded-md cursor-pointer hover:bg-gray-100 hover:text-primary transition-colors truncate block
+                        ${heading.level === 1 ? 'font-bold text-gray-900 pl-2' : ''}
+                        ${heading.level === 2 ? 'font-medium text-gray-700 pl-4' : ''}
+                        ${heading.level === 3 ? 'text-gray-600 pl-6' : ''}
+                        ${heading.level === 4 ? 'text-gray-500 pl-8 text-xs' : ''}
+                        ${heading.level >= 5 ? 'text-gray-400 pl-10 text-xs' : ''}
                     `}
                     onClick={() => {
                         editor.chain().focus().setTextSelection(heading.pos + 1).run();
@@ -1090,11 +1115,19 @@ const TableOfContents = ({ editor }: { editor: any }) => {
     );
 };
 
-const EditorToolbar = ({ editor, onAddImage }: { editor: any, onAddImage: () => void }) => {
+const EditorToolbar = ({ editor, onAddImage, showTOC, onToggleTOC }: { editor: any, onAddImage: () => void, showTOC: boolean, onToggleTOC: () => void }) => {
     if (!editor) return null;
 
     return (
-        <div className="border-b border-gray-200 p-2 flex items-center space-x-1 overflow-x-auto bg-gray-50 sticky top-0 z-10">
+        <div className="border-b border-gray-200 p-2 flex items-center space-x-1 overflow-x-auto bg-white sticky top-0 z-10 shadow-sm">
+             {/* TOC Toggle Button */}
+            <ToolbarBtn 
+                onClick={onToggleTOC} 
+                isActive={showTOC}
+                icon={<PanelLeft className={`w-4 h-4 ${showTOC ? 'text-primary' : 'text-gray-400'}`}/>} 
+                label={showTOC ? "" : "大纲"}
+            />
+            <div className="w-px h-4 bg-gray-300 mx-2"></div>
             <ToolbarBtn 
                 onClick={() => editor.chain().focus().toggleBold().run()} 
                 isActive={editor.isActive('bold')} 
