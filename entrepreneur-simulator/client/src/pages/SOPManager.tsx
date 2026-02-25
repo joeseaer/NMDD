@@ -4,12 +4,16 @@ import {
   MoreHorizontal, Share2, Trash2, FileText, Activity, Clock, 
   ArrowLeft, List, Link as LinkIcon, Code, 
   CheckSquare, Bold, Italic, Type, RotateCcw,
-  Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder, Menu, Image as ImageIcon, PanelLeft, Columns
+  Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder, Menu, Image as ImageIcon, PanelLeft, Columns, Table as TableIcon
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
+import { Table } from '@tiptap/extension-table';
+import { TableCell } from '@tiptap/extension-table-cell';
+import { TableHeader } from '@tiptap/extension-table-header';
+import { TableRow } from '@tiptap/extension-table-row';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -964,6 +968,12 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
                 },
             }),
             Indent,
+            Table.configure({
+                resizable: true,
+            }),
+            TableRow,
+            TableHeader,
+            TableCell,
         ],
         content: mdParser.render(content), // Initial content: Markdown -> HTML
         editorProps: {
@@ -1237,7 +1247,13 @@ const EditorToolbar = ({ editor, onAddImage, showTOC, onToggleTOC }: { editor: a
             />
             <div className="w-px h-4 bg-gray-300 mx-2"></div>
             <ToolbarBtn 
-                onClick={onAddImage} 
+                onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} 
+                icon={<TableIcon className="w-4 h-4"/>} 
+                label="表格"
+            />
+            <div className="w-px h-4 bg-gray-300 mx-2"></div>
+            <ToolbarBtn 
+                onClick={onAddImage}  
                 icon={<ImageIcon className="w-4 h-4"/>} 
                 label="图片"
             />
