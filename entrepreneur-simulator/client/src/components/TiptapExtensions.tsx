@@ -38,13 +38,13 @@ export const ColumnList = Node.create({
       setColumns: (cols: number) => ({ commands }: any) => {
         // Create columns based on the number requested
         const columns = Array.from({ length: cols }).map(() => ({
-            type: 'column',
-            content: [{ type: 'paragraph' }]
+          type: 'column',
+          content: [{ type: 'paragraph' }]
         }));
 
         return commands.insertContent({
-            type: 'columnList',
-            content: columns
+          type: 'columnList',
+          content: columns
         });
       },
     }
@@ -54,18 +54,17 @@ export const ColumnList = Node.create({
     return [
       new InputRule({
         find: /^\/2\s$/, // Matches "/2 "
-        handler: ({ state, range, match }) => {
-          const { tr } = state;
+        handler: ({ state, range }) => {
+          const { tr, schema } = state;
           const start = range.from;
           const end = range.to;
           
           tr.delete(start, end); // Delete the "/2 " text
           
           // Insert 2 columns
-          const columns = Array.from({ length: 2 }).map(() => ({
-            type: 'column',
-            content: [{ type: 'paragraph' }]
-          }));
+          const columns = Array.from({ length: 2 }).map(() => schema.nodes.column.create(null, [
+             schema.nodes.paragraph.create()
+          ]));
           
           const node = this.type.create(null, columns);
           tr.replaceSelectionWith(node);
@@ -73,18 +72,17 @@ export const ColumnList = Node.create({
       }),
       new InputRule({
         find: /^\/3\s$/, // Matches "/3 "
-        handler: ({ state, range, match }) => {
-          const { tr } = state;
+        handler: ({ state, range }) => {
+          const { tr, schema } = state;
           const start = range.from;
           const end = range.to;
           
           tr.delete(start, end); // Delete the "/3 " text
           
           // Insert 3 columns
-          const columns = Array.from({ length: 3 }).map(() => ({
-            type: 'column',
-            content: [{ type: 'paragraph' }]
-          }));
+          const columns = Array.from({ length: 3 }).map(() => schema.nodes.column.create(null, [
+             schema.nodes.paragraph.create()
+          ]));
           
           const node = this.type.create(null, columns);
           tr.replaceSelectionWith(node);
