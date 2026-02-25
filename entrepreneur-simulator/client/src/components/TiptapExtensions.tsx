@@ -18,9 +18,123 @@ declare module '@tiptap/core' {
        * Set the number of columns
        */
       setColumns: (cols: number) => ReturnType;
+    },
+    indent: {
+      indent: () => ReturnType;
+      outdent: () => ReturnType;
     }
   }
 }
+
+// --- Indent Extension ---
+
+export const Indent = Extension.create({
+  name: 'indent',
+
+  addOptions() {
+    return {
+      types: ['paragraph', 'heading', 'blockquote'],
+      indentLevels: [0, 30, 60, 90, 120, 150, 180, 210],
+      defaultIndentLevel: 0,
+    };
+  },
+
+  addGlobalAttributes() {
+    return [
+      {
+        types: this.options.types,
+        attributes: {
+          indent: {
+            default: this.options.defaultIndentLevel,
+            renderHTML: attributes => ({
+              style: `margin-left: ${attributes.indent}px!important;`
+            }),
+            parseHTML: element => parseInt(element.style.marginLeft) || this.options.defaultIndentLevel,
+          },
+        },
+      },
+    ];
+  },
+
+  addCommands() {
+    return {
+      indent: () => ({ tr, state, dispatch }) => {
+        const { selection } = state;
+        tr.setSelection(selection);
+        
+        // We need to collect changes first to avoid modifying the doc while iterating
+        // although setNodeMarkup is generally safe for attrs.
+        // However, we only want to target top-level blocks in the selection usually, 
+        // or just all matching blocks.
+        
+        const { from, to } = selection;
+        
+        state.doc.nodesBetween(from, to, (node, pos) => {
+            if (this.options.types.includes(node.type.name)) {
+                const currentIndent = node.attrs.indent || 0;
+                const newIndent = Math.min(currentIndent + 30, 210);
+                
+                if (dispatch) {
+                    tr.setNodeMarkup(pos, null, { ...node.attrs, indent: newIndent });
+                }
+                return false; // Don't traverse children of a matched block to avoid double indenting?
+                              // Actually, if we indent a blockquote, do we want to indent its paragraphs?
+                              // If blockquote has margin, and p has margin...
+                              // Let's say yes, return false to stop drilling down.
+            }
+        });
+
+        return true;
+      },
+      outdent: () => ({ tr, state, dispatch }) => {
+        const { selection } = state;
+        tr.setSelection(selection);
+        const { from, to } = selection;
+
+        state.doc.nodesBetween(from, to, (node, pos) => {
+            if (this.options.types.includes(node.type.name)) {
+                const currentIndent = node.attrs.indent || 0;
+                const newIndent = Math.max(currentIndent - 30, 0);
+                
+                if (dispatch) {
+                    tr.setNodeMarkup(pos, null, { ...node.attrs, indent: newIndent });
+                }
+                return false;
+            }
+        });
+
+        return true;
+      },
+    };
+  },
+
+  addKeyboardShortcuts() {
+    return {
+      Tab: () => {
+         // Check if we are in a list first
+         if (this.editor.can().sinkListItem('listItem')) {
+             return this.editor.chain().focus().sinkListItem('listItem').run();
+         }
+         if (this.editor.can().sinkListItem('taskItem')) {
+             return this.editor.chain().focus().sinkListItem('taskItem').run();
+         }
+         // Otherwise indent
+         return this.editor.chain().focus().indent().run();
+      },
+      'Shift-Tab': () => {
+         // Check if we are in a list first
+         if (this.editor.can().liftListItem('listItem')) {
+             return this.editor.chain().focus().liftListItem('listItem').run();
+         }
+         if (this.editor.can().liftListItem('taskItem')) {
+             return this.editor.chain().focus().liftListItem('taskItem').run();
+         }
+         // Otherwise outdent
+         return this.editor.chain().focus().outdent().run();
+      },
+    };
+  },
+});
 
 // --- Column Extension ---
 

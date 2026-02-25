@@ -7,7 +7,6 @@ import {
   Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder, Menu, Image as ImageIcon, PanelLeft, Columns
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
-import { Extension } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
@@ -20,7 +19,7 @@ import MarkdownIt from 'markdown-it';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import { api } from '../services/api';
-import { ColumnList, Column, SlashCommand, getSuggestionItems, renderItems } from '../components/TiptapExtensions';
+import { ColumnList, Column, SlashCommand, getSuggestionItems, renderItems, Indent } from '../components/TiptapExtensions';
 
 // --- Types ---
 
@@ -81,43 +80,6 @@ turndownService.addRule('keepColumns', {
 });
 
 // --- Custom Extensions ---
-
-const TabKeymap = Extension.create({
-  name: 'tabKeymap',
-  addKeyboardShortcuts() {
-    return {
-      'Tab': () => {
-        // 1. Try to sink list item (nested list)
-        if (this.editor.can().sinkListItem('listItem')) {
-          return this.editor.chain().focus().sinkListItem('listItem').run();
-        }
-        if (this.editor.can().sinkListItem('taskItem')) {
-          return this.editor.chain().focus().sinkListItem('taskItem').run();
-        }
-        
-        // 2. If not a list, maybe we can implement a simple indent (padding)
-        // For now, we'll just return false to let default behavior happen (focus move)
-        // OR return true to prevent focus move if we want to "do nothing" but consume the event
-        // The user wants "indent", if we can't indent, maybe we should let them tab navigation?
-        // Usually editors capture Tab.
-        
-        // Let's try to insert a few spaces if not a list? (Soft tab)
-        // return this.editor.chain().focus().insertContent('    ').run();
-        
-        return false;
-      },
-      'Shift-Tab': () => {
-         if (this.editor.can().liftListItem('listItem')) {
-            return this.editor.chain().focus().liftListItem('listItem').run();
-         }
-         if (this.editor.can().liftListItem('taskItem')) {
-            return this.editor.chain().focus().liftListItem('taskItem').run();
-         }
-         return false;
-      }
-    }
-  }
-});
 
 // --- Custom Node Views ---
 const ResizableImageComponent = (props: any) => {
@@ -1001,7 +963,7 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
                     render: renderItems,
                 },
             }),
-            TabKeymap,
+            Indent,
         ],
         content: mdParser.render(content), // Initial content: Markdown -> HTML
         editorProps: {
