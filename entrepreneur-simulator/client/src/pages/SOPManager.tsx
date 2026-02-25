@@ -225,9 +225,9 @@ export default function SOPManager() {
           
           // Background fetch to sync - REMOVED to avoid race condition overwriting optimistic state
           // fetchData();
-      } catch (error) {
+      } catch (error: any) {
           console.error("Failed to create SOP", error);
-          alert("创建失败，请检查网络连接");
+          alert(`创建失败: ${error.message || "请检查网络连接"}`);
       } finally {
           setLoading(false);
       }

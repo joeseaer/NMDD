@@ -86,7 +86,7 @@ async function routes(fastify, options) {
       return { id, message: "SOP Created Successfully" };
     } catch (err) {
       request.log.error(err);
-      reply.code(500).send({ error: 'Failed to save SOP' });
+      reply.code(500).send({ error: err.message || 'Failed to save SOP' });
     }
   });
 
