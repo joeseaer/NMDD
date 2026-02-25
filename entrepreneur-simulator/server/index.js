@@ -12,6 +12,7 @@ console.log("----------------------------------------------------------------");
 // Plugins
 fastify.register(require('@fastify/cors'), { origin: true });
 fastify.register(require('@fastify/websocket'));
+fastify.register(require('@fastify/multipart'));
 
 // Services
 const dbService = require('./services/dbService');

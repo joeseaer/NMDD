@@ -27,6 +27,13 @@ const initDB = async () => {
     scenesCollection = await chromaClient.getOrCreateCollection({ name: "scene_embeddings" });
     sopCollection = await chromaClient.getOrCreateCollection({ name: "sop_embeddings" });
     console.log('✅ Connected to ChromaDB Collections');
+
+    // Init Storage Bucket
+    const { data: buckets } = await supabase.storage.listBuckets();
+    if (!buckets.find(b => b.name === 'sop-images')) {
+        await supabase.storage.createBucket('sop-images', { public: true });
+        console.log('✅ Created "sop-images" storage bucket');
+    }
   } catch (chromaErr) {
     console.warn('⚠️ ChromaDB Connection Failed (Is it running?):', chromaErr.message);
   }
@@ -710,9 +717,28 @@ const getAllUserData = async (userId) => {
   }
 };
 
+const uploadFile = async (fileBuffer, fileName, mimeType) => {
+    if (!supabase) throw new Error("Database connection not established");
+
+    const { data, error } = await supabase.storage
+        .from('sop-images')
+        .upload(fileName, fileBuffer, {
+            contentType: mimeType,
+            upsert: false
+        });
+
+    if (error) throw error;
+
+    const { data: publicData } = supabase.storage
+        .from('sop-images')
+        .getPublicUrl(fileName);
+
+    return publicData.publicUrl;
+};
+
 module.exports = { 
   initDB, saveScene, getRecentScenes, saveSOP, getSOPs, deleteSOP, deleteSOPsByTitle,
   savePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog,
   saveReviewSession, getReviewSessions, getReviewSession, getUserStats,
-  saveNPCRelation, getNPCRelations, updateNPCRelation, getAllUserData
+  saveNPCRelation, getNPCRelations, updateNPCRelation, getAllUserData, uploadFile
 };

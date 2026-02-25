@@ -4,11 +4,12 @@ import {
   MoreHorizontal, Share2, Trash2, FileText, Activity, Clock, 
   ArrowLeft, List, Link as LinkIcon, Code, 
   CheckSquare, Bold, Italic, Type, RotateCcw,
-  Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder, Menu
+  Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder, Menu, Image as ImageIcon
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
+import Image from '@tiptap/extension-image';
 import TaskList from '@tiptap/extension-task-list';
 import TaskItem from '@tiptap/extension-task-item';
 import Placeholder from '@tiptap/extension-placeholder';
@@ -794,6 +795,17 @@ function SOPDetailView({ sop, allScenes, allPeople, isSaving, onBack, onUpdate, 
 }
 
 const TiptapEditor = ({ content, onChange }: { content: string, onChange: (content: string) => void }) => {
+    const uploadImage = useCallback(async (file: File) => {
+        try {
+            const { url } = await api.uploadImage(file);
+            return url;
+        } catch (error) {
+            console.error('Failed to upload image', error);
+            alert('图片上传失败，请重试');
+            return null;
+        }
+    }, []);
+
     const editor = useEditor({
         extensions: [
             StarterKit.configure({
@@ -807,6 +819,10 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
                 },
             }),
             Link.configure({ openOnClick: false }),
+            Image.configure({
+                inline: true,
+                allowBase64: true,
+            }),
             TaskList,
             TaskItem.configure({ 
                 nested: true,
@@ -814,13 +830,55 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
                     class: 'flex items-start space-x-2',
                 },
             }),
-            Placeholder.configure({ placeholder: '开始输入内容... (支持 Markdown 快捷键，如 # 标题，- 列表，[ ] 任务)' }),
+            Placeholder.configure({ placeholder: '开始输入内容... (支持 Markdown 快捷键，如 # 标题，- 列表，[ ] 任务，支持截图粘贴)' }),
         ],
         content: mdParser.render(content), // Initial content: Markdown -> HTML
         editorProps: {
             attributes: {
-                class: 'prose prose-sm max-w-none focus:outline-none min-h-[500px] p-8 outline-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:mb-4 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mb-3 [&_h2]:mt-6 [&_li_p]:m-0 [&_ul[data-type="taskList"]]:list-none [&_ul[data-type="taskList"]]:pl-0',
+                class: 'prose prose-sm max-w-none focus:outline-none min-h-[500px] p-8 outline-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:mb-4 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mb-3 [&_h2]:mt-6 [&_li_p]:m-0 [&_ul[data-type="taskList"]]:list-none [&_ul[data-type="taskList"]]:pl-0 [&_img]:rounded-lg [&_img]:shadow-sm [&_img]:max-w-full [&_img]:my-4',
             },
+            handlePaste: (view, event, _slice) => {
+                const items = Array.from(event.clipboardData?.items || []);
+                const item = items.find(item => item.type.indexOf('image') === 0);
+
+                if (item) {
+                    event.preventDefault();
+                    const file = item.getAsFile();
+                    if (file) {
+                        uploadImage(file).then(url => {
+                            if (url) {
+                                const { schema } = view.state;
+                                const node = schema.nodes.image.create({ src: url });
+                                const transaction = view.state.tr.replaceSelectionWith(node);
+                                view.dispatch(transaction);
+                            }
+                        });
+                    }
+                    return true;
+                }
+                return false;
+            },
+            handleDrop: (view, event, _slice, moved) => {
+                if (!moved && event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]) {
+                    const file = event.dataTransfer.files[0];
+                    if (file.type.indexOf('image') === 0) {
+                        event.preventDefault();
+                        uploadImage(file).then(url => {
+                            if (url) {
+                                const { schema } = view.state;
+                                const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY });
+                                if (coordinates) {
+                                    const node = schema.nodes.image.create({ src: url });
+                                    const transaction = view.state.tr.insert(coordinates.pos, node);
+                                    view.dispatch(transaction);
+                                }
+                            }
+                        });
+                        return true;
+                    }
+                }
+                return false;
+            }
         },
         onUpdate: ({ editor }) => {
              const html = editor.getHTML();
@@ -828,6 +886,22 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
              onChange(markdown);
         }
     });
+
+    const addImage = useCallback(() => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async () => {
+            if (input.files?.length) {
+                const file = input.files[0];
+                const url = await uploadImage(file);
+                if (url) {
+                    editor?.chain().focus().setImage({ src: url }).run();
+                }
+            }
+        };
+        input.click();
+    }, [editor, uploadImage]);
 
     if (!editor) {
         return null;
@@ -838,32 +912,8 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
         if (editor && content) {
             const currentHTML = editor.getHTML();
             const newHTML = mdParser.render(content);
-            // Simple check to avoid loop/cursor jump if content is similar
-            // But since markdown conversion can vary, this is tricky.
-            // For title update specifically, we know it changes H1.
-            // Let's just update if they are significantly different or if not focused?
-            
-            // Actually, for title sync, it's better to just let the title input drive the title,
-            // and the editor drive the content.
-            // But if we want bidirectional sync, we need to be careful.
-            
-            // If we just want title -> H1 sync:
-            // When title changes, we update content prop.
-            // We should update editor content.
-            
-            // Check if current editor content matches the prop (converted to markdown)
             const currentMarkdown = turndownService.turndown(currentHTML);
             if (currentMarkdown.trim() !== content.trim()) {
-                 // Only update if not focused to avoid interrupting typing?
-                 // Or update only the specific part?
-                 // For now, let's just update if not focused, or if the change is from title (which means editor is likely not focused or at least not on H1)
-                 // But user might be editing title while looking at editor.
-                 
-                 // Let's try to update. Tiptap's setContent should preserve selection if possible?
-                 // No, setContent replaces everything.
-                 
-                 // If the user is editing the title input, the editor is NOT focused.
-                 // So it is safe to update editor content.
                  if (!editor.isFocused) {
                      editor.commands.setContent(newHTML);
                  }
@@ -873,7 +923,7 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
 
     return (
         <div className="flex flex-col h-full min-h-[500px]">
-            <EditorToolbar editor={editor} />
+            <EditorToolbar editor={editor} onAddImage={addImage} />
             <div className="flex-1 bg-white cursor-text p-8" onClick={() => editor.chain().focus().run()}>
                 <EditorContent editor={editor} />
             </div>
@@ -881,7 +931,7 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
     )
 }
 
-const EditorToolbar = ({ editor }: { editor: any }) => {
+const EditorToolbar = ({ editor, onAddImage }: { editor: any, onAddImage: () => void }) => {
     if (!editor) return null;
 
     return (
@@ -940,6 +990,12 @@ const EditorToolbar = ({ editor }: { editor: any }) => {
                 onClick={() => editor.chain().focus().toggleBlockquote().run()} 
                 isActive={editor.isActive('blockquote')} 
                 icon={<Quote className="w-4 h-4"/>} 
+            />
+            <div className="w-px h-4 bg-gray-300 mx-2"></div>
+            <ToolbarBtn 
+                onClick={onAddImage} 
+                icon={<ImageIcon className="w-4 h-4"/>} 
+                label="图片"
             />
         </div>
     );

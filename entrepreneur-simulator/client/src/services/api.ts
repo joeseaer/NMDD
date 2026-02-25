@@ -10,6 +10,22 @@ export const api = {
         return response.json();
     },
 
+    uploadImage: async (file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await fetch(`${API_BASE_URL}/upload`, {
+            method: 'POST',
+            body: formData,
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to upload image');
+        }
+        return response.json();
+    },
+
     createSOP: async (sopData: any) => {
         // Ensure user_id is present
         const dataToSend = { ...sopData, user_id: sopData.user_id || CURRENT_USER_ID };

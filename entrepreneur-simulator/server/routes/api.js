@@ -443,6 +443,27 @@ async function routes(fastify, options) {
     }
   });
 
+  // File Upload
+  fastify.post('/upload', async (request, reply) => {
+    try {
+      const data = await request.file();
+      if (!data) {
+        return reply.code(400).send({ error: "No file uploaded" });
+      }
+      
+      const buffer = await data.toBuffer();
+      const filename = `${Date.now()}-${data.filename}`;
+      const mimeType = data.mimetype;
+
+      const url = await dbService.uploadFile(buffer, filename, mimeType);
+      
+      return { url };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: err.message || 'Upload failed' });
+    }
+  });
+
   // Init DB (for dev)
 
   // Init DB (for dev)
