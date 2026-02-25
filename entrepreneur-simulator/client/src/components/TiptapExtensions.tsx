@@ -1,7 +1,17 @@
 
-import { Node, mergeAttributes } from '@tiptap/core';
-import { ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent } from '@tiptap/react';
-import React from 'react';
+import { Node, mergeAttributes, InputRule } from '@tiptap/core';
+
+// --- Module Augmentation for Commands ---
+declare module '@tiptap/core' {
+  interface Commands<ReturnType> {
+    columnList: {
+      /**
+       * Set the number of columns
+       */
+      setColumns: (cols: number) => ReturnType;
+    }
+  }
+}
 
 // --- Column Extension ---
 
@@ -27,10 +37,6 @@ export const ColumnList = Node.create({
     return {
       setColumns: (cols: number) => ({ commands }: any) => {
         // Create columns based on the number requested
-        // This is a simplified implementation. 
-        // Real implementation might need to wrap current selection.
-        // For now, we insert a new column block.
-        
         const columns = Array.from({ length: cols }).map(() => ({
             type: 'column',
             content: [{ type: 'paragraph' }]
@@ -42,6 +48,49 @@ export const ColumnList = Node.create({
         });
       },
     }
+  },
+
+  addInputRules() {
+    return [
+      new InputRule({
+        find: /^\/2\s$/, // Matches "/2 "
+        handler: ({ state, range, match }) => {
+          const { tr } = state;
+          const start = range.from;
+          const end = range.to;
+          
+          tr.delete(start, end); // Delete the "/2 " text
+          
+          // Insert 2 columns
+          const columns = Array.from({ length: 2 }).map(() => ({
+            type: 'column',
+            content: [{ type: 'paragraph' }]
+          }));
+          
+          const node = this.type.create(null, columns);
+          tr.replaceSelectionWith(node);
+        },
+      }),
+      new InputRule({
+        find: /^\/3\s$/, // Matches "/3 "
+        handler: ({ state, range, match }) => {
+          const { tr } = state;
+          const start = range.from;
+          const end = range.to;
+          
+          tr.delete(start, end); // Delete the "/3 " text
+          
+          // Insert 3 columns
+          const columns = Array.from({ length: 3 }).map(() => ({
+            type: 'column',
+            content: [{ type: 'paragraph' }]
+          }));
+          
+          const node = this.type.create(null, columns);
+          tr.replaceSelectionWith(node);
+        },
+      }),
+    ]
   },
 });
 
@@ -62,7 +111,3 @@ export const Column = Node.create({
     return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'column', class: 'flex-1 min-w-0 border border-dashed border-gray-200 p-2 rounded-lg' }), 0]
   },
 });
-
-// --- Slash Command Helper (Input Rules) ---
-// We will add input rules in the main editor config, 
-// but we can export the regex helpers here if needed.

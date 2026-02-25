@@ -4,10 +4,9 @@ import {
   MoreHorizontal, Share2, Trash2, FileText, Activity, Clock, 
   ArrowLeft, List, Link as LinkIcon, Code, 
   CheckSquare, Bold, Italic, Type, RotateCcw,
-  Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder, Menu, Image as ImageIcon, PanelLeft
+  Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder, Menu, Image as ImageIcon, PanelLeft, Columns
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
-import { InputRule } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
@@ -939,7 +938,9 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
                     class: 'flex items-start space-x-2',
                 },
             }),
-            Placeholder.configure({ placeholder: '开始输入内容... (支持 Markdown 快捷键，如 # 标题，- 列表，[ ] 任务，支持截图粘贴)' }),
+            Placeholder.configure({ placeholder: '开始输入内容... (支持 Markdown 快捷键，如 # 标题，- 列表，[ ] 任务，/2 两栏，/3 三栏)' }),
+            ColumnList,
+            Column,
         ],
         content: mdParser.render(content), // Initial content: Markdown -> HTML
         editorProps: {
@@ -1199,6 +1200,17 @@ const EditorToolbar = ({ editor, onAddImage, showTOC, onToggleTOC }: { editor: a
                 onClick={() => editor.chain().focus().toggleBlockquote().run()} 
                 isActive={editor.isActive('blockquote')} 
                 icon={<Quote className="w-4 h-4"/>} 
+            />
+            <div className="w-px h-4 bg-gray-300 mx-2"></div>
+            <ToolbarBtn 
+                onClick={() => editor.chain().focus().setColumns(2).run()} 
+                icon={<Columns className="w-4 h-4"/>} 
+                label="2栏"
+            />
+            <ToolbarBtn 
+                onClick={() => editor.chain().focus().setColumns(3).run()} 
+                icon={<Columns className="w-4 h-4"/>} 
+                label="3栏"
             />
             <div className="w-px h-4 bg-gray-300 mx-2"></div>
             <ToolbarBtn 
