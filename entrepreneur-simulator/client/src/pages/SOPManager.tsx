@@ -19,7 +19,7 @@ import MarkdownIt from 'markdown-it';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import { api } from '../services/api';
-import { ColumnList, Column } from '../components/TiptapExtensions';
+import { ColumnList, Column, SlashCommand, getSuggestionItems, renderItems } from '../components/TiptapExtensions';
 
 // --- Types ---
 
@@ -938,9 +938,15 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
                     class: 'flex items-start space-x-2',
                 },
             }),
-            Placeholder.configure({ placeholder: '开始输入内容... (支持 Markdown 快捷键，如 # 标题，- 列表，[ ] 任务，/2 两栏，/3 三栏)' }),
+            Placeholder.configure({ placeholder: '开始输入内容... (输入 / 唤起命令菜单)' }),
             ColumnList,
             Column,
+            SlashCommand.configure({
+                suggestion: {
+                    items: getSuggestionItems,
+                    render: renderItems,
+                },
+            }),
         ],
         content: mdParser.render(content), // Initial content: Markdown -> HTML
         editorProps: {
