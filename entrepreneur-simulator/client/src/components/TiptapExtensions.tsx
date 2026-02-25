@@ -6,8 +6,8 @@ import tippy from 'tippy.js';
 import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { 
   Heading1, Heading2, Heading3, List, ListOrdered, CheckSquare, 
-  Quote, Minus, Code, Table, Calculator, Layout, Image as ImageIcon,
-  Type, AlignLeft
+  Quote, Minus, Code, Layout, Image as ImageIcon,
+  Type
 } from 'lucide-react';
 
 // --- Module Augmentation for Commands ---
