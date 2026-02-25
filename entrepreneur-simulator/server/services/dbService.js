@@ -24,18 +24,22 @@ const initDB = async () => {
   }
 
   try {
-    scenesCollection = await chromaClient.getOrCreateCollection({ name: "scene_embeddings" });
-    sopCollection = await chromaClient.getOrCreateCollection({ name: "sop_embeddings" });
-    console.log('✅ Connected to ChromaDB Collections');
+    if (process.env.CHROMA_URL) {
+      scenesCollection = await chromaClient.getOrCreateCollection({ name: "scene_embeddings" });
+      sopCollection = await chromaClient.getOrCreateCollection({ name: "sop_embeddings" });
+      console.log('✅ Connected to ChromaDB Collections');
+    }
 
     // Init Storage Bucket
-    const { data: buckets } = await supabase.storage.listBuckets();
-    if (!buckets.find(b => b.name === 'sop-images')) {
-        await supabase.storage.createBucket('sop-images', { public: true });
-        console.log('✅ Created "sop-images" storage bucket');
+    if (supabase) {
+        const { data: buckets } = await supabase.storage.listBuckets();
+        if (buckets && !buckets.find(b => b.name === 'sop-images')) {
+            await supabase.storage.createBucket('sop-images', { public: true });
+            console.log('✅ Created "sop-images" storage bucket');
+        }
     }
-  } catch (chromaErr) {
-    console.warn('⚠️ ChromaDB Connection Failed (Is it running?):', chromaErr.message);
+  } catch (err) {
+    console.warn('⚠️ Init DB Warning:', err.message);
   }
 };
 
@@ -727,7 +731,10 @@ const uploadFile = async (fileBuffer, fileName, mimeType) => {
             upsert: false
         });
 
-    if (error) throw error;
+    if (error) {
+        console.error("Upload Error:", error);
+        throw error;
+    }
 
     const { data: publicData } = supabase.storage
         .from('sop-images')
