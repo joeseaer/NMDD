@@ -9,11 +9,13 @@ import {
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
-import Image from '@tiptap/extension-image';
-import TaskList from '@tiptap/extension-task-list';
-import TaskItem from '@tiptap/extension-task-item';
-import Placeholder from '@tiptap/extension-placeholder';
-import MarkdownIt from 'markdown-it';
+  import Image from '@tiptap/extension-image';
+  import TaskList from '@tiptap/extension-task-list';
+  import TaskItem from '@tiptap/extension-task-item';
+  import Placeholder from '@tiptap/extension-placeholder';
+  import Heading from '@tiptap/extension-heading';
+  import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
+  import MarkdownIt from 'markdown-it';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import { api } from '../services/api';
@@ -61,6 +63,82 @@ const turndownService = new TurndownService({
     codeBlockStyle: 'fenced'
 });
 turndownService.use(gfm);
+
+// --- Custom Node Views ---
+const ResizableImageComponent = (props: any) => {
+    const { node, updateAttributes, selected } = props;
+    const [width, setWidth] = useState(node.attrs.width || '100%');
+    const [resizing, setResizing] = useState(false);
+    
+    // Simple drag resize handler
+    const handleMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault();
+        setResizing(true);
+        
+        const startX = e.clientX;
+        const startWidth = node.attrs.width ? parseInt(node.attrs.width) : (e.target as HTMLElement).parentElement?.offsetWidth || 300;
+        
+        const onMouseMove = (e: MouseEvent) => {
+            const currentX = e.clientX;
+            const diffX = currentX - startX;
+            const newWidth = Math.max(100, startWidth + diffX);
+            setWidth(`${newWidth}px`);
+        };
+        
+        const onMouseUp = (e: MouseEvent) => {
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            setResizing(false);
+            // Commit change
+            const currentX = e.clientX;
+            const diffX = currentX - startX;
+            const newWidth = Math.max(100, startWidth + diffX);
+            updateAttributes({ width: `${newWidth}px` });
+        };
+        
+        document.addEventListener('mousemove', onMouseMove);
+        document.addEventListener('mouseup', onMouseUp);
+    };
+
+    return (
+        <NodeViewWrapper className="image-resizer-wrapper inline-block relative group" style={{ width: width, maxWidth: '100%' }}>
+            <div className={`relative ${selected ? 'ring-2 ring-primary rounded-lg' : ''}`}>
+                <img 
+                    src={node.attrs.src} 
+                    alt={node.attrs.alt}
+                    className="rounded-lg w-full h-auto"
+                />
+                {/* Drag Handle */}
+                <div 
+                    className={`absolute bottom-2 right-2 w-4 h-4 bg-white border border-gray-300 rounded shadow-sm cursor-nwse-resize flex items-center justify-center transition-opacity ${selected || resizing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
+                    onMouseDown={handleMouseDown}
+                >
+                    <div className="w-2 h-2 border-r border-b border-gray-400"></div>
+                </div>
+                
+                {/* Bubble Menu for Alignment (Simplified version) */}
+                {selected && (
+                    <div className="absolute top-2 right-2 bg-white rounded shadow-lg border border-gray-100 p-1 flex space-x-1">
+                        <button 
+                            className="p-1 hover:bg-gray-100 rounded"
+                            onClick={() => updateAttributes({ width: '100%' })}
+                            title="全宽"
+                        >
+                            <span className="text-xs font-bold px-1">100%</span>
+                        </button>
+                        <button 
+                            className="p-1 hover:bg-gray-100 rounded"
+                            onClick={() => updateAttributes({ width: '50%' })}
+                            title="半宽"
+                        >
+                            <span className="text-xs font-bold px-1">50%</span>
+                        </button>
+                    </div>
+                )}
+            </div>
+        </NodeViewWrapper>
+    );
+};
 
 // --- Custom Hooks ---
 
@@ -819,9 +897,27 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
                 },
             }),
             Link.configure({ openOnClick: false }),
-            Image.configure({
+            Image.extend({
+                addAttributes() {
+                    return {
+                        ...this.parent?.(),
+                        width: {
+                            default: '100%',
+                            renderHTML: attributes => ({
+                                width: attributes.width,
+                            }),
+                        },
+                    }
+                },
+                addNodeView() {
+                    return ReactNodeViewRenderer(ResizableImageComponent);
+                },
+            }).configure({
                 inline: true,
                 allowBase64: true,
+            }),
+            Heading.configure({
+                levels: [1, 2, 3, 4, 5, 6],
             }),
             TaskList,
             TaskItem.configure({ 
@@ -835,7 +931,7 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
         content: mdParser.render(content), // Initial content: Markdown -> HTML
         editorProps: {
             attributes: {
-                class: 'prose prose-sm max-w-none focus:outline-none min-h-[500px] p-8 outline-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:mb-4 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mb-3 [&_h2]:mt-6 [&_li_p]:m-0 [&_ul[data-type="taskList"]]:list-none [&_ul[data-type="taskList"]]:pl-0 [&_img]:rounded-lg [&_img]:shadow-sm [&_img]:max-w-full [&_img]:my-4',
+                class: 'prose prose-sm max-w-none focus:outline-none min-h-[500px] p-8 outline-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:mb-4 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mb-3 [&_h2]:mt-6 [&_h3]:text-xl [&_h3]:font-bold [&_h3]:mb-2 [&_h3]:mt-4 [&_h4]:text-lg [&_h4]:font-bold [&_h4]:mb-2 [&_h5]:text-base [&_h5]:font-bold [&_h5]:mb-1 [&_h6]:text-sm [&_h6]:font-bold [&_h6]:text-gray-500 [&_li_p]:m-0 [&_ul[data-type="taskList"]]:list-none [&_ul[data-type="taskList"]]:pl-0 [&_img]:rounded-lg [&_img]:shadow-sm [&_img]:max-w-full [&_img]:my-4',
             },
             handlePaste: (view, event, _slice) => {
                 const items = Array.from(event.clipboardData?.items || []);
@@ -922,14 +1018,77 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
     }, [content, editor]);
 
     return (
-        <div className="flex flex-col h-full min-h-[500px]">
-            <EditorToolbar editor={editor} onAddImage={addImage} />
-            <div className="flex-1 bg-white cursor-text p-8" onClick={() => editor.chain().focus().run()}>
-                <EditorContent editor={editor} />
+        <div className="flex h-full min-h-[500px] relative">
+            {/* Outline / Table of Contents (Left Side) - Simplified */}
+            <div className="hidden xl:block w-48 sticky top-0 h-full overflow-y-auto pr-4 border-r border-gray-100 py-4 mr-4">
+                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 pl-2">大纲</h4>
+                <TableOfContents editor={editor} />
+            </div>
+
+            <div className="flex-1 flex flex-col min-w-0">
+                <EditorToolbar editor={editor} onAddImage={addImage} />
+                <div className="flex-1 bg-white cursor-text p-8" onClick={() => editor.chain().focus().run()}>
+                    <EditorContent editor={editor} />
+                </div>
             </div>
         </div>
     )
 }
+
+const TableOfContents = ({ editor }: { editor: any }) => {
+    const [headings, setHeadings] = useState<{ level: number; text: string; id: string; pos: number }[]>([]);
+
+    useEffect(() => {
+        if (!editor) return;
+
+        const updateHeadings = () => {
+            const items: any[] = [];
+            editor.state.doc.descendants((node: any, pos: number) => {
+                if (node.type.name === 'heading') {
+                    items.push({
+                        level: node.attrs.level,
+                        text: node.textContent,
+                        id: `heading-${pos}`, // Simple ID
+                        pos: pos
+                    });
+                }
+            });
+            setHeadings(items);
+        };
+
+        updateHeadings();
+        editor.on('update', updateHeadings);
+
+        return () => {
+            editor.off('update', updateHeadings);
+        };
+    }, [editor]);
+
+    if (headings.length === 0) return <div className="text-xs text-gray-300 pl-2">暂无标题</div>;
+
+    return (
+        <ul className="space-y-1">
+            {headings.map((heading, index) => (
+                <li 
+                    key={index} 
+                    className={`
+                        text-xs cursor-pointer hover:text-primary transition-colors truncate
+                        ${heading.level === 1 ? 'font-bold text-gray-800 pl-0' : ''}
+                        ${heading.level === 2 ? 'font-medium text-gray-600 pl-2' : ''}
+                        ${heading.level >= 3 ? 'text-gray-500 pl-4' : ''}
+                    `}
+                    onClick={() => {
+                        editor.chain().focus().setTextSelection(heading.pos + 1).run();
+                        const element = document.querySelector(`.ProseMirror h${heading.level}`);
+                        if(element) element.scrollIntoView({ behavior: 'smooth' });
+                    }}
+                >
+                    {heading.text || '(空标题)'}
+                </li>
+            ))}
+        </ul>
+    );
+};
 
 const EditorToolbar = ({ editor, onAddImage }: { editor: any, onAddImage: () => void }) => {
     if (!editor) return null;
@@ -968,6 +1127,12 @@ const EditorToolbar = ({ editor, onAddImage }: { editor: any, onAddImage: () => 
                 isActive={editor.isActive('heading', { level: 2 })} 
                 icon={<Type className="w-4 h-4"/>} 
                 label="H2" 
+            />
+            <ToolbarBtn 
+                onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} 
+                isActive={editor.isActive('heading', { level: 3 })} 
+                icon={<Type className="w-3 h-3"/>} 
+                label="H3" 
             />
             <div className="w-px h-4 bg-gray-300 mx-2"></div>
             <ToolbarBtn 
