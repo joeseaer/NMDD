@@ -17,6 +17,7 @@
     "@tiptap/extension-task-list": "^3.20.0",
     "@tiptap/react": "^3.20.0",
     "@tiptap/starter-kit": "^3.20.0",
+    "@tiptap/suggestion": "^3.20.0",
     "@types/markdown-it": "^14.1.2",
     "@types/turndown": "^5.0.6",
     "axios": "^1.6.7",
@@ -31,6 +32,7 @@
     "recharts": "^3.7.0",
     "remark-gfm": "^4.0.1",
     "tailwind-merge": "^2.2.1",
+    "tippy.js": "^6.3.7",
     "turndown": "^7.2.2",
     "turndown-plugin-gfm": "^1.0.2"
   },

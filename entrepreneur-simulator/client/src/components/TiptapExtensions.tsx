@@ -3,7 +3,7 @@ import { Node, mergeAttributes, InputRule, Extension } from '@tiptap/core';
 import Suggestion from '@tiptap/suggestion';
 import { ReactRenderer } from '@tiptap/react';
 import tippy from 'tippy.js';
-import React, { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { 
   Heading1, Heading2, Heading3, List, ListOrdered, CheckSquare, 
   Quote, Minus, Code, Layout, Image as ImageIcon,
