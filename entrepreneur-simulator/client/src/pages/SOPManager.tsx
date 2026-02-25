@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   BookOpen, Plus, Tag, Search, X, 
   MoreHorizontal, Share2, Trash2, FileText, Activity, Clock, 
@@ -67,7 +67,7 @@ function useDebouncedCallback<T extends (...args: any[]) => any>(
   callback: T,
   wait: number
 ) {
-  const timeout = useRef<NodeJS.Timeout>();
+  const timeout = useRef<ReturnType<typeof setTimeout>>();
 
   return useCallback(
     (...args: Parameters<T>) => {

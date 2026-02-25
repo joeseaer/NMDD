@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocation, Link } from 'react-router-dom';
-import { CheckCircle, BarChart2, MessageSquare, ArrowRight, UserCheck, UserPlus } from 'lucide-react';
+import { CheckCircle, BarChart2, ArrowRight, UserCheck, UserPlus } from 'lucide-react';
 import { api } from '../services/api';
 
 export default function Review() {

@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Plus, User, Tag, Calendar, MessageSquare, Brain, X, Save, Edit2, Phone, MapPin, Zap, ThumbsUp, Activity, Smile, Frown, Meh, AlertCircle, Lock, Cake, Upload, Camera, Users, Clock, Eye, EyeOff, Briefcase, GraduationCap, Coffee, Compass, Crown, ChevronDown, ChevronUp, Bot } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Search, Plus, User, Tag, Calendar, MessageSquare, Brain, X, Save, Edit2, Phone, MapPin, Zap, ThumbsUp, Activity, AlertCircle, Lock, Cake, Upload, Users, Clock, Eye, EyeOff, Briefcase, GraduationCap, Coffee, Compass, Crown, ChevronDown, ChevronUp, Bot } from 'lucide-react';
 import { api } from '../services/api';
 
 // --- Constants ---
@@ -204,7 +204,7 @@ export default function PersonalityManager() {
     fetchPeople();
   }, []);
 
-  const handleCreateSuccess = (newPerson: any) => {
+  const handleCreateSuccess = () => {
     fetchPeople();
     setIsCreating(false);
   };
@@ -271,7 +271,7 @@ export default function PersonalityManager() {
       const dataToApply = finalData || analysisResult;
       if (!dataToApply) return;
       
-      setEditForm(prev => ({
+      setEditForm((prev: any) => ({
           ...(prev || selectedPerson || {}),
           disc_type: dataToApply.disc || '',
           mbti_type: dataToApply.mbti || '',

@@ -1,11 +1,18 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Send, User, Bot, Loader2, Sparkles, BookOpen } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Send, Bot, Loader2, Sparkles, BookOpen } from 'lucide-react';
+
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  related_sops?: string[];
+  timestamp: Date;
+}
 
 export default function ChatAssistant() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
-  const scrollRef = useRef(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   
   // WebSocket connection would go here in a real app
   // For now, we simulate API calls
@@ -19,7 +26,7 @@ export default function ChatAssistant() {
   const handleSend = async () => {
     if (!input.trim()) return;
 
-    const userMsg = { role: 'user', content: input, timestamp: new Date() };
+    const userMsg: ChatMessage = { role: 'user', content: input, timestamp: new Date() };
     setMessages(prev => [...prev, userMsg]);
     setInput('');
     setIsTyping(true);
@@ -33,7 +40,7 @@ export default function ChatAssistant() {
       
       const data = await response.json();
       
-      const aiMsg = { 
+      const aiMsg: ChatMessage = { 
         role: 'assistant', 
         content: data.content, 
         related_sops: data.related_sops || [],
@@ -43,7 +50,8 @@ export default function ChatAssistant() {
       setMessages(prev => [...prev, aiMsg]);
     } catch (err) {
       console.error("Assistant Error", err);
-      setMessages(prev => [...prev, { role: 'assistant', content: "抱歉，连接失败，请稍后重试。", timestamp: new Date() }]);
+      const errorMsg: ChatMessage = { role: 'assistant', content: "抱歉，连接失败，请稍后重试。", timestamp: new Date() };
+      setMessages(prev => [...prev, errorMsg]);
     } finally {
       setIsTyping(false);
     }

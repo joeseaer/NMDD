@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Play, TrendingUp, AlertCircle, History, TreeDeciduous, ArrowRight, BarChart3, Zap, Users, BookOpen, Award, Target, Gem, Crown, Shield } from 'lucide-react';
+import { Play, TrendingUp, History, TreeDeciduous, ArrowRight, BarChart3, Zap, Users, BookOpen, Award, Target, Gem, Crown, Shield } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from 'recharts';
 import { api } from '../services/api';
 

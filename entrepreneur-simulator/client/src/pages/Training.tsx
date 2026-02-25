@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import { Send, User, Bot, AlertTriangle, CheckCircle, Info, Sparkles, X, Activity } from 'lucide-react';
+import { Send, AlertTriangle, CheckCircle, Info, Sparkles, X, Activity } from 'lucide-react';
 
 interface NPCResponse {
   text: string;

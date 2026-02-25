@@ -166,7 +166,7 @@ export default function EvolutionTree() {
         <div className="absolute left-1/2 top-0 bottom-0 w-1 bg-gray-200 -ml-0.5 z-0"></div>
 
         <div className="max-w-4xl mx-auto space-y-16 relative z-10 pb-20">
-          {tiers.slice().reverse().map((tier, index) => (
+          {tiers.slice().reverse().map((tier) => (
             <div key={tier.id} className="relative">
               {/* Tier Label */}
               <div className="flex justify-center mb-6">

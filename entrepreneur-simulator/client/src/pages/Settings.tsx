@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Save, Download, Clock, CheckCircle, AlertCircle, Database } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Save, Download, Clock, AlertCircle, Database } from 'lucide-react';
 
 export default function Settings() {
   const [autoBackup, setAutoBackup] = useState(false);

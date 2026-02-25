@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { Send, FileText, Bot, User, Clock, CheckCircle, AlertTriangle, Briefcase, MessageSquare, Mic, Users, Plus, ChevronRight, Save, Link as LinkIcon, BarChart3, MoreHorizontal, X } from 'lucide-react';
+import { Send, FileText, Bot, Clock, CheckCircle, AlertTriangle, Briefcase, MessageSquare, Mic, Users, Plus, Save, Link as LinkIcon, BarChart3, MoreHorizontal, X } from 'lucide-react';
 import { api } from '../services/api';
 
 // --- Types ---

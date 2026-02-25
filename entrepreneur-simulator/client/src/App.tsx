@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import { Brain, MessageSquare, History, User, Settings, LayoutDashboard, BookOpen, Users, FileText } from 'lucide-react'
+import { Brain, MessageSquare, User, Settings, LayoutDashboard, BookOpen, Users, FileText } from 'lucide-react'
 
 // Pages
 import Dashboard from './pages/Dashboard'
@@ -130,7 +130,7 @@ function App() {
   )
 }
 
-function SidebarLink({ to, icon, label, active = false }) {
+function SidebarLink({ to, icon, label, active = false }: { to: string; icon: React.ReactNode; label: string; active?: boolean }) {
   return (
     <Link
       to={to}
