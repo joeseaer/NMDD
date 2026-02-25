@@ -82,8 +82,8 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-50 overflow-y-auto">
-      {/* Header Section with Gradient */}
+    <div className="space-y-6 p-4 lg:p-8">
+      {/* Banner */}
       <div className="bg-gradient-to-r from-indigo-600 to-purple-600 px-8 py-10 text-white shadow-lg">
           <div className="flex justify-between items-end">
               <div>

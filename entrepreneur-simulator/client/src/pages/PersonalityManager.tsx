@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Plus, User, Calendar, MessageSquare, Brain, X, Save, Edit2, Phone, MapPin, Zap, ThumbsUp, Activity, AlertCircle, Lock, Cake, Upload, Users, Clock, Eye, EyeOff, Briefcase, GraduationCap, Coffee, Compass, Crown, ChevronDown, ChevronUp, Bot } from 'lucide-react';
+import { Search, Plus, User, Calendar, MessageSquare, Brain, X, Save, Edit2, Phone, MapPin, Zap, ThumbsUp, Activity, AlertCircle, Lock, Cake, Upload, Users, Clock, Eye, EyeOff, Briefcase, GraduationCap, Coffee, Compass, Crown, ChevronDown, ChevronUp, Bot, ArrowLeft } from 'lucide-react';
 import { api } from '../services/api';
 
 // --- Constants ---
@@ -329,7 +329,10 @@ export default function PersonalityManager() {
   return (
     <div className="flex h-full bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
       {/* Sidebar List */}
-      <div className="w-80 border-r border-gray-100 bg-gray-50/50 flex flex-col flex-shrink-0">
+      <div className={`
+        w-full lg:w-80 border-r border-gray-100 bg-gray-50/50 flex-col flex-shrink-0 
+        ${selectedPerson ? 'hidden lg:flex' : 'flex'}
+      `}>
         <div className="p-4 border-b border-gray-100">
           <h2 className="text-lg font-bold text-gray-900 mb-4 flex items-center">
             <User className="w-5 h-5 mr-2 text-primary" />
@@ -421,9 +424,16 @@ export default function PersonalityManager() {
       </div>
 
       {/* Main Detail Area */}
-      <div className="flex-1 overflow-y-auto bg-white">
+      <div className={`flex-1 overflow-y-auto bg-white ${selectedPerson ? 'block' : 'hidden lg:block'}`}>
         {selectedPerson ? (
-          <div className="p-8 max-w-4xl mx-auto">
+          <div className="p-4 lg:p-8 max-w-4xl mx-auto">
+            {/* Mobile Back Button */}
+            <div className="lg:hidden mb-4">
+                <button onClick={() => setSelectedPerson(null)} className="flex items-center text-gray-500 hover:text-gray-900 font-medium text-sm">
+                    <ArrowLeft className="w-4 h-4 mr-1" /> 返回列表
+                </button>
+            </div>
+
             {/* Header */}
             <div className="flex justify-between items-start mb-8 border-b border-gray-100 pb-6">
               <div className="flex items-start gap-4 flex-1">

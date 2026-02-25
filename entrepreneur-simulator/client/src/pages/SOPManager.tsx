@@ -4,7 +4,7 @@ import {
   MoreHorizontal, Share2, Trash2, FileText, Activity, Clock, 
   ArrowLeft, List, Link as LinkIcon, Code, 
   CheckSquare, Bold, Italic, Type, RotateCcw,
-  Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder
+  Strikethrough, Quote, ListOrdered, Sparkles, Save, Folder, Menu
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -90,10 +90,11 @@ export default function SOPManager() {
   const [allScenes, setAllScenes] = useState<any[]>([]);
   const [allPeople, setAllPeople] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false); // New state for saving status
+  const [isSaving, setIsSaving] = useState(false);
   
   const [activeCategory, setActiveCategory] = useState('all');
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [showMobileSidebar, setShowMobileSidebar] = useState(false); // New state for mobile sidebar
   
   // Navigation State
   const [viewMode, setViewMode] = useState<'list' | 'detail' | 'template'>('list');
@@ -241,17 +242,32 @@ export default function SOPManager() {
   return (
     <div className="flex h-full bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
       
-      {/* Sidebar - Only visible in List Mode or Large Screens */}
-      <div className={`w-64 border-r border-gray-100 bg-gray-50/50 p-6 flex-shrink-0 ${viewMode !== 'list' ? 'hidden lg:block' : ''}`}>
-        <h2 className="text-lg font-bold text-gray-900 mb-6 flex items-center">
-          <BookOpen className="w-5 h-5 mr-2 text-primary" />
-          知识库体系
-        </h2>
+      {/* Mobile Sidebar Overlay */}
+      {showMobileSidebar && (
+        <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setShowMobileSidebar(false)} />
+      )}
+
+      {/* Sidebar - Desktop & Mobile Drawer */}
+      <div className={`
+        fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-gray-100 p-6 transform transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 lg:bg-gray-50/50 lg:block
+        ${showMobileSidebar ? 'translate-x-0' : '-translate-x-full'}
+        ${viewMode !== 'list' ? 'hidden lg:block' : ''}
+      `}>
+        <div className="flex justify-between items-center mb-6">
+            <h2 className="text-lg font-bold text-gray-900 flex items-center">
+            <BookOpen className="w-5 h-5 mr-2 text-primary" />
+            知识库体系
+            </h2>
+            <button onClick={() => setShowMobileSidebar(false)} className="lg:hidden text-gray-500">
+                <X className="w-5 h-5" />
+            </button>
+        </div>
+        
         <nav className="space-y-1">
           {MOCK_CATEGORIES.map(cat => (
             <button
               key={cat.id}
-              onClick={() => { setActiveCategory(cat.id); setViewMode('list'); }}
+              onClick={() => { setActiveCategory(cat.id); setViewMode('list'); setShowMobileSidebar(false); }}
               className={`
                 w-full flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors
                 ${activeCategory === cat.id 
@@ -288,12 +304,19 @@ export default function SOPManager() {
         
         {viewMode === 'list' && (
           <>
-            <header className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white">
-              <div className="flex-1 max-w-lg relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Search className="h-4 w-4 text-gray-400" />
-                </div>
-                <input
+            <header className="px-4 lg:px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white gap-2">
+              <div className="flex items-center flex-1 max-w-lg relative gap-2">
+                <button 
+                  onClick={() => setShowMobileSidebar(true)} 
+                  className="lg:hidden p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-lg"
+                >
+                  <Menu className="w-5 h-5" />
+                </button>
+                <div className="flex-1 relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Search className="h-4 w-4 text-gray-400" />
+                  </div>
+                  <input
                   type="text"
                   className="block w-full pl-10 pr-3 py-2 border border-gray-200 rounded-lg leading-5 bg-gray-50 placeholder-gray-400 focus:outline-none focus:bg-white focus:ring-1 focus:ring-primary focus:border-primary sm:text-sm transition-colors"
                   placeholder="搜索方法论、标签..."
@@ -301,6 +324,7 @@ export default function SOPManager() {
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
+            </div>
               <div className="ml-4 flex items-center space-x-3">
                 <button 
                   onClick={() => setViewMode('template')}
