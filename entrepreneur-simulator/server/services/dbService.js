@@ -35,7 +35,7 @@ const initDB = async () => {
 // --- Scenes ---
 
 const saveScene = async (sceneData) => {
-  if (!supabase) return null;
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
   
   const { data, error } = await supabase
     .from('scenes')
@@ -60,7 +60,7 @@ const saveScene = async (sceneData) => {
 };
 
 const getRecentScenes = async (userId, limit = 5) => {
-  if (!supabase) return [];
+  if (!supabase || !userId) return [];
 
   const { data, error } = await supabase
     .from('scenes')
@@ -79,7 +79,7 @@ const getRecentScenes = async (userId, limit = 5) => {
 // --- SOPs ---
 
 const saveSOP = async (sopData) => {
-  if (!supabase) return null;
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
 
   let sopId = sopData.id;
 
@@ -313,7 +313,7 @@ const deleteSOPsByTitle = async (title) => {
 // --- People Profiles ---
 
 const savePersonProfile = async (profileData) => {
-  if (!supabase) return null;
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
 
   if (profileData.id) {
       // Update existing
@@ -424,7 +424,7 @@ const getPeopleProfiles = async (userId) => {
 // --- Interaction Logs ---
 
 const saveInteractionLog = async (logData) => {
-  if (!supabase) return null;
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
 
   const { data, error } = await supabase
     .from('interaction_logs')
@@ -504,7 +504,7 @@ const getInteractionLogs = async (personId) => {
 // --- Review Sessions (Real Scene Review) ---
 
 const saveReviewSession = async (sessionData) => {
-    if (!supabase) return null;
+    if (!supabase) throw new Error("Database connection not established. Check environment variables.");
 
     // Check if exists
     if (sessionData.id && sessionData.id.length > 10) {
@@ -583,6 +583,8 @@ const getReviewSession = async (sessionId) => {
 // --- NPC Relations ---
 
 const saveNPCRelation = async (relationData) => {
+    if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+
     const { data, error } = await supabase
         .from('user_npc_relations')
         .insert([relationData])
