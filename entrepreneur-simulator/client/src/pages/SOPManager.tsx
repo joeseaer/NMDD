@@ -19,6 +19,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import Placeholder from '@tiptap/extension-placeholder';
 import Heading from '@tiptap/extension-heading';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
+import { DOMParser as ProseMirrorDOMParser } from 'prosemirror-model';
 import MarkdownIt from 'markdown-it';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
@@ -981,6 +982,21 @@ const TiptapEditor = ({ content, onChange }: { content: string, onChange: (conte
                 class: 'prose prose-sm max-w-none focus:outline-none min-h-[500px] p-8 outline-none [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:mb-4 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mb-3 [&_h2]:mt-6 [&_h3]:text-xl [&_h3]:font-bold [&_h3]:mb-2 [&_h3]:mt-4 [&_h4]:text-lg [&_h4]:font-bold [&_h4]:mb-2 [&_h5]:text-base [&_h5]:font-bold [&_h5]:mb-1 [&_h6]:text-sm [&_h6]:font-bold [&_h6]:text-gray-500 [&_li_p]:m-0 [&_ul[data-type="taskList"]]:list-none [&_ul[data-type="taskList"]]:pl-0 [&_img]:rounded-lg [&_img]:shadow-sm [&_img]:max-w-full [&_img]:my-4',
             },
             handlePaste: (view, event, _slice) => {
+                const text = event.clipboardData?.getData('text/plain');
+                if (text) {
+                     // Check for Markdown table syntax (Header row + Separator row)
+                     if (/^\s*\|.*\|\s*\n\s*\|[-:| ]+\|\s*/m.test(text)) {
+                         const html = mdParser.render(text);
+                         const parser = new DOMParser();
+                         const doc = parser.parseFromString(html, 'text/html');
+                         const pmParser = ProseMirrorDOMParser.fromSchema(view.state.schema);
+                         const slice = pmParser.parseSlice(doc.body);
+                         const transaction = view.state.tr.replaceSelection(slice);
+                         view.dispatch(transaction);
+                         return true;
+                     }
+                }
+
                 const items = Array.from(event.clipboardData?.items || []);
                 const item = items.find(item => item.type.indexOf('image') === 0);
 
