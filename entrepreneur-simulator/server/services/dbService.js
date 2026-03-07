@@ -16,6 +16,22 @@ const chromaClient = new ChromaClient({
 let scenesCollection = null;
 let sopCollection = null;
 
+function summarizeMindMapContent(content) {
+  const text = typeof content === 'string' ? content : '';
+  const hasFence = text.includes('```mindmap');
+  const hasDiv = text.includes('data-type="mind-map"') || text.includes("data-type='mind-map'");
+  const idx = hasFence ? text.indexOf('```mindmap') : (hasDiv ? text.indexOf('data-type') : -1);
+  const snippet = idx >= 0
+    ? text.slice(Math.max(0, idx - 60), Math.min(text.length, idx + 240))
+    : '';
+  return {
+    len: text.length,
+    hasFence,
+    hasDiv,
+    snippet,
+  };
+}
+
 const initDB = async () => {
   if (supabase) {
     console.log('✅ Connected to Supabase');
@@ -94,6 +110,11 @@ const saveSOP = async (sopData) => {
 
   let sopId = sopData.id;
 
+  // Ensure content is processed if it contains URL-encoded mindmap data
+  // Although frontend decodes it for display, we want to store it as is or decoded?
+  // Frontend sends Markdown. The markdown contains <div ... data-mindmap="...">
+  // Postgres TEXT column can handle it fine. No special processing needed here usually.
+  
   // Check if updating or inserting
   if (sopData.id && sopData.id.length > 10) { // Simple check for UUID vs mock ID
       const { data, error } = await supabase
@@ -113,15 +134,19 @@ const saveSOP = async (sopData) => {
       if (error) throw error;
       sopId = data.id;
   } else {
+      // If ID is missing or short (temp ID), treat as insert
+      // Remove temp ID from payload so Postgres generates new UUID
+      const { id, ...insertData } = sopData;
+      
       const { data, error } = await supabase
         .from('sops')
         .insert([{
-            user_id: sopData.user_id || 'test-user', // Default for now
-            title: sopData.title,
-            category: sopData.category,
-            tags: sopData.tags,
-            version: sopData.version,
-            content: sopData.content,
+            user_id: insertData.user_id || 'test-user', // Default for now
+            title: insertData.title,
+            category: insertData.category,
+            tags: insertData.tags,
+            version: insertData.version,
+            content: insertData.content,
             // related_scenes is legacy, we use relational tables now
         }])
         .select('id')
@@ -129,6 +154,22 @@ const saveSOP = async (sopData) => {
 
       if (error) throw error;
       sopId = data.id;
+  }
+
+  try {
+    const mm = summarizeMindMapContent(sopData?.content);
+    if (mm.hasFence || mm.hasDiv) {
+      const { data: saved, error: savedError } = await supabase
+        .from('sops')
+        .select('id, content, updated_at')
+        .eq('id', sopId)
+        .single();
+      if (!savedError && saved) {
+        console.log('[mindmap][db] saved-check', { id: saved.id, updated_at: saved.updated_at, ...summarizeMindMapContent(saved.content) });
+      }
+    }
+  } catch (e) {
+    console.warn('[mindmap][db] saved-check failed', e?.message || e);
   }
 
   // Save version history

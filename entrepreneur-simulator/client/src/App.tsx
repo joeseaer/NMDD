@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react'
 import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import { Brain, MessageSquare, User, Settings, LayoutDashboard, BookOpen, Users, FileText, Menu, X } from 'lucide-react'
+import { Brain, MessageSquare, User, Settings, LayoutDashboard, BookOpen, Users, FileText, Menu, X, Notebook } from 'lucide-react'
 
 // Pages
 import Dashboard from './pages/Dashboard'
 import Training from './pages/Training'
 import Review from './pages/Review'
 import SOPManager from './pages/SOPManager'
+import NoteManager from './pages/NoteManager'
 import PersonalityManager from './pages/PersonalityManager'
 import RealReview from './pages/RealReview'
 import ChatAssistant from './pages/ChatAssistant'
@@ -21,6 +22,7 @@ function App() {
   useEffect(() => {
     if (location.pathname.includes('/training') || location.pathname.includes('/evolution-tree')) setActiveTab('dashboard');
     else if (location.pathname.includes('/sop')) setActiveTab('sop');
+    else if (location.pathname.includes('/notes')) setActiveTab('notes');
     else if (location.pathname.includes('/personality')) setActiveTab('personality');
     else if (location.pathname.includes('/real-review')) setActiveTab('real-review');
     else if (location.pathname.includes('/assistant')) setActiveTab('assistant');
@@ -90,6 +92,7 @@ function App() {
           <div>
             <h3 className="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">记录中心</h3>
             <SidebarLink to="/sop" icon={<BookOpen size={20} />} label="SOP 方法论库" active={activeTab === 'sop'} />
+            <SidebarLink to="/notes" icon={<Notebook size={20} />} label="随笔/文档" active={activeTab === 'notes'} />
             <SidebarLink to="/personality" icon={<Users size={20} />} label="性格分析档案" active={activeTab === 'personality'} />
             <SidebarLink to="/real-review" icon={<FileText size={20} />} label="真实场景复盘" active={activeTab === 'real-review'} />
           </div>
@@ -146,6 +149,7 @@ function App() {
               <Route path="/training/:sceneId" element={<Training />} />
               <Route path="/review/:sceneId" element={<Review />} />
               <Route path="/sop" element={<SOPManager />} />
+              <Route path="/notes" element={<NoteManager />} />
               <Route path="/personality" element={<PersonalityManager />} />
               <Route path="/real-review" element={<RealReview />} />
               <Route path="/evolution-tree" element={<EvolutionTree />} />

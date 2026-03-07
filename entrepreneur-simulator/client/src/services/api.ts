@@ -30,16 +30,39 @@ export const api = {
         // Ensure user_id is present
         const dataToSend = { ...sopData, user_id: sopData.user_id || CURRENT_USER_ID };
         
+        // Ensure content is not undefined or empty string if it's supposed to be JSON for some cases
+        // But for SOPs, content is usually Markdown string.
+        // If it's empty, make sure it's an empty string, not undefined.
+        if (dataToSend.content === undefined || dataToSend.content === null) {
+            dataToSend.content = '';
+        }
+
         const response = await fetch(`${API_BASE_URL}/sop/create`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(dataToSend)
         });
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to create SOP');
+        
+        const text = await response.text();
+        if (!text) {
+             // If response is empty, it's a critical failure for creation as we need the ID
+             console.error("Empty response received from server for createSOP");
+             throw new Error('Server returned empty response (no ID received)');
         }
-        return response.json();
+
+        try {
+            const data = JSON.parse(text);
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to create SOP');
+            }
+            if (!data.id) {
+                throw new Error('Server response missing SOP ID');
+            }
+            return data;
+        } catch (e: any) {
+            console.error("JSON Parse Error:", e, "Response Text:", text);
+            throw new Error(e.message || `Invalid JSON response: ${text.substring(0, 100)}...`);
+        }
     },
 
     deleteSOP: async (id: string) => {

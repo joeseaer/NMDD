@@ -1,14 +1,15 @@
 
 import { Node, mergeAttributes, InputRule, Extension } from '@tiptap/core';
 import Suggestion from '@tiptap/suggestion';
-import { ReactRenderer } from '@tiptap/react';
+import { ReactRenderer, ReactNodeViewRenderer } from '@tiptap/react';
 import tippy from 'tippy.js';
 import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { 
   Heading1, Heading2, Heading3, List, ListOrdered, CheckSquare, 
   Quote, Minus, Code, Layout, Image as ImageIcon,
-  Type
+  Type, Network
 } from 'lucide-react';
+import { MindMapComponent } from './MindMapExtension';
 
 // --- Module Augmentation for Commands ---
 declare module '@tiptap/core' {
@@ -233,6 +234,56 @@ export const Column = Node.create({
   },
 });
 
+// --- Mind Map Extension ---
+
+export const MindMap = Node.create({
+  name: 'mindMap',
+  group: 'block',
+  atom: true,
+
+  addAttributes() {
+    return {
+      data: {
+        default: null,
+        parseHTML: element => {
+          const raw = element.getAttribute('data-mindmap');
+          if (!raw) return null;
+          try {
+            return decodeURIComponent(raw);
+          } catch {
+            return raw;
+          }
+        },
+        renderHTML: attributes => {
+          const jsonStr = typeof attributes.data === 'object'
+            ? JSON.stringify(attributes.data)
+            : (attributes.data || '');
+
+          return {
+            'data-mindmap': encodeURIComponent(jsonStr),
+          }
+        },
+      },
+    }
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: 'div[data-type="mind-map"]',
+      },
+    ]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'mind-map' })]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(MindMapComponent)
+  },
+});
+
 
 // --- Slash Command Extension ---
 
@@ -443,6 +494,22 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
         icon: <Layout className="w-3 h-3" />,
         command: ({ editor, range }: any) => {
             editor.chain().focus().deleteRange(range).setColumns(3).run();
+        },
+    },
+    {
+        title: '思维导图',
+        shortcut: '/swdt',
+        icon: <Network className="w-3 h-3" />,
+        command: ({ editor, range }: any) => {
+            editor.chain().focus().deleteRange(range).insertContent({
+                type: 'mindMap',
+                attrs: {
+                    data: { 
+                        nodes: [{ id: 'root', type: 'mindMap', data: { label: '中心主题' }, position: { x: 0, y: 0 } }], 
+                        edges: [] 
+                    }
+                }
+            }).run();
         },
     },
   ].filter(item => item.title.toLowerCase().includes(query.toLowerCase()) || item.shortcut.includes(query.toLowerCase()));

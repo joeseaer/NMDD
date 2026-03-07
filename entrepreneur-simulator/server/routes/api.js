@@ -2,6 +2,22 @@ const sceneService = require('../services/sceneService');
 const chatService = require('../services/chatService');
 const dbService = require('../services/dbService');
 
+function summarizeMindMapContent(content) {
+  const text = typeof content === 'string' ? content : '';
+  const hasFence = text.includes('```mindmap');
+  const hasDiv = text.includes('data-type="mind-map"') || text.includes("data-type='mind-map'");
+  const idx = hasFence ? text.indexOf('```mindmap') : (hasDiv ? text.indexOf('data-type') : -1);
+  const snippet = idx >= 0
+    ? text.slice(Math.max(0, idx - 60), Math.min(text.length, idx + 240))
+    : '';
+  return {
+    len: text.length,
+    hasFence,
+    hasDiv,
+    snippet,
+  };
+}
+
 async function routes(fastify, options) {
   
   // Scene Generation
@@ -76,13 +92,22 @@ async function routes(fastify, options) {
   fastify.get('/sop/:userId', async (request, reply) => {
     const { userId } = request.params;
     const sops = await dbService.getSOPs(userId);
+
+    try {
+      const mindmapCount = (sops || []).filter((s) => summarizeMindMapContent(s.content).hasFence || summarizeMindMapContent(s.content).hasDiv).length;
+      request.log.info({ userId, count: (sops || []).length, mindmapCount }, 'Fetched SOPs');
+    } catch {}
+
     return sops;
   });
 
   fastify.post('/sop/create', async (request, reply) => {
     try {
       const sopData = request.body;
+      const mm = summarizeMindMapContent(sopData?.content);
+      request.log.info({ title: sopData?.title, id: sopData?.id, user_id: sopData?.user_id, ...mm }, 'Saving SOP');
       const id = await dbService.saveSOP(sopData);
+      request.log.info({ id }, 'SOP Saved');
       return { id, message: "SOP Created Successfully" };
     } catch (err) {
       request.log.error(err);

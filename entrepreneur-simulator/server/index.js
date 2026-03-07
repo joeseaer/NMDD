@@ -2,13 +2,6 @@ const fastify = require('fastify')({ logger: true });
 const path = require('path');
 require('dotenv').config();
 
-console.log("----------------------------------------------------------------");
-console.log("Server Starting...");
-console.log("Environment Check:");
-console.log("OPENAI_API_KEY:", process.env.OPENAI_API_KEY ? `Loaded (${process.env.OPENAI_API_KEY.substring(0, 5)}...)` : "MISSING");
-console.log("OPENAI_BASE_URL:", process.env.OPENAI_BASE_URL);
-console.log("----------------------------------------------------------------");
-
 // Plugins
 fastify.register(require('@fastify/cors'), { origin: true });
 fastify.register(require('@fastify/websocket'));
