@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { Search, Plus, User, Calendar, MessageSquare, Brain, X, Save, Edit2, Phone, MapPin, Zap, ThumbsUp, Activity, AlertCircle, Lock, Cake, Upload, Users, Clock, Eye, EyeOff, Briefcase, GraduationCap, Coffee, Compass, Crown, ChevronDown, ChevronUp, Bot, ArrowLeft } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Search, Plus, User, Calendar, MessageSquare, Brain, X, Save, Edit2, Phone, MapPin, Zap, ThumbsUp, Activity, AlertCircle, Lock, Cake, Upload, Users, Clock, Eye, EyeOff, Briefcase, GraduationCap, Coffee, Compass, Crown, ChevronDown, ChevronUp, Bot, ArrowLeft, Check } from 'lucide-react';
 import { api } from '../services/api';
 
 // --- Constants ---
@@ -87,6 +87,125 @@ export default function PersonalityManager() {
   const [consultModalOpen, setConsultModalOpen] = useState(false);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+
+  const defaultProfileAnalysis = useMemo(() => ({
+    layer_1_core: {
+      personality_traits: '',
+      core_values: '',
+      cognitive_mode: '',
+      emotional_energy: '',
+    },
+    layer_2_drive: {
+      motivation_system: '',
+      skills_capabilities: '',
+      resource_network: '',
+    },
+    layer_3_surface: {
+      behavior_habits: '',
+      life_trajectory: '',
+      current_status_path: '',
+    },
+  }), []);
+
+  const parseAnalysis = (privateInfo: any) => {
+    if (!privateInfo || typeof privateInfo !== 'string') return defaultProfileAnalysis;
+    const raw = privateInfo.trim();
+    if (!raw) return defaultProfileAnalysis;
+    try {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object' && (obj.layer_1_core || obj.layer_2_drive || obj.layer_3_surface)) {
+        return {
+          layer_1_core: { ...defaultProfileAnalysis.layer_1_core, ...(obj.layer_1_core || {}) },
+          layer_2_drive: { ...defaultProfileAnalysis.layer_2_drive, ...(obj.layer_2_drive || {}) },
+          layer_3_surface: { ...defaultProfileAnalysis.layer_3_surface, ...(obj.layer_3_surface || {}) },
+        };
+      }
+    } catch {}
+    return {
+      ...defaultProfileAnalysis,
+      layer_3_surface: {
+        ...defaultProfileAnalysis.layer_3_surface,
+        current_status_path: raw,
+      },
+    };
+  };
+
+  const [analysisDraft, setAnalysisDraft] = useState<any>(defaultProfileAnalysis);
+  const [savedAt, setSavedAt] = useState<Record<string, number>>({});
+  const [savingField, setSavingField] = useState<string | null>(null);
+  const saveTimersRef = useRef<Record<string, any>>({});
+  const latestAnalysisRef = useRef<any>(defaultProfileAnalysis);
+  const [sectionOpen, setSectionOpen] = useState({ layer1: true, layer2: true, layer3: true });
+
+  useEffect(() => {
+    latestAnalysisRef.current = analysisDraft;
+  }, [analysisDraft]);
+
+  useEffect(() => {
+    if (!selectedPerson) return;
+    const parsed = parseAnalysis(selectedPerson.private_info);
+    setAnalysisDraft(parsed);
+    latestAnalysisRef.current = parsed;
+    setSavedAt({});
+    setSavingField(null);
+  }, [selectedPerson?.id]);
+
+  const autosaveAnalysis = async (next: any, fieldKey: string) => {
+    if (!selectedPerson) return;
+    setSavingField(fieldKey);
+    try {
+      await api.updatePersonProfileAnalysis(selectedPerson.id, next);
+      const now = Date.now();
+      setSavedAt((prev) => ({ ...prev, [fieldKey]: now }));
+      setTimeout(() => {
+        setSavedAt((prev) => {
+          if (prev[fieldKey] !== now) return prev;
+          const { [fieldKey]: _, ...rest } = prev;
+          return rest;
+        });
+      }, 2000);
+      const json = JSON.stringify(next);
+      setSelectedPerson((p: any) => (p && p.id === selectedPerson.id ? { ...p, private_info: json } : p));
+      setPeople((prev) => prev.map((p) => (p.id === selectedPerson.id ? { ...p, private_info: json } : p)));
+      setEditForm((prev: any) => (prev && prev.id === selectedPerson.id ? { ...prev, private_info: json } : prev));
+    } catch (e) {
+      console.error('Failed to autosave profile analysis', e);
+    } finally {
+      setSavingField((cur) => (cur === fieldKey ? null : cur));
+    }
+  };
+
+  const setAnalysisField = (path: string, value: string) => {
+    setAnalysisDraft((prev: any) => {
+      const next = {
+        ...prev,
+        [path.split('.')[0]]: {
+          ...(prev?.[path.split('.')[0]] || {}),
+          [path.split('.')[1]]: value,
+        },
+      };
+      return next;
+    });
+
+    if (saveTimersRef.current[path]) clearTimeout(saveTimersRef.current[path]);
+    saveTimersRef.current[path] = setTimeout(() => {
+      const current = latestAnalysisRef.current;
+      const [layer, key] = path.split('.');
+      const next = {
+        ...current,
+        [layer]: {
+          ...(current?.[layer] || {}),
+          [key]: value,
+        },
+      };
+      autosaveAnalysis(next, path);
+    }, 1500);
+  };
+
+  const autoResize = (el: HTMLTextAreaElement) => {
+    el.style.height = '0px';
+    el.style.height = `${el.scrollHeight}px`;
+  };
 
   const fetchSummary = async (personId: string) => {
       setSummaryLoading(true);
@@ -885,31 +1004,299 @@ export default function PersonalityManager() {
                 <div className="bg-blue-50 p-6 rounded-xl border border-blue-100">
                     <div className="flex justify-between items-center mb-4">
                         <h3 className="font-bold text-blue-900 flex items-center">
-                            <Lock className="w-4 h-4 mr-2" /> 私人信息
+                            <Lock className="w-4 h-4 mr-2" /> 人物深度分析档案（三层冰山）
                         </h3>
                         <button onClick={() => setShowPrivate(false)} className="text-blue-500 hover:text-blue-700">
                             <EyeOff className="w-4 h-4" />
                         </button>
                     </div>
-                    <div className="space-y-2">
-                        {isEditing && editForm ? (
-                            <textarea 
-                                value={editForm.private_info || ''} 
-                                onChange={e => setEditForm({...editForm, private_info: e.target.value})}
-                                className="w-full h-24 text-sm text-blue-800 bg-white/50 border border-blue-100 rounded p-2 focus:outline-none focus:border-blue-300 resize-none"
-                                placeholder="记录生肖、生日、家庭情况、喜好、重要日期等..."
-                            />
-                        ) : (
-                            <p className="text-sm text-blue-800 leading-relaxed whitespace-pre-wrap">
-                                {selectedPerson.private_info || <span className="text-blue-400 italic">暂无私人信息记录</span>}
-                            </p>
-                        )}
+
+                    <div className="space-y-4">
+                        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                            <button
+                                onClick={() => setSectionOpen((prev) => ({ ...prev, layer1: !prev.layer1 }))}
+                                className="w-full flex items-start justify-between px-5 py-4 text-left"
+                            >
+                                <div>
+                                    <div className="text-base font-bold text-gray-900">第一层：底层操作系统</div>
+                                    <div className="text-xs text-gray-600 mt-1">这部分通常不可见，但决定了一切行为。</div>
+                                </div>
+                                <div className="text-gray-400 mt-1">{sectionOpen.layer1 ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}</div>
+                            </button>
+                            {sectionOpen.layer1 && (
+                              <div className="px-5 pb-5">
+                                <div className="border-l-4 border-blue-700 bg-blue-50/40 rounded-lg p-4 space-y-5">
+
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">人格特质关键词</div>
+                                      {savedAt['layer_1_core.personality_traits'] && <Check className="w-4 h-4 text-green-600" />}
+                                      {savingField === 'layer_1_core.personality_traits' && <div className="text-[10px] text-gray-400">保存中…</div>}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
+                                      请记录其显性的性格分类及行为偏好。<br />
+                                      DISC/大五/九型人格类型？能量来源（内向/外向）？信息处理方式（直觉/实感）？决策依据（逻辑/情感）？生活态度（计划/随性）？
+                                    </div>
+                                    <textarea
+                                      rows={3}
+                                      value={analysisDraft.layer_1_core.personality_traits}
+                                      onChange={(e) => {
+                                        setAnalysisField('layer_1_core.personality_traits', e.target.value);
+                                        autoResize(e.currentTarget);
+                                      }}
+                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none overflow-hidden ${analysisDraft.layer_1_core.personality_traits ? 'border-gray-300' : 'border-gray-200'}`}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">核心价值观与信念</div>
+                                      {savedAt['layer_1_core.core_values'] && <Check className="w-4 h-4 text-green-600" />}
+                                      {savingField === 'layer_1_core.core_values' && <div className="text-[10px] text-gray-400">保存中…</div>}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
+                                      请挖掘驱动其行为的底层代码和道德底线。<br />
+                                      他最看重什么（金钱/名誉/爱/自由/正义）？绝对不可触碰的底线在哪里？他对世界的基本假设是什么（人性本善/本恶？世界是安全的/危险的？）？
+                                    </div>
+                                    <textarea
+                                      rows={4}
+                                      value={analysisDraft.layer_1_core.core_values}
+                                      onChange={(e) => {
+                                        setAnalysisField('layer_1_core.core_values', e.target.value);
+                                        autoResize(e.currentTarget);
+                                      }}
+                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none overflow-hidden ${analysisDraft.layer_1_core.core_values ? 'border-gray-300' : 'border-gray-200'}`}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">认知与思维模式</div>
+                                      {savedAt['layer_1_core.cognitive_mode'] && <Check className="w-4 h-4 text-green-600" />}
+                                      {savingField === 'layer_1_core.cognitive_mode' && <div className="text-[10px] text-gray-400">保存中…</div>}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
+                                      请分析其处理信息和解决问题的思维习惯。<br />
+                                      逻辑思维能力强弱？抽象思维能力强弱？是固定型思维还是成长型思维？归因风格如何（成功归因于自己/环境？失败归因于自己/环境？）？
+                                    </div>
+                                    <textarea
+                                      rows={3}
+                                      value={analysisDraft.layer_1_core.cognitive_mode}
+                                      onChange={(e) => {
+                                        setAnalysisField('layer_1_core.cognitive_mode', e.target.value);
+                                        autoResize(e.currentTarget);
+                                      }}
+                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none overflow-hidden ${analysisDraft.layer_1_core.cognitive_mode ? 'border-gray-300' : 'border-gray-200'}`}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">情绪与心理能量</div>
+                                      {savedAt['layer_1_core.emotional_energy'] && <Check className="w-4 h-4 text-green-600" />}
+                                      {savingField === 'layer_1_core.emotional_energy' && <div className="text-[10px] text-gray-400">保存中…</div>}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
+                                      请评估其情绪稳定性及面对压力时的心理状态。<br />
+                                      情绪波动频率？抗压能力（AQ）高低？自我觉察能力如何（能否意识到自己的情绪变化）？
+                                    </div>
+                                    <textarea
+                                      rows={3}
+                                      value={analysisDraft.layer_1_core.emotional_energy}
+                                      onChange={(e) => {
+                                        setAnalysisField('layer_1_core.emotional_energy', e.target.value);
+                                        autoResize(e.currentTarget);
+                                      }}
+                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none overflow-hidden ${analysisDraft.layer_1_core.emotional_energy ? 'border-gray-300' : 'border-gray-200'}`}
+                                    />
+                                  </div>
+
+                                </div>
+                              </div>
+                            )}
+                        </div>
+
+                        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                            <button
+                                onClick={() => setSectionOpen((prev) => ({ ...prev, layer2: !prev.layer2 }))}
+                                className="w-full flex items-start justify-between px-5 py-4 text-left"
+                            >
+                                <div>
+                                    <div className="text-base font-bold text-gray-900">第二层：中间驱动层</div>
+                                    <div className="text-xs text-gray-600 mt-1">动力、连接与资源如何驱动 TA 的行动。</div>
+                                </div>
+                                <div className="text-gray-400 mt-1">{sectionOpen.layer2 ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}</div>
+                            </button>
+                            {sectionOpen.layer2 && (
+                              <div className="px-5 pb-5">
+                                <div className="border-l-4 border-orange-500 bg-orange-50/40 rounded-lg p-4 space-y-5">
+
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">动机系统（显性与隐性）</div>
+                                      {savedAt['layer_2_drive.motivation_system'] && <Check className="w-4 h-4 text-green-600" />}
+                                      {savingField === 'layer_2_drive.motivation_system' && <div className="text-[10px] text-gray-400">保存中…</div>}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
+                                      请区分其口头目标与潜意识渴望。<br />
+                                      显性动机（他嘴上说的目标是什么）？隐性动机（潜意识里真正渴望的是什么：权力欲/亲和欲/成就欲）？两者是否一致？
+                                    </div>
+                                    <textarea
+                                      rows={3}
+                                      value={analysisDraft.layer_2_drive.motivation_system}
+                                      onChange={(e) => {
+                                        setAnalysisField('layer_2_drive.motivation_system', e.target.value);
+                                        autoResize(e.currentTarget);
+                                      }}
+                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-orange-200 resize-none overflow-hidden ${analysisDraft.layer_2_drive.motivation_system ? 'border-gray-300' : 'border-gray-200'}`}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">能力与技能树</div>
+                                      {savedAt['layer_2_drive.skills_capabilities'] && <Check className="w-4 h-4 text-green-600" />}
+                                      {savingField === 'layer_2_drive.skills_capabilities' && <div className="text-[10px] text-gray-400">保存中…</div>}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
+                                      请罗列其胜任工作的硬实力与软实力。<br />
+                                      硬技能（专业本领/证书）？软技能（沟通/领导力/协作）？可迁移能力有哪些？
+                                    </div>
+                                    <textarea
+                                      rows={3}
+                                      value={analysisDraft.layer_2_drive.skills_capabilities}
+                                      onChange={(e) => {
+                                        setAnalysisField('layer_2_drive.skills_capabilities', e.target.value);
+                                        autoResize(e.currentTarget);
+                                      }}
+                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-orange-200 resize-none overflow-hidden ${analysisDraft.layer_2_drive.skills_capabilities ? 'border-gray-300' : 'border-gray-200'}`}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">资源网络与人际角色</div>
+                                      {savedAt['layer_2_drive.resource_network'] && <Check className="w-4 h-4 text-green-600" />}
+                                      {savingField === 'layer_2_drive.resource_network' && <div className="text-[10px] text-gray-400">保存中…</div>}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
+                                      请分析其社会支持系统及在关系中的定位。<br />
+                                      强关系（家人/密友）的支持度如何？弱关系（同事/泛社交）的广度如何？他在关系中通常扮演什么角色（提供者/索取者/协调者）？
+                                    </div>
+                                    <textarea
+                                      rows={3}
+                                      value={analysisDraft.layer_2_drive.resource_network}
+                                      onChange={(e) => {
+                                        setAnalysisField('layer_2_drive.resource_network', e.target.value);
+                                        autoResize(e.currentTarget);
+                                      }}
+                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-orange-200 resize-none overflow-hidden ${analysisDraft.layer_2_drive.resource_network ? 'border-gray-300' : 'border-gray-200'}`}
+                                    />
+                                  </div>
+
+                                </div>
+                              </div>
+                            )}
+                        </div>
+
+                        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+                            <button
+                                onClick={() => setSectionOpen((prev) => ({ ...prev, layer3: !prev.layer3 }))}
+                                className="w-full flex items-start justify-between px-5 py-4 text-left"
+                            >
+                                <div>
+                                    <div className="text-base font-bold text-gray-900">第三层：表层表现层</div>
+                                    <div className="text-xs text-gray-600 mt-1">肉眼可见的行为与轨迹，折射出内在结构。</div>
+                                </div>
+                                <div className="text-gray-400 mt-1">{sectionOpen.layer3 ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}</div>
+                            </button>
+                            {sectionOpen.layer3 && (
+                              <div className="px-5 pb-5">
+                                <div className="border-l-4 border-green-600 bg-green-50/40 rounded-lg p-4 space-y-5">
+
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">行为模式与生活规律</div>
+                                      {savedAt['layer_3_surface.behavior_habits'] && <Check className="w-4 h-4 text-green-600" />}
+                                      {savingField === 'layer_3_surface.behavior_habits' && <div className="text-[10px] text-gray-400">保存中…</div>}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
+                                      请记录肉眼可见的日常习惯及其折射出的特质。<br />
+                                      生活规律（作息/运动/饮食 → 反映自律与能量管理）？消费习惯（反映价值观与安全感来源）？言语风格与非语言信号（肢体动作/微表情）？
+                                    </div>
+                                    <textarea
+                                      rows={4}
+                                      value={analysisDraft.layer_3_surface.behavior_habits}
+                                      onChange={(e) => {
+                                        setAnalysisField('layer_3_surface.behavior_habits', e.target.value);
+                                        autoResize(e.currentTarget);
+                                      }}
+                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-green-200 resize-none overflow-hidden ${analysisDraft.layer_3_surface.behavior_habits ? 'border-gray-300' : 'border-gray-200'}`}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">人生轨迹与关键事件</div>
+                                      {savedAt['layer_3_surface.life_trajectory'] && <Check className="w-4 h-4 text-green-600" />}
+                                      {savingField === 'layer_3_surface.life_trajectory' && <div className="text-[10px] text-gray-400">保存中…</div>}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
+                                      请按时间轴梳理塑造其现状的关键节点。<br />
+                                      原生家庭影响？求学经历？成长经历中的关键转折点？是否有重大创伤或高光时刻？这些事件如何影响了现在的他？
+                                    </div>
+                                    <textarea
+                                      rows={5}
+                                      value={analysisDraft.layer_3_surface.life_trajectory}
+                                      onChange={(e) => {
+                                        setAnalysisField('layer_3_surface.life_trajectory', e.target.value);
+                                        autoResize(e.currentTarget);
+                                      }}
+                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-green-200 resize-none overflow-hidden ${analysisDraft.layer_3_surface.life_trajectory ? 'border-gray-300' : 'border-gray-200'}`}
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">当前处境与行动路径</div>
+                                      {savedAt['layer_3_surface.current_status_path'] && <Check className="w-4 h-4 text-green-600" />}
+                                      {savingField === 'layer_3_surface.current_status_path' && <div className="text-[10px] text-gray-400">保存中…</div>}
+                                    </div>
+                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
+                                      请分析其当下的现实状态与未来的匹配度。<br />
+                                      当前处境（职业/婚姻/财务现状，痛点与爽点分别是什么）？行动路径（人生理想/未来规划是否清晰？目前的行动是否与目标一致？）？
+                                    </div>
+                                    <textarea
+                                      rows={4}
+                                      value={analysisDraft.layer_3_surface.current_status_path}
+                                      onChange={(e) => {
+                                        setAnalysisField('layer_3_surface.current_status_path', e.target.value);
+                                        autoResize(e.currentTarget);
+                                      }}
+                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-green-200 resize-none overflow-hidden ${analysisDraft.layer_3_surface.current_status_path ? 'border-gray-300' : 'border-gray-200'}`}
+                                    />
+                                  </div>
+
+                                </div>
+                              </div>
+                            )}
+                        </div>
                     </div>
                 </div>
                 ) : (
                     <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100/50 flex items-center justify-between cursor-pointer hover:bg-blue-50" onClick={() => setShowPrivate(true)}>
                         <div className="flex items-center text-blue-900/50 font-medium">
-                            <Lock className="w-4 h-4 mr-2" /> 私人信息 (已隐藏)
+                            <Lock className="w-4 h-4 mr-2" /> 人物深度分析档案 (已隐藏)
                         </div>
                         <Eye className="w-4 h-4 text-blue-400" />
                     </div>

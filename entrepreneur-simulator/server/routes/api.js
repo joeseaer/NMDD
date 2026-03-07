@@ -171,6 +171,23 @@ async function routes(fastify, options) {
     }
   });
 
+  fastify.patch('/people/:id/profile-analysis', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const { profile_analysis } = request.body || {};
+
+      const privateInfo = typeof profile_analysis === 'string'
+        ? profile_analysis
+        : JSON.stringify(profile_analysis ?? {});
+
+      const updatedId = await dbService.updatePersonPrivateInfo(id, privateInfo);
+      return { id: updatedId, message: 'Profile analysis updated' };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to update profile analysis' });
+    }
+  });
+
   fastify.post('/people/analyze', async (request, reply) => {
     try {
         const { personId, currentData } = request.body;

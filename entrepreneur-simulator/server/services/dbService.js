@@ -439,6 +439,23 @@ const savePersonProfile = async (profileData) => {
   }
 };
 
+const updatePersonPrivateInfo = async (personId, privateInfo) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+
+  const { data, error } = await supabase
+    .from('people_profiles')
+    .update({
+      private_info: privateInfo,
+      updated_at: new Date(),
+    })
+    .eq('id', personId)
+    .select('id')
+    .single();
+
+  if (error) throw error;
+  return data.id;
+};
+
 const getPeopleProfiles = async (userId) => {
   if (!supabase) return [];
 
@@ -786,7 +803,7 @@ const uploadFile = async (fileBuffer, fileName, mimeType) => {
 
 module.exports = { 
   initDB, saveScene, getRecentScenes, saveSOP, getSOPs, deleteSOP, deleteSOPsByTitle,
-  savePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog,
+  savePersonProfile, updatePersonPrivateInfo, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog,
   saveReviewSession, getReviewSessions, getReviewSession, getUserStats,
   saveNPCRelation, getNPCRelations, updateNPCRelation, getAllUserData, uploadFile
 };

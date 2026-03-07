@@ -108,6 +108,16 @@ export const api = {
         return response.json();
     },
 
+    updatePersonProfileAnalysis: async (id: string, profileAnalysis: any) => {
+        const response = await fetch(`${API_BASE_URL}/people/${id}/profile-analysis`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ profile_analysis: profileAnalysis })
+        });
+        if (!response.ok) throw new Error('Failed to update profile analysis');
+        return response.json();
+    },
+
     analyzePerson: async (personId: string, currentData?: any) => {
         const response = await fetch(`${API_BASE_URL}/people/analyze`, {
             method: 'POST',

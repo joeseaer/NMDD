@@ -1,8 +1,44 @@
+require('dotenv').config();
 const OpenAI = require('openai');
-const openai = new OpenAI({
-  apiKey: '996ba513-fd2a-4004-a592-ace01df16cce',
-  baseURL: 'https://ark.cn-beijing.volces.com/api/v3'
-});
+
+let openaiClient = null;
+function getOpenAIClient() {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is missing');
+  }
+  openaiClient = new OpenAI({
+    apiKey,
+    baseURL: process.env.OPENAI_BASE_URL,
+  });
+  return openaiClient;
+}
+
+function getModel() {
+  const m = process.env.OPENAI_MODEL;
+  if (m && String(m).trim()) return String(m).trim();
+  const base = String(process.env.OPENAI_BASE_URL || '');
+  if (base.includes('dashscope.aliyuncs.com')) return 'qwen-plus';
+  return 'doubao-seed-2-0-pro-260215';
+}
+
+function extractJsonObject(text) {
+  if (!text || typeof text !== 'string') return null;
+  const cleaned = text.replace(/```json\n|```/g, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  const candidate = cleaned.slice(start, end + 1);
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+}
 
 const isMock = false;
 
@@ -54,12 +90,14 @@ const assessConversation = async (conversationLog, finalResult) => {
   `;
 
   try {
+    const openai = getOpenAIClient();
     const completion = await openai.chat.completions.create({
       messages: [{ role: "system", content: prompt }],
-      model: "doubao-seed-2-0-pro-260215",
+      model: getModel(),
     });
-    const content = completion.choices[0].message.content.replace(/```json\n|\n```/g, '').replace(/```/g, '').trim();
-    return JSON.parse(content);
+    const parsed = extractJsonObject(completion.choices?.[0]?.message?.content);
+    if (!parsed) throw new Error('Model output is not valid JSON');
+    return parsed;
   } catch (err) {
     console.error("Scoring Error:", err.message);
     // Fallback scoring to avoid hanging
