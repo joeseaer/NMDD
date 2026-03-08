@@ -108,6 +108,14 @@ export const api = {
         return response.json();
     },
 
+    deletePerson: async (id: string) => {
+        const response = await fetch(`${API_BASE_URL}/people/${id}`, {
+            method: 'DELETE'
+        });
+        if (!response.ok) throw new Error('Failed to delete person');
+        return response.json();
+    },
+
     updatePersonProfileAnalysis: async (id: string, profileAnalysis: any) => {
         const response = await fetch(`${API_BASE_URL}/people/${id}/profile-analysis`, {
             method: 'PATCH',
@@ -115,6 +123,16 @@ export const api = {
             body: JSON.stringify({ profile_analysis: profileAnalysis })
         });
         if (!response.ok) throw new Error('Failed to update profile analysis');
+        return response.json();
+    },
+
+    updatePersonReactionLibrary: async (id: string, reactionLibrary: any[]) => {
+        const response = await fetch(`${API_BASE_URL}/people/${id}/reaction-library`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reaction_library: reactionLibrary })
+        });
+        if (!response.ok) throw new Error('Failed to update reaction library');
         return response.json();
     },
 
@@ -155,6 +173,26 @@ export const api = {
             body: JSON.stringify({ personId })
         });
         if (!response.ok) throw new Error('Failed to get summary');
+        return response.json();
+    },
+
+    generatePracticalScenes: async (personId: string) => {
+        const response = await fetch(`${API_BASE_URL}/people/practical-scenes`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personId })
+        });
+        if (!response.ok) throw new Error('Failed to generate practical scenes');
+        return response.json();
+    },
+
+    ensureVerificationChecklist: async (personId: string, layerKey: string, force: boolean = false) => {
+        const response = await fetch(`${API_BASE_URL}/people/verification-checklist`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ personId, layerKey, force })
+        });
+        if (!response.ok) throw new Error('Failed to generate verification checklist');
         return response.json();
     },
 

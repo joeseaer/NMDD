@@ -1,6 +1,56 @@
 const sceneService = require('../services/sceneService');
 const chatService = require('../services/chatService');
 const dbService = require('../services/dbService');
+const crypto = require('crypto');
+
+const normalizeForHash = (v) => {
+  if (v === undefined || v === null) return '';
+  if (Array.isArray(v)) return v.map(normalizeForHash);
+  if (typeof v === 'object') {
+    const keys = Object.keys(v).sort();
+    const out = {};
+    keys.forEach((k) => {
+      out[k] = normalizeForHash(v[k]);
+    });
+    return out;
+  }
+  return String(v).trim().replace(/\s+/g, ' ');
+};
+
+const sha256 = (obj) => {
+  const normalized = normalizeForHash(obj);
+  return crypto.createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
+};
+
+const parsePrivateInfoToAnalysis = (privateInfo) => {
+  const empty = {
+    layer_1_core: { personality_traits: '', core_values: '', cognitive_mode: '', emotional_energy: '' },
+    layer_2_drive: { motivation_system: '', skills_capabilities: '', resource_network: '' },
+    layer_3_surface: { behavior_habits: '', life_trajectory: '', current_status_path: '' },
+    verification_checklists: {},
+  };
+
+  if (!privateInfo || typeof privateInfo !== 'string') return empty;
+  const raw = privateInfo.trim();
+  if (!raw) return empty;
+
+  try {
+    const obj = JSON.parse(raw);
+    if (obj && typeof obj === 'object') {
+      return {
+        layer_1_core: { ...empty.layer_1_core, ...(obj.layer_1_core || {}) },
+        layer_2_drive: { ...empty.layer_2_drive, ...(obj.layer_2_drive || {}) },
+        layer_3_surface: { ...empty.layer_3_surface, ...(obj.layer_3_surface || {}) },
+        verification_checklists: obj.verification_checklists && typeof obj.verification_checklists === 'object' ? obj.verification_checklists : {},
+      };
+    }
+  } catch {}
+
+  return {
+    ...empty,
+    layer_3_surface: { ...empty.layer_3_surface, current_status_path: raw },
+  };
+};
 
 function summarizeMindMapContent(content) {
   const text = typeof content === 'string' ? content : '';
@@ -155,7 +205,7 @@ async function routes(fastify, options) {
       return { id, message: "Person Profile Saved Successfully" };
     } catch (err) {
       request.log.error(err);
-      reply.code(500).send({ error: 'Failed to save Person Profile' });
+      reply.code(500).send({ error: 'Failed to save Person Profile', detail: err?.message });
     }
   });
 
@@ -171,20 +221,56 @@ async function routes(fastify, options) {
     }
   });
 
+  fastify.delete('/people/:id', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      await dbService.deletePersonProfile(id);
+      return { id, message: 'Person Profile Deleted Successfully' };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to delete Person Profile', detail: err?.message });
+    }
+  });
+
   fastify.patch('/people/:id/profile-analysis', async (request, reply) => {
     try {
       const { id } = request.params;
       const { profile_analysis } = request.body || {};
 
-      const privateInfo = typeof profile_analysis === 'string'
-        ? profile_analysis
-        : JSON.stringify(profile_analysis ?? {});
+      const incoming = typeof profile_analysis === 'string'
+        ? (() => { try { return JSON.parse(profile_analysis); } catch { return null; } })()
+        : (profile_analysis ?? null);
 
-      const updatedId = await dbService.updatePersonPrivateInfo(id, privateInfo);
+      const profiles = await dbService.getPeopleProfiles('user-1');
+      const current = profiles.find(p => p.id === id);
+      const base = current && typeof current.private_info === 'string'
+        ? (() => { try { return JSON.parse(current.private_info); } catch { return {}; } })()
+        : {};
+
+      const next = {
+        ...(base && typeof base === 'object' ? base : {}),
+        layer_1_core: incoming?.layer_1_core ?? base?.layer_1_core ?? {},
+        layer_2_drive: incoming?.layer_2_drive ?? base?.layer_2_drive ?? {},
+        layer_3_surface: incoming?.layer_3_surface ?? base?.layer_3_surface ?? {},
+      };
+
+      const updatedId = await dbService.updatePersonPrivateInfo(id, JSON.stringify(next));
       return { id: updatedId, message: 'Profile analysis updated' };
     } catch (err) {
       request.log.error(err);
       reply.code(500).send({ error: 'Failed to update profile analysis' });
+    }
+  });
+
+  fastify.patch('/people/:id/reaction-library', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const { reaction_library } = request.body || {};
+      const updatedId = await dbService.updatePersonReactionLibrary(id, reaction_library);
+      return { id: updatedId, message: 'Reaction library updated' };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to update reaction library' });
     }
   });
 
@@ -260,6 +346,82 @@ async function routes(fastify, options) {
           request.log.error(err);
           reply.code(500).send({ error: 'Summary generation failed' });
       }
+  });
+
+  // AI Practical Scene Library (Triggers & Pleasers)
+  fastify.post('/people/practical-scenes', async (request, reply) => {
+    try {
+      const { personId } = request.body;
+      const profiles = await dbService.getPeopleProfiles('user-1');
+      const profile = profiles.find(p => p.id === personId);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+
+      const logs = await dbService.getInteractionLogs(personId);
+      const result = await chatService.generatePracticalSceneLibrary({ profile, logs });
+
+      await dbService.updatePersonTriggersPleasers(personId, result.triggers, result.pleasers);
+
+      return { triggers: result.triggers, pleasers: result.pleasers };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to generate practical scenes' });
+    }
+  });
+
+  // AI Verification Checklist (Iceberg layer)
+  fastify.post('/people/verification-checklist', async (request, reply) => {
+    try {
+      const { personId, layerKey, force } = request.body || {};
+      if (!personId || !layerKey) return reply.code(400).send({ error: 'Missing personId or layerKey' });
+
+      const profiles = await dbService.getPeopleProfiles('user-1');
+      const profile = profiles.find(p => p.id === personId);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+
+      const analysis = parsePrivateInfoToAnalysis(profile.private_info);
+      const layerData = analysis[layerKey];
+      if (!layerData || typeof layerData !== 'object') return reply.code(400).send({ error: 'Invalid layerKey' });
+
+      const layerTitleMap = {
+        layer_1_core: '第一层：底层操作系统',
+        layer_2_drive: '第二层：中间驱动层',
+        layer_3_surface: '第三层：表层表现层',
+      };
+      const layerTitle = layerTitleMap[layerKey] || layerKey;
+
+      const currentHash = sha256(layerData);
+      const existing = analysis.verification_checklists?.[layerKey];
+      if (!force && existing && existing.hash === currentHash && Array.isArray(existing.items)) {
+        return { items: existing.items, hash: existing.hash, reused: true };
+      }
+
+      const logs = await dbService.getInteractionLogs(personId);
+      const result = await chatService.generateVerificationChecklist({
+        profile,
+        layerKey,
+        layerTitle,
+        layerData,
+        logs,
+      });
+
+      const next = {
+        ...analysis,
+        verification_checklists: {
+          ...(analysis.verification_checklists || {}),
+          [layerKey]: {
+            hash: currentHash,
+            items: Array.isArray(result.items) ? result.items : [],
+            generated_at: new Date().toISOString(),
+          },
+        },
+      };
+
+      await dbService.updatePersonPrivateInfo(personId, JSON.stringify(next));
+      return { items: next.verification_checklists[layerKey].items, hash: currentHash, reused: false };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to generate verification checklist', detail: err?.message });
+    }
   });
 
   // Interaction Logs

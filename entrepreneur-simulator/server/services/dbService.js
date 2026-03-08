@@ -367,6 +367,30 @@ const deleteSOPsByTitle = async (title) => {
 const savePersonProfile = async (profileData) => {
   if (!supabase) throw new Error("Database connection not established. Check environment variables.");
 
+  const normalizeDate = (v) => {
+    if (v === undefined || v === null) return null;
+    if (typeof v === 'string') {
+      const s = v.trim();
+      return s ? s : null;
+    }
+    return v;
+  };
+
+  const normalizeBasicInfoExtra = (v) => {
+    if (!Array.isArray(v)) return [];
+    return v
+      .map((it) => {
+        if (!it || typeof it !== 'object') return null;
+        return {
+          id: typeof it.id === 'string' ? it.id : undefined,
+          icon: typeof it.icon === 'string' ? it.icon : undefined,
+          label: typeof it.label === 'string' ? it.label : '',
+          value: typeof it.value === 'string' ? it.value : '',
+        };
+      })
+      .filter((it) => it && (it.label.trim() || it.value.trim()));
+  };
+
   if (profileData.id) {
       // Update existing
       const { data, error } = await supabase
@@ -375,6 +399,7 @@ const savePersonProfile = async (profileData) => {
             name: profileData.name,
             identity: profileData.identity,
             field: profileData.field,
+            hometown: profileData.hometown,
             tags: profileData.tags,
             relationship_strength: profileData.relationship_strength,
             disc_type: profileData.disc_type,
@@ -382,18 +407,20 @@ const savePersonProfile = async (profileData) => {
             ai_analysis: profileData.ai_analysis,
             interaction_tips: profileData.interaction_tips,
             contact_info: profileData.contact_info,
-            first_met_date: profileData.first_met_date,
+            first_met_date: normalizeDate(profileData.first_met_date),
             first_met_scene: profileData.first_met_scene,
             current_mood: profileData.current_mood,
             triggers: profileData.triggers,
             pleasers: profileData.pleasers,
             private_info: profileData.private_info,
-            birthday: profileData.birthday,
+            birthday: normalizeDate(profileData.birthday),
             avatar_real: profileData.avatar_real,
             avatar_ai: profileData.avatar_ai,
             avatar_type: profileData.avatar_type,
             related_people: profileData.related_people,
             category: profileData.category, // Added category
+            basic_info_extra: normalizeBasicInfoExtra(profileData.basic_info_extra),
+            reaction_library: Array.isArray(profileData.reaction_library) ? profileData.reaction_library : [],
             updated_at: new Date()
         })
         .eq('id', profileData.id)
@@ -411,6 +438,7 @@ const savePersonProfile = async (profileData) => {
             name: profileData.name,
             identity: profileData.identity,
             field: profileData.field,
+            hometown: profileData.hometown,
             tags: profileData.tags,
             relationship_strength: profileData.relationship_strength,
             disc_type: profileData.disc_type,
@@ -418,18 +446,20 @@ const savePersonProfile = async (profileData) => {
             ai_analysis: profileData.ai_analysis,
             interaction_tips: profileData.interaction_tips,
             contact_info: profileData.contact_info,
-            first_met_date: profileData.first_met_date,
+            first_met_date: normalizeDate(profileData.first_met_date),
             first_met_scene: profileData.first_met_scene,
             current_mood: profileData.current_mood,
             triggers: profileData.triggers,
             pleasers: profileData.pleasers,
             private_info: profileData.private_info,
-            birthday: profileData.birthday,
+            birthday: normalizeDate(profileData.birthday),
             avatar_real: profileData.avatar_real,
             avatar_ai: profileData.avatar_ai,
             avatar_type: profileData.avatar_type,
             related_people: profileData.related_people,
-            category: profileData.category // Added category
+            category: profileData.category, // Added category
+            basic_info_extra: normalizeBasicInfoExtra(profileData.basic_info_extra),
+            reaction_library: Array.isArray(profileData.reaction_library) ? profileData.reaction_library : []
         }])
         .select('id')
         .single();
@@ -454,6 +484,51 @@ const updatePersonPrivateInfo = async (personId, privateInfo) => {
 
   if (error) throw error;
   return data.id;
+};
+
+const updatePersonTriggersPleasers = async (personId, triggers, pleasers) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+
+  const { data, error } = await supabase
+    .from('people_profiles')
+    .update({
+      triggers: Array.isArray(triggers) ? triggers : [],
+      pleasers: Array.isArray(pleasers) ? pleasers : [],
+      updated_at: new Date(),
+    })
+    .eq('id', personId)
+    .select('id')
+    .single();
+
+  if (error) throw error;
+  return data.id;
+};
+
+const updatePersonReactionLibrary = async (personId, reactionLibrary) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+
+  const { data, error } = await supabase
+    .from('people_profiles')
+    .update({
+      reaction_library: Array.isArray(reactionLibrary) ? reactionLibrary : [],
+      updated_at: new Date(),
+    })
+    .eq('id', personId)
+    .select('id')
+    .single();
+
+  if (error) throw error;
+  return data.id;
+};
+
+const deletePersonProfile = async (personId) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+  const { error } = await supabase
+    .from('people_profiles')
+    .delete()
+    .eq('id', personId);
+  if (error) throw error;
+  return personId;
 };
 
 const getPeopleProfiles = async (userId) => {
@@ -803,7 +878,7 @@ const uploadFile = async (fileBuffer, fileName, mimeType) => {
 
 module.exports = { 
   initDB, saveScene, getRecentScenes, saveSOP, getSOPs, deleteSOP, deleteSOPsByTitle,
-  savePersonProfile, updatePersonPrivateInfo, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog,
+  savePersonProfile, updatePersonPrivateInfo, updatePersonTriggersPleasers, updatePersonReactionLibrary, deletePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog,
   saveReviewSession, getReviewSessions, getReviewSession, getUserStats,
   saveNPCRelation, getNPCRelations, updateNPCRelation, getAllUserData, uploadFile
 };

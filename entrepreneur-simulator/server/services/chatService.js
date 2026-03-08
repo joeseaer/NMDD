@@ -275,6 +275,146 @@ async function generateScript({ profile, logs, intent, context }) {
     }
 }
 
+async function generatePracticalSceneLibrary({ profile, logs }) {
+  if (isMock) {
+    return {
+      triggers: [
+        '在TA熬夜赶工时直接打电话闲聊（会被视为打扰）',
+        '当众夸奖TA的天赋（更希望被认可努力）',
+      ],
+      pleasers: [
+        '分享一篇与TA研究方向无关但逻辑精妙的文章（满足智力愉悦）',
+        '在TA比价时帮TA找到优惠券或给出最优确认（提供确定性）',
+        '深夜发一张路边摊“冒烟”的照片不加文字（低压力陪伴感）',
+      ],
+    };
+  }
+
+  const logsText = logs.slice(0, 8).map(l =>
+    `[${l.event_date}] ${l.event_context} - 我: ${l.my_behavior} -> 他: ${l.their_reaction}`
+  ).join('\n');
+
+  const icebergText = formatIcebergPrivateInfo(profile.private_info);
+
+  const prompt = `
+你是一个“人际关系实战策略”专家。请基于人物画像与互动记录，生成一份【实战场景库】。
+
+输出要求：
+1) 必须输出严格 JSON（不要 markdown/不要多余文字）。
+2) triggers：3-6 条“雷区触发场景”，每条是具体可执行的场景句子，包含触发条件 + 你为什么认为是雷区（用括号简短解释）。
+3) pleasers：3-6 条“爽点触发场景”，每条是具体可执行的场景句子，包含触发动作 + 你为什么认为会爽（用括号简短解释）。
+4) 句子要贴近日常沟通，不要抽象标签，不要建议“送大礼/砸钱”这类泛化方案。
+
+人物信息：
+姓名：${profile.name}
+身份：${profile.identity}
+领域：${profile.field}
+性格关键词：${profile.disc_type} / ${profile.mbti_type}
+性格分析：${profile.ai_analysis || '暂无'}
+相处建议：${profile.interaction_tips || '暂无'}
+
+人物深度分析档案（三层冰山）：
+${icebergText}
+
+最近互动（参考）：
+${logsText || '无'}
+
+请输出：
+{
+  "triggers": ["..."],
+  "pleasers": ["..."]
+}
+`;
+
+  try {
+    const openai = getOpenAIClient();
+    const completion = await openai.chat.completions.create({
+      messages: [{ role: 'system', content: prompt }],
+      model: getModel(),
+    });
+
+    const parsed = extractJsonObject(completion.choices?.[0]?.message?.content);
+    if (!parsed) throw new Error('Model output is not valid JSON');
+
+    const triggers = Array.isArray(parsed.triggers) ? parsed.triggers.filter(Boolean).map(String) : [];
+    const pleasers = Array.isArray(parsed.pleasers) ? parsed.pleasers.filter(Boolean).map(String) : [];
+
+    return {
+      triggers: triggers.slice(0, 6),
+      pleasers: pleasers.slice(0, 6),
+    };
+  } catch (err) {
+    console.error('Practical Scene Library Error:', err);
+    return {
+      triggers: [],
+      pleasers: [],
+    };
+  }
+}
+
+async function generateVerificationChecklist({ profile, layerKey, layerTitle, layerData, logs }) {
+  if (isMock) {
+    return {
+      items: [
+        '他所谓的“家里沟通不多”是完全不联系，还是只报喜不报忧？（下次闲聊可试探）',
+        '“报复性运动”通常持续几天？是否会受伤？（观察频率与恢复方式）',
+      ],
+    };
+  }
+
+  const logsText = (logs || []).slice(0, 6).map(l =>
+    `[${l.event_date}] ${l.event_context} - 我: ${l.my_behavior} -> 他: ${l.their_reaction}`
+  ).join('\n');
+
+  const icebergText = formatIcebergPrivateInfo(profile.private_info);
+  const layerJson = JSON.stringify(layerData || {}, null, 2);
+
+  const prompt = `
+你是一个人物洞察访谈专家。你将看到人物画像与“三层冰山”资料。你的任务是为指定层级生成【待验证清单】。
+
+规则：
+1) 只输出严格 JSON，不要 markdown，不要多余文字。
+2) items 为 2-6 条“可验证的问题/假设”，每条必须是具体、可通过后续闲聊/观察/一次互动验证的内容。
+3) 每条建议以“问题？（如何验证/下次怎么试探）”的形式，括号内尽量短。
+4) 不要重复已有明确结论，不要空泛心理学名词堆砌。
+
+人物信息：
+姓名：${profile.name}
+身份：${profile.identity}
+性格关键词：${profile.disc_type} / ${profile.mbti_type}
+
+人物深度分析档案（三层冰山，供参考）：
+${icebergText}
+
+当前层级：${layerTitle} (${layerKey})
+当前层级已录入内容（JSON）：
+${layerJson}
+
+最近互动（参考，可为空）：
+${logsText || '无'}
+
+请输出：
+{
+  "items": ["...", "..."]
+}
+`;
+
+  try {
+    const openai = getOpenAIClient();
+    const completion = await openai.chat.completions.create({
+      messages: [{ role: 'system', content: prompt }],
+      model: getModel(),
+    });
+    const parsed = extractJsonObject(completion.choices?.[0]?.message?.content);
+    if (!parsed) throw new Error('Model output is not valid JSON');
+    const items = Array.isArray(parsed.items) ? parsed.items.filter(Boolean).map(String) : [];
+    return { items: items.slice(0, 6) };
+  } catch (err) {
+    console.error('Verification Checklist Error:', err);
+    return { items: [] };
+  }
+}
+
 async function generateInteractionReview({ profile, log }) {
     if (isMock) {
         return {
@@ -353,7 +493,7 @@ async function analyzeSOPContent(content) {
     }
 }
 
-module.exports = { processAssistantMessage, analyzePerson, generateScript, generateInteractionReview, consultPerson, generateSummary, processReviewInteraction, generateSOPFromReview, analyzeSOPContent };
+module.exports = { processAssistantMessage, analyzePerson, generateScript, generateInteractionReview, consultPerson, generateSummary, generatePracticalSceneLibrary, generateVerificationChecklist, processReviewInteraction, generateSOPFromReview, analyzeSOPContent };
 
 async function processReviewInteraction({ userId, sessionId, userInput, history }) {
     if (isMock) {

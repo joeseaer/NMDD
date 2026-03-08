@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Plus, User, Calendar, MessageSquare, Brain, X, Save, Edit2, Phone, MapPin, Zap, ThumbsUp, Activity, AlertCircle, Lock, Cake, Upload, Users, Clock, Eye, EyeOff, Briefcase, GraduationCap, Coffee, Compass, Crown, ChevronDown, ChevronUp, Bot, ArrowLeft, Check } from 'lucide-react';
+import { Search, Plus, User, Calendar, MessageSquare, Brain, X, Save, Edit2, Phone, MapPin, Zap, ThumbsUp, Activity, AlertCircle, Lock, Cake, Upload, Users, Clock, Eye, EyeOff, Briefcase, GraduationCap, Coffee, Compass, Crown, ChevronDown, ChevronUp, Bot, ArrowLeft, Check, Trash2 } from 'lucide-react';
 import { api } from '../services/api';
 
 // --- Constants ---
@@ -87,6 +87,59 @@ export default function PersonalityManager() {
   const [consultModalOpen, setConsultModalOpen] = useState(false);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [practicalScenesLoading, setPracticalScenesLoading] = useState(false);
+
+  const BASIC_EXTRA_ICON_KEYS = useMemo(() => ([
+    'MapPin',
+    'MessageSquare',
+    'Calendar',
+    'Phone',
+    'Coffee',
+    'Briefcase',
+    'GraduationCap',
+    'Compass',
+    'Crown',
+    'Activity',
+    'Zap',
+    'ThumbsUp',
+  ]), []);
+
+  const renderBasicExtraIcon = (key: string | undefined) => {
+    const k = String(key || '').trim();
+    const props = { className: 'w-4 h-4 text-gray-400' };
+    switch (k) {
+      case 'MapPin': return <MapPin {...props} />;
+      case 'MessageSquare': return <MessageSquare {...props} />;
+      case 'Calendar': return <Calendar {...props} />;
+      case 'Phone': return <Phone {...props} />;
+      case 'Coffee': return <Coffee {...props} />;
+      case 'Briefcase': return <Briefcase {...props} />;
+      case 'GraduationCap': return <GraduationCap {...props} />;
+      case 'Compass': return <Compass {...props} />;
+      case 'Crown': return <Crown {...props} />;
+      case 'Activity': return <Activity {...props} />;
+      case 'Zap': return <Zap {...props} />;
+      case 'ThumbsUp': return <ThumbsUp {...props} />;
+      default: return <MapPin {...props} />;
+    }
+  };
+
+  const pickRandomBasicExtraIcon = () => {
+    const i = Math.floor(Math.random() * BASIC_EXTRA_ICON_KEYS.length);
+    return BASIC_EXTRA_ICON_KEYS[i] || 'MapPin';
+  };
+
+  const createBasicExtraItem = () => {
+    const id = (globalThis.crypto && 'randomUUID' in globalThis.crypto)
+      ? (globalThis.crypto as any).randomUUID()
+      : `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    return { id, icon: pickRandomBasicExtraIcon(), label: '', value: '' };
+  };
+
+  const [reactionLibraryDraft, setReactionLibraryDraft] = useState<any[]>([]);
+  const [reactionSaving, setReactionSaving] = useState(false);
+  const [reactionSavedAt, setReactionSavedAt] = useState<number | null>(null);
+  const reactionSaveTimerRef = useRef<any>(null);
 
   const defaultProfileAnalysis = useMemo(() => ({
     layer_1_core: {
@@ -107,48 +160,183 @@ export default function PersonalityManager() {
     },
   }), []);
 
-  const parseAnalysis = (privateInfo: any) => {
-    if (!privateInfo || typeof privateInfo !== 'string') return defaultProfileAnalysis;
-    const raw = privateInfo.trim();
-    if (!raw) return defaultProfileAnalysis;
-    try {
-      const obj = JSON.parse(raw);
-      if (obj && typeof obj === 'object' && (obj.layer_1_core || obj.layer_2_drive || obj.layer_3_surface)) {
-        return {
-          layer_1_core: { ...defaultProfileAnalysis.layer_1_core, ...(obj.layer_1_core || {}) },
-          layer_2_drive: { ...defaultProfileAnalysis.layer_2_drive, ...(obj.layer_2_drive || {}) },
-          layer_3_surface: { ...defaultProfileAnalysis.layer_3_surface, ...(obj.layer_3_surface || {}) },
-        };
-      }
-    } catch {}
-    return {
-      ...defaultProfileAnalysis,
-      layer_3_surface: {
-        ...defaultProfileAnalysis.layer_3_surface,
-        current_status_path: raw,
-      },
-    };
-  };
-
   const [analysisDraft, setAnalysisDraft] = useState<any>(defaultProfileAnalysis);
   const [savedAt, setSavedAt] = useState<Record<string, number>>({});
   const [savingField, setSavingField] = useState<string | null>(null);
   const saveTimersRef = useRef<Record<string, any>>({});
   const latestAnalysisRef = useRef<any>(defaultProfileAnalysis);
   const [sectionOpen, setSectionOpen] = useState({ layer1: true, layer2: true, layer3: true });
+  const [verificationChecklists, setVerificationChecklists] = useState<any>({});
+  const [verificationLoading, setVerificationLoading] = useState<Record<string, boolean>>({});
+  const verificationTimersRef = useRef<Record<string, any>>({});
+  const checklistInitRef = useRef<string | null>(null);
 
   useEffect(() => {
     latestAnalysisRef.current = analysisDraft;
   }, [analysisDraft]);
 
+  const parsePrivateInfo = (privateInfo: any) => {
+    if (!privateInfo || typeof privateInfo !== 'string') return { analysis: defaultProfileAnalysis, verification: {} };
+    const raw = privateInfo.trim();
+    if (!raw) return { analysis: defaultProfileAnalysis, verification: {} };
+    try {
+      const obj = JSON.parse(raw);
+      if (obj && typeof obj === 'object') {
+        return {
+          analysis: {
+            layer_1_core: { ...defaultProfileAnalysis.layer_1_core, ...(obj.layer_1_core || {}) },
+            layer_2_drive: { ...defaultProfileAnalysis.layer_2_drive, ...(obj.layer_2_drive || {}) },
+            layer_3_surface: { ...defaultProfileAnalysis.layer_3_surface, ...(obj.layer_3_surface || {}) },
+          },
+          verification: obj.verification_checklists && typeof obj.verification_checklists === 'object' ? obj.verification_checklists : {},
+        };
+      }
+    } catch {}
+    return {
+      analysis: {
+        ...defaultProfileAnalysis,
+        layer_3_surface: { ...defaultProfileAnalysis.layer_3_surface, current_status_path: raw },
+      },
+      verification: {},
+    };
+  };
+
+  const hasAnyText = (obj: any) => {
+    if (!obj || typeof obj !== 'object') return false;
+    return Object.values(obj).some((v: any) => typeof v === 'string' ? v.trim() : false);
+  };
+
+  const scheduleEnsureChecklist = (layerKey: string, force: boolean = false) => {
+    if (!selectedPerson) return;
+    const analysis = latestAnalysisRef.current;
+    if (!hasAnyText(analysis?.[layerKey])) return;
+    if (verificationTimersRef.current[layerKey]) clearTimeout(verificationTimersRef.current[layerKey]);
+    verificationTimersRef.current[layerKey] = setTimeout(async () => {
+      setVerificationLoading((prev) => ({ ...prev, [layerKey]: true }));
+      try {
+        const res = await api.ensureVerificationChecklist(selectedPerson.id, layerKey, force);
+        setVerificationChecklists((prev: any) => ({
+          ...(prev || {}),
+          [layerKey]: {
+            ...(prev?.[layerKey] || {}),
+            items: Array.isArray(res?.items) ? res.items : [],
+            hash: res?.hash,
+            generated_at: new Date().toISOString(),
+          },
+        }));
+
+        setSelectedPerson((p: any) => {
+          if (!p || p.id !== selectedPerson.id) return p;
+          try {
+            const base = p.private_info && typeof p.private_info === 'string' ? JSON.parse(p.private_info) : {};
+            const next = {
+              ...(base && typeof base === 'object' ? base : {}),
+              verification_checklists: {
+                ...((base && typeof base === 'object' && base.verification_checklists) ? base.verification_checklists : {}),
+                [layerKey]: { hash: res?.hash, items: Array.isArray(res?.items) ? res.items : [], generated_at: new Date().toISOString() },
+              },
+            };
+            return { ...p, private_info: JSON.stringify(next) };
+          } catch {
+            return p;
+          }
+        });
+      } catch (e) {
+        console.error('Failed to ensure verification checklist', e);
+      } finally {
+        setVerificationLoading((prev) => ({ ...prev, [layerKey]: false }));
+      }
+    }, 800);
+  };
+
   useEffect(() => {
     if (!selectedPerson) return;
-    const parsed = parseAnalysis(selectedPerson.private_info);
-    setAnalysisDraft(parsed);
-    latestAnalysisRef.current = parsed;
+    const parsed = parsePrivateInfo(selectedPerson.private_info);
+    setAnalysisDraft(parsed.analysis);
+    latestAnalysisRef.current = parsed.analysis;
+    setVerificationChecklists(parsed.verification);
+    checklistInitRef.current = null;
     setSavedAt({});
     setSavingField(null);
+    setReactionLibraryDraft(Array.isArray(selectedPerson.reaction_library) ? selectedPerson.reaction_library : []);
+    setReactionSaving(false);
+    setReactionSavedAt(null);
   }, [selectedPerson?.id]);
+
+  useEffect(() => {
+    if (!selectedPerson) return;
+    if (checklistInitRef.current === selectedPerson.id) return;
+    checklistInitRef.current = selectedPerson.id;
+    ['layer_1_core', 'layer_2_drive', 'layer_3_surface'].forEach((layerKey) => {
+      const existing = verificationChecklists?.[layerKey];
+      if (existing && Array.isArray(existing.items) && existing.items.length > 0) return;
+      scheduleEnsureChecklist(layerKey, false);
+    });
+  }, [selectedPerson?.id]);
+
+  const normalizeReactionLibrary = (items: any[]) => {
+    if (!Array.isArray(items)) return [];
+    return items
+      .map((it) => {
+        if (!it || typeof it !== 'object') return { scene: '', reaction: '' };
+        return {
+          scene: typeof it.scene === 'string' ? it.scene : '',
+          reaction: typeof it.reaction === 'string' ? it.reaction : '',
+        };
+      })
+      .filter((it) => it.scene.trim() || it.reaction.trim());
+  };
+
+  const scheduleSaveReactionLibrary = (next: any[]) => {
+    if (!selectedPerson) return;
+    if (reactionSaveTimerRef.current) clearTimeout(reactionSaveTimerRef.current);
+    reactionSaveTimerRef.current = setTimeout(async () => {
+      setReactionSaving(true);
+      try {
+        const normalized = normalizeReactionLibrary(next);
+        await api.updatePersonReactionLibrary(selectedPerson.id, normalized);
+        const updated = { ...selectedPerson, reaction_library: normalized };
+        setSelectedPerson(updated);
+        setPeople((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+        setEditForm((prev: any) => (prev && prev.id === updated.id ? { ...prev, reaction_library: normalized } : prev));
+        const now = Date.now();
+        setReactionSavedAt(now);
+        setTimeout(() => {
+          setReactionSavedAt((cur) => (cur === now ? null : cur));
+        }, 2000);
+      } catch (err) {
+        console.error('Failed to save reaction library', err);
+      } finally {
+        setReactionSaving(false);
+      }
+    }, 1500);
+  };
+
+  const updateReactionItem = (index: number, patch: any) => {
+    setReactionLibraryDraft((prev) => {
+      const next = Array.isArray(prev) ? [...prev] : [];
+      const current = next[index] && typeof next[index] === 'object' ? next[index] : { scene: '', reaction: '' };
+      next[index] = { ...current, ...patch };
+      scheduleSaveReactionLibrary(next);
+      return next;
+    });
+  };
+
+  const addReactionItem = () => {
+    setReactionLibraryDraft((prev) => {
+      const next = Array.isArray(prev) ? [...prev, { scene: '', reaction: '' }] : [{ scene: '', reaction: '' }];
+      scheduleSaveReactionLibrary(next);
+      return next;
+    });
+  };
+
+  const removeReactionItem = (index: number) => {
+    setReactionLibraryDraft((prev) => {
+      const next = Array.isArray(prev) ? prev.filter((_, i) => i !== index) : [];
+      scheduleSaveReactionLibrary(next);
+      return next;
+    });
+  };
 
   const autosaveAnalysis = async (next: any, fieldKey: string) => {
     if (!selectedPerson) return;
@@ -164,10 +352,13 @@ export default function PersonalityManager() {
           return rest;
         });
       }, 2000);
-      const json = JSON.stringify(next);
+      const json = JSON.stringify({ ...next, verification_checklists: verificationChecklists || {} });
       setSelectedPerson((p: any) => (p && p.id === selectedPerson.id ? { ...p, private_info: json } : p));
       setPeople((prev) => prev.map((p) => (p.id === selectedPerson.id ? { ...p, private_info: json } : p)));
       setEditForm((prev: any) => (prev && prev.id === selectedPerson.id ? { ...prev, private_info: json } : prev));
+
+      const layerKey = String(fieldKey || '').split('.')[0];
+      if (layerKey) scheduleEnsureChecklist(layerKey, false);
     } catch (e) {
       console.error('Failed to autosave profile analysis', e);
     } finally {
@@ -217,6 +408,26 @@ export default function PersonalityManager() {
       } finally {
           setSummaryLoading(false);
       }
+  };
+
+  const handleGeneratePracticalScenes = async () => {
+    if (!selectedPerson) return;
+    setPracticalScenesLoading(true);
+    try {
+      const result = await api.generatePracticalScenes(selectedPerson.id);
+      const triggers = Array.isArray(result?.triggers) ? result.triggers : [];
+      const pleasers = Array.isArray(result?.pleasers) ? result.pleasers : [];
+
+      const updated = { ...selectedPerson, triggers, pleasers };
+      setSelectedPerson(updated);
+      setPeople(prev => prev.map(p => p.id === updated.id ? updated : p));
+      setEditForm((prev: any) => (prev && prev.id === updated.id ? { ...prev, triggers, pleasers } : prev));
+    } catch (err) {
+      console.error('Failed to generate practical scenes', err);
+      alert('生成失败，请稍后重试');
+    } finally {
+      setPracticalScenesLoading(false);
+    }
   };
 
   const fetchPeople = async () => {
@@ -354,7 +565,12 @@ export default function PersonalityManager() {
             ? editForm.tags.split(/[,，\s]+/).filter(Boolean) 
             : (Array.isArray(editForm.tags) ? editForm.tags : []);
           
-          const updatedData = { ...editForm, tags };
+          const updatedData = {
+            ...editForm,
+            tags,
+            birthday: editForm.birthday ? editForm.birthday : null,
+            first_met_date: editForm.first_met_date ? editForm.first_met_date : null,
+          };
           await api.updatePerson(selectedPerson.id, updatedData);
           
           setSelectedPerson(updatedData);
@@ -365,6 +581,22 @@ export default function PersonalityManager() {
           alert("更新失败");
       }
   }
+
+  const handleDeletePerson = async () => {
+    if (!selectedPerson) return;
+    const ok = window.confirm(`确认删除人物「${selectedPerson.name || ''}」？该人物的互动记录也会一并删除。`);
+    if (!ok) return;
+    try {
+      await api.deletePerson(selectedPerson.id);
+      setPeople((prev) => prev.filter((p: any) => p.id !== selectedPerson.id));
+      setSelectedPerson(null);
+      setEditForm(null);
+      setIsEditing(false);
+    } catch (e) {
+      console.error('Delete failed', e);
+      alert('删除失败，请稍后重试');
+    }
+  };
 
   const handleAIAnalyze = async () => {
       if (!selectedPerson) return;
@@ -635,6 +867,9 @@ export default function PersonalityManager() {
                                 <button onClick={() => { setIsEditing(true); setEditForm(selectedPerson); }} className="p-1 text-gray-400 hover:text-primary transition-colors" title="编辑档案">
                                     <Edit2 className="w-4 h-4" />
                                 </button>
+                                <button onClick={handleDeletePerson} className="p-1 text-gray-400 hover:text-red-600 transition-colors" title="删除人物">
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
                             </div>
                         </div>
                 <p className="text-gray-500 mb-2">
@@ -655,6 +890,7 @@ export default function PersonalityManager() {
                       <div className="flex space-x-2 mb-4">
                           <button onClick={() => setIsEditing(false)} className="px-3 py-1 text-sm text-gray-500 hover:text-gray-700">取消</button>
                           <button onClick={handleUpdateProfile} className="px-3 py-1 text-sm bg-primary text-white rounded-md hover:bg-primary/90">保存</button>
+                          <button onClick={handleDeletePerson} className="px-3 py-1 text-sm bg-red-600 text-white rounded-md hover:bg-red-700">删除</button>
                       </div>
                   )}
                 
@@ -852,41 +1088,109 @@ export default function PersonalityManager() {
                     )}
                   </div>
 
-                  {/* Triggers & Pleasers */}
-                  <div className="pt-4 border-t border-purple-200 grid grid-cols-2 gap-4">
-                      <div>
-                          <h4 className="text-sm font-bold text-red-700 mb-2 flex items-center"><AlertCircle className="w-3 h-3 mr-1"/> 雷区 (Triggers)</h4>
-                          {isEditing && editForm ? (
-                              <textarea 
-                                  value={Array.isArray(editForm.triggers) ? editForm.triggers.join('\n') : (editForm.triggers || '')} 
-                                  onChange={e => setEditForm({...editForm, triggers: e.target.value.split('\n')})}
-                                  className="w-full h-20 text-xs bg-white/50 border border-red-100 rounded p-2 focus:outline-none focus:border-red-300 resize-none"
-                                  placeholder="每行一个..."
-                              />
+                  <div className="mt-4 pt-4 border-t border-purple-200">
+                      <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-bold text-gray-900">高频场景反应库</h4>
+                          <div className="flex items-center gap-2">
+                              {reactionSavedAt && <Check className="w-4 h-4 text-green-600" />}
+                              {reactionSaving && <div className="text-[10px] text-gray-400">保存中…</div>}
+                              <button
+                                  onClick={addReactionItem}
+                                  className="text-xs px-3 py-1.5 rounded-md bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
+                              >
+                                  + 添加
+                              </button>
+                          </div>
+                      </div>
+                      <div className="text-xs text-gray-600 leading-relaxed mb-3">
+                          用“场景 → 反应”的形式记录；遇到具体情况时直接查这里，比宏观性格分析更好用。
+                      </div>
+
+                      <div className="space-y-3">
+                          {(reactionLibraryDraft || []).length > 0 ? (
+                              reactionLibraryDraft.map((item: any, idx: number) => (
+                                  <div key={idx} className="bg-white/60 border border-gray-200 rounded-lg p-3">
+                                      <div className="flex items-center justify-between mb-2">
+                                          <div className="text-xs font-bold text-gray-700">场景 → 反应</div>
+                                          <button
+                                              onClick={() => removeReactionItem(idx)}
+                                              className="text-gray-400 hover:text-red-500"
+                                              title="删除"
+                                          >
+                                              <X className="w-4 h-4" />
+                                          </button>
+                                      </div>
+                                      <input
+                                          value={typeof item?.scene === 'string' ? item.scene : ''}
+                                          onChange={(e) => updateReactionItem(idx, { scene: e.target.value })}
+                                          className="w-full text-sm bg-white border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-200"
+                                          placeholder="场景：例如 被质疑学术观点时"
+                                      />
+                                      <div className="mt-2 text-xs text-gray-400">→</div>
+                                      <textarea
+                                          rows={3}
+                                          value={typeof item?.reaction === 'string' ? item.reaction : ''}
+                                          onChange={(e) => updateReactionItem(idx, { reaction: e.target.value })}
+                                          className="mt-2 w-full text-sm bg-white border border-gray-200 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-purple-200 resize-none"
+                                          placeholder="反应：例如 沉默不语，事后发邮件长篇大论解释（防御机制：回避正面冲突，重视逻辑自洽）"
+                                      />
+                                  </div>
+                              ))
                           ) : (
-                              <ul className="list-disc list-inside text-xs text-purple-800 space-y-1">
-                                  {(selectedPerson.triggers || []).length > 0 ? (
-                                      selectedPerson.triggers.map((t: string, i: number) => <li key={i}>{t}</li>)
-                                  ) : <span className="text-gray-400 italic">暂无记录</span>}
-                              </ul>
+                              <div className="text-xs text-gray-400 italic">暂无记录，点击“+ 添加”开始记录。</div>
                           )}
                       </div>
-                      <div>
-                          <h4 className="text-sm font-bold text-green-700 mb-2 flex items-center"><ThumbsUp className="w-3 h-3 mr-1"/> 爽点 (Pleasers)</h4>
-                          {isEditing && editForm ? (
-                              <textarea 
-                                  value={Array.isArray(editForm.pleasers) ? editForm.pleasers.join('\n') : (editForm.pleasers || '')} 
-                                  onChange={e => setEditForm({...editForm, pleasers: e.target.value.split('\n')})}
-                                  className="w-full h-20 text-xs bg-white/50 border border-green-100 rounded p-2 focus:outline-none focus:border-green-300 resize-none"
-                                  placeholder="每行一个..."
-                              />
-                          ) : (
-                              <ul className="list-disc list-inside text-xs text-purple-800 space-y-1">
-                                  {(selectedPerson.pleasers || []).length > 0 ? (
-                                      selectedPerson.pleasers.map((t: string, i: number) => <li key={i}>{t}</li>)
-                                  ) : <span className="text-gray-400 italic">暂无记录</span>}
-                              </ul>
-                          )}
+                  </div>
+
+                  {/* Practical Scene Library */}
+                  <div className="pt-4 border-t border-purple-200">
+                      <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-bold text-gray-900 flex items-center">
+                              <Zap className="w-4 h-4 mr-2 text-purple-600" /> 实战场景库
+                          </h4>
+                          <button
+                              onClick={handleGeneratePracticalScenes}
+                              disabled={practicalScenesLoading}
+                              className="text-xs px-3 py-1.5 rounded-md bg-purple-600 text-white hover:bg-purple-700 disabled:opacity-60 disabled:cursor-not-allowed flex items-center"
+                          >
+                              <Bot className="w-3 h-3 mr-1" /> {practicalScenesLoading ? '生成中…' : 'AI 生成/更新'}
+                          </button>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="bg-white/60 border border-red-100 rounded-lg p-4">
+                              <div className="text-sm font-bold text-red-700 mb-2 flex items-center">
+                                  <AlertCircle className="w-4 h-4 mr-2" /> 💥 雷区触发场景
+                              </div>
+                              {(selectedPerson.triggers || []).length > 0 ? (
+                                  <ul className="list-disc list-inside text-xs text-gray-800 space-y-2">
+                                      {selectedPerson.triggers.map((t: string, i: number) => (
+                                          <li key={i} className="leading-relaxed">{t}</li>
+                                      ))}
+                                  </ul>
+                              ) : (
+                                  <div className="text-xs text-gray-400 italic">
+                                      暂无内容，点击右上角“AI 生成/更新”自动生成。
+                                  </div>
+                              )}
+                          </div>
+
+                          <div className="bg-white/60 border border-green-100 rounded-lg p-4">
+                              <div className="text-sm font-bold text-green-700 mb-2 flex items-center">
+                                  <ThumbsUp className="w-4 h-4 mr-2" /> ✨ 爽点触发场景
+                              </div>
+                              {(selectedPerson.pleasers || []).length > 0 ? (
+                                  <ul className="list-disc list-inside text-xs text-gray-800 space-y-2">
+                                      {selectedPerson.pleasers.map((t: string, i: number) => (
+                                          <li key={i} className="leading-relaxed">{t}</li>
+                                      ))}
+                                  </ul>
+                              ) : (
+                                  <div className="text-xs text-gray-400 italic">
+                                      暂无内容，点击右上角“AI 生成/更新”自动生成。
+                                  </div>
+                              )}
+                          </div>
                       </div>
                   </div>
                 </div>
@@ -908,6 +1212,20 @@ export default function PersonalityManager() {
                             />
                         ) : (
                             <span className="text-gray-900 break-all">{selectedPerson.contact_info || '未记录'}</span>
+                        )}
+                    </div>
+                    <div className="flex items-center">
+                        <MapPin className="w-4 h-4 mr-2 text-gray-400"/>
+                        <span className="text-gray-500 w-20 shrink-0">哪里人:</span>
+                        {isEditing && editForm ? (
+                            <input
+                                value={editForm.hometown || ''}
+                                onChange={e => setEditForm({...editForm, hometown: e.target.value})}
+                                className="flex-1 bg-white border border-gray-200 rounded px-2 py-1"
+                                placeholder="如：海南 / 北京"
+                            />
+                        ) : (
+                            <span className="text-gray-900">{selectedPerson.hometown || '未记录'}</span>
                         )}
                     </div>
                     <div className="flex items-center">
@@ -935,6 +1253,74 @@ export default function PersonalityManager() {
                             />
                         ) : (
                             <span className="text-gray-900">{selectedPerson.first_met_scene || '未记录'}</span>
+                        )}
+                    </div>
+
+                    <div className="pt-3 mt-3 border-t border-gray-200">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="text-sm font-bold text-gray-900">自定义条目</div>
+                            {isEditing && editForm && (
+                                <button
+                                    onClick={() => {
+                                        const current = Array.isArray(editForm.basic_info_extra) ? editForm.basic_info_extra : [];
+                                        setEditForm({ ...editForm, basic_info_extra: [...current, createBasicExtraItem()] });
+                                    }}
+                                    className="text-xs text-primary hover:underline"
+                                >
+                                    + 手动添加
+                                </button>
+                            )}
+                        </div>
+
+                        {(isEditing && editForm ? (Array.isArray(editForm.basic_info_extra) ? editForm.basic_info_extra : []) : (Array.isArray(selectedPerson.basic_info_extra) ? selectedPerson.basic_info_extra : [])).length > 0 ? (
+                            <div className="space-y-2">
+                                {(isEditing && editForm ? (Array.isArray(editForm.basic_info_extra) ? editForm.basic_info_extra : []) : (Array.isArray(selectedPerson.basic_info_extra) ? selectedPerson.basic_info_extra : [])).map((it: any, idx: number) => (
+                                    <div key={it?.id || idx} className="flex items-center gap-2">
+                                        <div className="shrink-0">{renderBasicExtraIcon(it?.icon)}</div>
+                                        {isEditing && editForm ? (
+                                            <>
+                                                <input
+                                                    value={it?.label || ''}
+                                                    onChange={(e) => {
+                                                        const arr = Array.isArray(editForm.basic_info_extra) ? [...editForm.basic_info_extra] : [];
+                                                        arr[idx] = { ...(arr[idx] || {}), label: e.target.value };
+                                                        setEditForm({ ...editForm, basic_info_extra: arr });
+                                                    }}
+                                                    className="w-24 bg-white border border-gray-200 rounded px-2 py-1 text-sm"
+                                                    placeholder="条目"
+                                                />
+                                                <span className="text-gray-400">:</span>
+                                                <input
+                                                    value={it?.value || ''}
+                                                    onChange={(e) => {
+                                                        const arr = Array.isArray(editForm.basic_info_extra) ? [...editForm.basic_info_extra] : [];
+                                                        arr[idx] = { ...(arr[idx] || {}), value: e.target.value };
+                                                        setEditForm({ ...editForm, basic_info_extra: arr });
+                                                    }}
+                                                    className="flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-sm"
+                                                    placeholder="内容"
+                                                />
+                                                <button
+                                                    onClick={() => {
+                                                        const arr = Array.isArray(editForm.basic_info_extra) ? editForm.basic_info_extra.filter((_: any, i: number) => i !== idx) : [];
+                                                        setEditForm({ ...editForm, basic_info_extra: arr });
+                                                    }}
+                                                    className="text-gray-400 hover:text-red-500"
+                                                    title="删除"
+                                                >
+                                                    <X className="w-4 h-4" />
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <div className="text-sm text-gray-900">
+                                                <span className="text-gray-500">{it?.label || '未命名'}:</span> {it?.value || '未记录'}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-xs text-gray-400 italic">暂无</div>
                         )}
                     </div>
                   </div>
@@ -1115,6 +1501,28 @@ export default function PersonalityManager() {
                                     />
                                   </div>
 
+                                  <div className="pt-4 border-t border-blue-200/70">
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">❓ 待验证清单</div>
+                                      <button
+                                        onClick={() => scheduleEnsureChecklist('layer_1_core', true)}
+                                        className="text-xs text-blue-700 hover:underline"
+                                        disabled={!!verificationLoading['layer_1_core']}
+                                      >
+                                        {verificationLoading['layer_1_core'] ? '生成中…' : '重新生成'}
+                                      </button>
+                                    </div>
+                                    {(verificationChecklists?.layer_1_core?.items || []).length > 0 ? (
+                                      <ul className="mt-2 list-disc list-inside text-xs text-gray-800 space-y-2">
+                                        {verificationChecklists.layer_1_core.items.map((t: string, i: number) => (
+                                          <li key={i} className="leading-relaxed">{t}</li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <div className="mt-2 text-xs text-gray-400 italic">填写内容后会自动生成待验证问题。</div>
+                                    )}
+                                  </div>
+
                                 </div>
                               </div>
                             )}
@@ -1201,6 +1609,28 @@ export default function PersonalityManager() {
                                     />
                                   </div>
 
+                                  <div className="pt-4 border-t border-orange-200/70">
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">❓ 待验证清单</div>
+                                      <button
+                                        onClick={() => scheduleEnsureChecklist('layer_2_drive', true)}
+                                        className="text-xs text-orange-700 hover:underline"
+                                        disabled={!!verificationLoading['layer_2_drive']}
+                                      >
+                                        {verificationLoading['layer_2_drive'] ? '生成中…' : '重新生成'}
+                                      </button>
+                                    </div>
+                                    {(verificationChecklists?.layer_2_drive?.items || []).length > 0 ? (
+                                      <ul className="mt-2 list-disc list-inside text-xs text-gray-800 space-y-2">
+                                        {verificationChecklists.layer_2_drive.items.map((t: string, i: number) => (
+                                          <li key={i} className="leading-relaxed">{t}</li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <div className="mt-2 text-xs text-gray-400 italic">填写内容后会自动生成待验证问题。</div>
+                                    )}
+                                  </div>
+
                                 </div>
                               </div>
                             )}
@@ -1285,6 +1715,28 @@ export default function PersonalityManager() {
                                       onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
                                       className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-green-200 resize-none overflow-hidden ${analysisDraft.layer_3_surface.current_status_path ? 'border-gray-300' : 'border-gray-200'}`}
                                     />
+                                  </div>
+
+                                  <div className="pt-4 border-t border-green-200/70">
+                                    <div className="flex items-center justify-between">
+                                      <div className="text-sm font-bold text-gray-900">❓ 待验证清单</div>
+                                      <button
+                                        onClick={() => scheduleEnsureChecklist('layer_3_surface', true)}
+                                        className="text-xs text-green-700 hover:underline"
+                                        disabled={!!verificationLoading['layer_3_surface']}
+                                      >
+                                        {verificationLoading['layer_3_surface'] ? '生成中…' : '重新生成'}
+                                      </button>
+                                    </div>
+                                    {(verificationChecklists?.layer_3_surface?.items || []).length > 0 ? (
+                                      <ul className="mt-2 list-disc list-inside text-xs text-gray-800 space-y-2">
+                                        {verificationChecklists.layer_3_surface.items.map((t: string, i: number) => (
+                                          <li key={i} className="leading-relaxed">{t}</li>
+                                        ))}
+                                      </ul>
+                                    ) : (
+                                      <div className="mt-2 text-xs text-gray-400 italic">填写内容后会自动生成待验证问题。</div>
+                                    )}
                                   </div>
 
                                 </div>
@@ -1654,6 +2106,7 @@ function PersonCreationModal({ onClose, onSuccess }: { onClose: () => void; onSu
         category: '', // Added category
         identity: '',
         field: '',
+        hometown: '',
         tags: '',
         relationship_strength: 50,
         disc_type: '',
@@ -1674,7 +2127,10 @@ function PersonCreationModal({ onClose, onSuccess }: { onClose: () => void; onSu
             const tagsArray = formData.tags.split(/[,，\s]+/).filter(Boolean);
             const dataToSave = {
                 ...formData,
-                tags: tagsArray
+                tags: tagsArray,
+                birthday: formData.birthday ? formData.birthday : null,
+                first_met_date: formData.first_met_date ? formData.first_met_date : null,
+                basic_info_extra: []
             };
             const result = await api.createPerson(dataToSave);
             onSuccess(result);
@@ -1746,6 +2202,16 @@ function PersonCreationModal({ onClose, onSuccess }: { onClose: () => void; onSu
                                 value={formData.field}
                                 onChange={e => setFormData({...formData, field: e.target.value})}
                                 placeholder="如：机械工程 / 互联网"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">哪里人</label>
+                            <input
+                                type="text"
+                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-primary/20 focus:border-primary"
+                                value={formData.hometown}
+                                onChange={e => setFormData({...formData, hometown: e.target.value})}
+                                placeholder="如：海南 / 北京"
                             />
                         </div>
                         <div>
