@@ -86,12 +86,51 @@ export default function FloatingAssistant() {
     start_time?: string | null;
     end_time?: string | null;
     warning?: string | null;
+    series?: { start_date: string; end_date: string; frequency: 'daily' } | null;
+    createdIds?: string[];
   }>(null);
   const disabled = useMemo(() => saving || parsing || !text.trim(), [saving, parsing, text]);
 
   const toIsoFromLocal = (date: string, time: string) => {
     const t = /^\d{2}:\d{2}$/.test(time) ? time : '09:00';
     return new Date(`${date}T${t}:00`).toISOString();
+  };
+
+  const makeDueAtIso = (date: string) => {
+    const base = new Date();
+    const parts = String(date).split('-').map((x) => parseInt(x, 10));
+    if (parts.length !== 3 || !parts.every((n) => Number.isFinite(n))) return null;
+    const d = new Date(base);
+    d.setFullYear(parts[0], parts[1] - 1, parts[2]);
+    d.setHours(base.getHours(), base.getMinutes(), 0, 0);
+    return d.toISOString();
+  };
+
+  const enumerateDays = (startDate: string, endDate: string) => {
+    const s = new Date(`${startDate}T00:00:00`);
+    const e = new Date(`${endDate}T00:00:00`);
+    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return [];
+    const out: string[] = [];
+    const maxDays = 62;
+    let cur = new Date(s);
+    let guard = 0;
+    while (cur.getTime() <= e.getTime() && guard < maxDays) {
+      out.push(toYmd(cur));
+      cur.setDate(cur.getDate() + 1);
+      guard += 1;
+    }
+    return out;
+  };
+
+  const undoCreated = async () => {
+    if (!draft?.createdIds?.length) return;
+    setSaving(true);
+    try {
+      await Promise.all(draft.createdIds.map((id) => api.deletePlannerItem(id, userId)));
+      setDraft(null);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -140,6 +179,9 @@ export default function FloatingAssistant() {
                   <button onClick={() => setDraft(null)} className="text-xs text-gray-500 hover:underline">清除</button>
                 </div>
                 {draft.warning && <div className="text-[11px] text-amber-700">{draft.warning}</div>}
+                {draft.createdIds?.length ? (
+                  <div className="text-[11px] text-emerald-700">已添加 {draft.createdIds.length} 条，可撤回。</div>
+                ) : null}
                 <div className="grid grid-cols-1 gap-2">
                   <select
                     value={draft.type}
@@ -161,6 +203,22 @@ export default function FloatingAssistant() {
                     onChange={(e) => setDraft({ ...draft, date: e.target.value })}
                     className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
                   />
+                  {draft.series?.frequency === 'daily' && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="date"
+                        value={draft.series.start_date}
+                        onChange={(e) => setDraft({ ...draft, series: { ...draft.series!, start_date: e.target.value } })}
+                        className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      />
+                      <input
+                        type="date"
+                        value={draft.series.end_date}
+                        onChange={(e) => setDraft({ ...draft, series: { ...draft.series!, end_date: e.target.value } })}
+                        className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                      />
+                    </div>
+                  )}
                   {draft.type === 'event' && (
                     <div className="grid grid-cols-2 gap-2">
                       <input
@@ -180,55 +238,12 @@ export default function FloatingAssistant() {
                 </div>
 
                 <button
-                  disabled={saving || !draft.title.trim() || !draft.date}
-                  onClick={async () => {
-                    if (!draft) return;
-                    setSaving(true);
-                    try {
-                      if (draft.type === 'task') {
-                        const base = new Date();
-                        const parts = String(draft.date).split('-').map((x) => parseInt(x, 10));
-                        let dueAt: string | null = null;
-                        if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
-                          const d = new Date(base);
-                          d.setFullYear(parts[0], parts[1] - 1, parts[2]);
-                          d.setHours(base.getHours(), base.getMinutes(), 0, 0);
-                          dueAt = d.toISOString();
-                        }
-                        await api.createPlannerItem(userId, {
-                          type: 'task',
-                          title: `提醒：${draft.title.trim()}`,
-                          due_at: dueAt,
-                          status: 'open',
-                          priority: 'medium',
-                          list_id: null,
-                        });
-                      } else {
-                        const s = toIsoFromLocal(draft.date, String(draft.start_time || '09:00'));
-                        const e = toIsoFromLocal(draft.date, String(draft.end_time || '18:00'));
-                        await api.createPlannerItem(userId, {
-                          type: 'event',
-                          title: draft.title.trim(),
-                          start_at: s,
-                          end_at: e,
-                          status: 'open',
-                          priority: 'medium',
-                          list_id: null,
-                        });
-                      }
-                      setText('');
-                      setTouched(false);
-                      setDueDate(toYmd(new Date()));
-                      setDraft(null);
-                      setOpen(false);
-                    } finally {
-                      setSaving(false);
-                    }
-                  }}
-                  className="w-full inline-flex items-center justify-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
+                  disabled={saving || !draft.createdIds?.length}
+                  onClick={undoCreated}
+                  className="w-full inline-flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-900 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
                 >
-                  <Plus className="w-4 h-4" />
-                  {saving ? '添加中…' : '确认添加'}
+                  <X className="w-4 h-4" />
+                  {saving ? '撤回中…' : '撤回'}
                 </button>
               </div>
             )}
@@ -244,24 +259,81 @@ export default function FloatingAssistant() {
                     const res = await api.parsePlannerText(userId, { text: t, listId: null, tzOffsetMinutes });
                     const suggestion = res?.suggestion;
                     const date = typeof suggestion?.date === 'string' && suggestion.date ? suggestion.date : (dueDate || toYmd(new Date()));
-                    setDraft({
+                    const nextDraft = {
                       type: suggestion?.type === 'event' ? 'event' : 'task',
                       title: String(suggestion?.title || sanitizeTitle(t, t)).trim() || t,
                       date,
                       start_time: suggestion?.start_time || null,
                       end_time: suggestion?.end_time || null,
                       warning: res?.warning || null,
-                    });
+                      series: suggestion?.series || null,
+                      createdIds: [],
+                    } as any;
+
+                    const createdIds: string[] = [];
+                    if (nextDraft.type === 'task' && nextDraft.series?.frequency === 'daily') {
+                      const days = enumerateDays(nextDraft.series.start_date, nextDraft.series.end_date);
+                      for (const d of days) {
+                        const dueAt = makeDueAtIso(d);
+                        const created = await api.createPlannerItem(userId, {
+                          type: 'task',
+                          title: `提醒：${String(nextDraft.title).trim()}`,
+                          due_at: dueAt,
+                          status: 'open',
+                          priority: 'medium',
+                          list_id: null,
+                        });
+                        if (created?.id) createdIds.push(String(created.id));
+                      }
+                    } else if (nextDraft.type === 'task') {
+                      const dueAt = makeDueAtIso(nextDraft.date);
+                      const created = await api.createPlannerItem(userId, {
+                        type: 'task',
+                        title: `提醒：${String(nextDraft.title).trim()}`,
+                        due_at: dueAt,
+                        status: 'open',
+                        priority: 'medium',
+                        list_id: null,
+                      });
+                      if (created?.id) createdIds.push(String(created.id));
+                    } else {
+                      const s = toIsoFromLocal(nextDraft.date, String(nextDraft.start_time || '09:00'));
+                      const e = toIsoFromLocal(nextDraft.date, String(nextDraft.end_time || '18:00'));
+                      const created = await api.createPlannerItem(userId, {
+                        type: 'event',
+                        title: String(nextDraft.title).trim(),
+                        start_at: s,
+                        end_at: e,
+                        status: 'open',
+                        priority: 'medium',
+                        list_id: null,
+                      });
+                      if (created?.id) createdIds.push(String(created.id));
+                    }
+
+                    setDraft({ ...nextDraft, createdIds });
                     if (!touched && suggestion?.date) setDueDate(suggestion.date);
                   } catch {
                     const date = dueDate || toYmd(new Date());
+                    const title = sanitizeTitle(t, t) || t;
+                    const dueAt = makeDueAtIso(date);
+                    const created = await api.createPlannerItem(userId, {
+                      type: 'task',
+                      title: `提醒：${title}`,
+                      due_at: dueAt,
+                      status: 'open',
+                      priority: 'medium',
+                      list_id: null,
+                    });
                     setDraft({
                       type: 'task',
-                      title: sanitizeTitle(t, t) || t,
+                      title,
                       date,
                       start_time: null,
                       end_time: null,
                       warning: 'AI 解析失败，已使用本地解析（可手动调整）',
+                      series: null,
+                      createdIds: created?.id ? [String(created.id)] : [],
                     });
                   }
                 } finally {
@@ -271,7 +343,7 @@ export default function FloatingAssistant() {
               className="w-full inline-flex items-center justify-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90 disabled:opacity-50"
             >
               <Plus className="w-4 h-4" />
-              {parsing ? '解析中…' : '解析'}
+              {parsing ? '添加中…' : '解析并添加'}
             </button>
             <div className="text-[11px] text-gray-400">支持：今天/明天/后天/下周一~下周日。</div>
           </div>

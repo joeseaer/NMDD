@@ -14,6 +14,7 @@
     <script>
       (function () {
         var root = document.getElementById('root');
+        window.__APP_BOOT_OK__ = false;
         var show = function (title, detail) {
           if (!root) return;
           root.innerHTML =
@@ -34,6 +35,17 @@
           var msg = r && r.message ? r.message : String(r || 'Unknown error');
           show('页面启动失败', msg);
         });
+
+        setTimeout(function () {
+          if (window.__APP_BOOT_OK__) return;
+          var hint = '';
+          if (location.protocol === 'file:') {
+            hint = '你正在用 file:// 直接打开页面，Vite/React 无法加载模块。请用 http://127.0.0.1:5173/ 访问。';
+          } else {
+            hint = '脚本未能启动或 API 未就绪。请确认：前端在 5173、后端在 3000，并打开浏览器控制台查看具体报错。';
+          }
+          show('一直卡在 Loading', hint);
+        }, 2500);
       })();
     </script>
     <script type="module" src="/src/main.tsx"></script>

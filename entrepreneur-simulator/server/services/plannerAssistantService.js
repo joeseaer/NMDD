@@ -47,12 +47,49 @@ function toYmd(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+function parseDateExpressionToYmd(expr, baseDate) {
+  const s = String(expr || '').trim();
+  if (!s) return '';
+
+  const ymd = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (ymd) {
+    const yy = parseInt(ymd[1], 10);
+    const mm = parseInt(ymd[2], 10);
+    const dd = parseInt(ymd[3], 10);
+    if ([yy, mm, dd].every(Number.isFinite)) return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+  }
+
+  const md = s.match(/(\d{1,2})月(\d{1,2})(日|号)/);
+  if (md) {
+    const mm = parseInt(md[1], 10);
+    const dd = parseInt(md[2], 10);
+    if ([mm, dd].every(Number.isFinite)) {
+      const d = new Date(baseDate);
+      d.setMonth(mm - 1, dd);
+      d.setHours(0, 0, 0, 0);
+      const b = new Date(baseDate);
+      b.setHours(0, 0, 0, 0);
+      if (d.getTime() < b.getTime()) d.setFullYear(d.getFullYear() + 1);
+      return toYmd(d);
+    }
+  }
+
+  return guessDueDateFromText(s, baseDate) || '';
+}
+
 function sanitizeTitle(inputTitle, rawText) {
   const base = String(inputTitle || rawText || '').trim();
   const stripped = base
     .replace(/\d{4}-\d{1,2}-\d{1,2}/g, '')
     .replace(/\d{1,2}月\d{1,2}日/g, '')
+    .replace(/\d{1,2}月/g, '')
     .replace(/\d{1,2}号/g, '')
+    .replace(/从/g, '')
+    .replace(/到/g, '')
+    .replace(/每天|每日/g, '')
+    .replace(/都要|要/g, '')
+    .replace(/提醒我/g, '')
+    .replace(/提醒/g, '')
     .replace(/(今天|明天|后天|下周[一二三四五六日天])/g, '')
     .replace(/[，,。\.、\s]+/g, ' ')
     .trim();
@@ -117,6 +154,43 @@ async function parsePlannerText({ text, tzOffsetMinutes }) {
   if (!raw) return { ok: false, error: 'empty_text' };
 
   const baseDate = new Date();
+
+  const rangeMatch = raw.match(/从(.+?)到(.+?)(每天|每日)/);
+  if (rangeMatch) {
+    const startExpr = rangeMatch[1];
+    const endExpr = rangeMatch[2];
+    const startDate = parseDateExpressionToYmd(startExpr, baseDate);
+    const endDate = parseDateExpressionToYmd(endExpr, baseDate);
+    const title = sanitizeTitle(raw, raw);
+    if (startDate && endDate) {
+      return {
+        ok: true,
+        source: 'rule',
+        suggestion: {
+          type: 'task',
+          title,
+          date: startDate,
+          start_time: null,
+          end_time: null,
+          series: { start_date: startDate, end_date: endDate, frequency: 'daily' },
+        },
+        warning: null,
+      };
+    }
+    return {
+      ok: true,
+      source: 'rule',
+      suggestion: {
+        type: 'task',
+        title,
+        date: startDate || endDate || '',
+        start_time: null,
+        end_time: null,
+        series: { start_date: startDate || '', end_date: endDate || '', frequency: 'daily' },
+      },
+      warning: '无法确认起止日期，请手动调整',
+    };
+  }
   const fallbackDate = guessDueDateFromText(raw, baseDate) || toYmd(baseDate);
   const fallbackTitle = sanitizeTitle(raw, raw);
   const fallback = {

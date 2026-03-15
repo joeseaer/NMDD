@@ -115,10 +115,10 @@ export default function Planner() {
     }
   };
 
-  const loadSecretary = async () => {
+  const loadSecretary = async (opts?: { refresh?: boolean }) => {
     setSecretaryLoading(true);
     try {
-      const res = await api.getSecretaryDaily(userId);
+      const res = await api.getSecretaryDaily(userId, { refresh: !!opts?.refresh });
       setSecretary(res || null);
     } catch {
       setSecretary(null);
@@ -424,7 +424,7 @@ export default function Planner() {
             <div className="bg-white rounded-lg border border-gray-100 p-3 lg:col-span-2">
               <div className="flex items-center justify-between">
                 <div className="text-xs font-bold text-gray-900">AI 建议（联系/约活动）</div>
-                <button onClick={loadSecretary} className="text-xs text-gray-500 hover:underline">刷新</button>
+                <button onClick={() => loadSecretary({ refresh: true })} className="text-xs text-gray-500 hover:underline">刷新</button>
               </div>
               {secretaryLoading ? (
                 <div className="mt-2 text-xs text-gray-400">生成中…</div>

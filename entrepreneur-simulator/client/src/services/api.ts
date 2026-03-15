@@ -229,8 +229,10 @@ export const api = {
         return response.json();
     },
 
-    getSecretaryDaily: async (userId: string = CURRENT_USER_ID) => {
-        const response = await fetch(`${API_BASE_URL}/secretary/daily/${encodeURIComponent(userId)}`);
+    getSecretaryDaily: async (userId: string = CURRENT_USER_ID, opts?: { refresh?: boolean }) => {
+        const url = new URL(`${API_BASE_URL}/secretary/daily/${encodeURIComponent(userId)}`, window.location.origin);
+        if (opts?.refresh) url.searchParams.set('refresh', '1');
+        const response = await fetch(url.toString());
         if (!response.ok) throw new Error('Failed to fetch secretary daily');
         return response.json();
     },

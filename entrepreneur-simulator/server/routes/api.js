@@ -810,7 +810,8 @@ async function routes(fastify, options) {
   fastify.get('/secretary/daily/:userId', async (request, reply) => {
     try {
       const { userId } = request.params;
-      const data = await secretaryService.getSecretaryDaily({ userId });
+      const refresh = String((request.query || {}).refresh || '') === '1';
+      const data = await secretaryService.getSecretaryDaily({ userId, refresh });
       return data;
     } catch (err) {
       request.log.error(err);

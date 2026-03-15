@@ -3,6 +3,13 @@ const dbService = require('./dbService');
 
 let openaiClient = null;
 
+const dailyCache = new Map();
+
+function toDateKeyLocal(d) {
+  const x = d instanceof Date ? d : new Date();
+  return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+}
+
 function getModel() {
   const m = process.env.OPENAI_MODEL;
   if (m && String(m).trim()) return String(m).trim();
@@ -36,11 +43,17 @@ function getOpenAIClientOrNull() {
   return openaiClient;
 }
 
-async function getSecretaryDaily({ userId }) {
+async function getSecretaryDaily({ userId, refresh }) {
   const uid = userId || 'user-1';
   const people = await dbService.getPeopleProfiles(uid);
   const now = new Date();
-  const nowText = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const nowText = toDateKeyLocal(now);
+
+  const cacheKey = `${uid}:${nowText}`;
+  if (!refresh && dailyCache.has(cacheKey)) {
+    const cached = dailyCache.get(cacheKey);
+    return { ...cached, cached: true, date: nowText };
+  }
 
   const payload = (people || []).slice(0, 30).map((p) => ({
     id: p.id,
@@ -56,7 +69,9 @@ async function getSecretaryDaily({ userId }) {
 
   const client = getOpenAIClientOrNull();
   if (!client) {
-    return { available: false, suggestions: [], message: 'OPENAI_API_KEY 未配置' };
+    const res = { available: false, suggestions: [], message: 'OPENAI_API_KEY 未配置', cached: false, date: nowText };
+    dailyCache.set(cacheKey, res);
+    return res;
   }
 
   const prompt = `你是用户的“精神秘书”。\n\n当前日期：${nowText}\n用户希望：在未来 7 天内给出“该联系谁/该约什么活动”的提醒建议。\n\n你会收到一组人物档案数据（可能包含深度分析档案 private_info、最近互动摘要、关系强度）。\n输出必须是 JSON（不要 markdown），字段：\n{\n  "suggestions": [\n    {\n      "person_id": string,\n      "person_name": string,\n      "when": "today"|"tomorrow"|"this_week",\n      "reason": string,\n      "action": string\n    }\n  ],\n  "notes": string[]\n}\n\n规则：\n- suggestions 最多 3 条；尽量挑关系强度高、很久没联系、或 private_info/last_interaction 暗示需要推进的。\n- action 必须是可执行的一句话（例如“发微信问候并约 30 分钟电话”）。\n- reason 30 字以内。\n\n人物数据：\n${JSON.stringify(payload)}`;
@@ -68,11 +83,13 @@ async function getSecretaryDaily({ userId }) {
     });
     const parsed = extractJsonObject(completion?.choices?.[0]?.message?.content);
     if (!parsed || typeof parsed !== 'object') {
-      return { available: true, suggestions: [], message: 'AI 输出解析失败' };
+      const res = { available: true, suggestions: [], message: 'AI 输出解析失败', cached: false, date: nowText };
+      dailyCache.set(cacheKey, res);
+      return res;
     }
     const suggestions = Array.isArray(parsed.suggestions) ? parsed.suggestions : [];
     const notes = Array.isArray(parsed.notes) ? parsed.notes.map((x) => String(x)).filter(Boolean) : [];
-    return {
+    const res = {
       available: true,
       suggestions: suggestions
         .map((s) => ({
@@ -85,9 +102,15 @@ async function getSecretaryDaily({ userId }) {
         .filter((s) => s.person_id && s.person_name && s.action)
         .slice(0, 3),
       notes,
+      cached: false,
+      date: nowText,
     };
+    dailyCache.set(cacheKey, res);
+    return res;
   } catch (e) {
-    return { available: true, suggestions: [], message: e?.message || 'AI 请求失败' };
+    const res = { available: true, suggestions: [], message: e?.message || 'AI 请求失败', cached: false, date: nowText };
+    dailyCache.set(cacheKey, res);
+    return res;
   }
 }
 

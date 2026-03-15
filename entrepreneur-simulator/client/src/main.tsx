@@ -5,8 +5,6 @@ import './index.css'
 import { BrowserRouter } from 'react-router-dom'
 import AppErrorBoundary from './components/AppErrorBoundary'
 
-;(window as any).__APP_BOOT_OK__ = false
-
 const showBootError = (err: unknown) => {
   const root = document.getElementById('root');
   if (!root) return;
