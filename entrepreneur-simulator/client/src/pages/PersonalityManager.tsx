@@ -565,10 +565,13 @@ export default function PersonalityManager() {
           const tags = typeof editForm.tags === 'string' 
             ? editForm.tags.split(/[,，\s]+/).filter(Boolean) 
             : (Array.isArray(editForm.tags) ? editForm.tags : []);
+
+          const related_people = Array.isArray(editForm.related_people) ? editForm.related_people : [];
           
           const updatedData = {
             ...editForm,
             tags,
+            related_people,
             birthday: editForm.birthday ? editForm.birthday : null,
             first_met_date: editForm.first_met_date ? editForm.first_met_date : null,
           };
@@ -1337,9 +1340,13 @@ export default function PersonalityManager() {
                         </h3>
                         {isEditing && <button onClick={() => setShowRelatedModal(true)} className="text-xs text-primary hover:underline">+ 关联</button>}
                     </div>
-                    {selectedPerson.related_people && selectedPerson.related_people.length > 0 ? (
+
+                    {(() => {
+                      const source = (isEditing && editForm) ? editForm : selectedPerson;
+                      const related = Array.isArray(source?.related_people) ? source.related_people : [];
+                      return related.length > 0 ? (
                         <div className="space-y-3">
-                            {selectedPerson.related_people.map((rel: any, i: number) => (
+                            {related.map((rel: any, i: number) => (
                                 <div key={i} className="flex items-center bg-white p-2 rounded border border-gray-200">
                                     <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold mr-3 shrink-0">
                                         {rel.avatar ? <img src={rel.avatar} className="w-full h-full rounded-full object-cover"/> : rel.name[0]}
@@ -1351,8 +1358,9 @@ export default function PersonalityManager() {
                                     {isEditing && (
                                         <button 
                                             onClick={() => {
-                                                const newRelated = selectedPerson.related_people.filter((_: any, idx: number) => idx !== i);
-                                                setEditForm({...editForm, related_people: newRelated});
+                                                const base = Array.isArray(editForm?.related_people) ? editForm.related_people : [];
+                                                const newRelated = base.filter((_: any, idx: number) => idx !== i);
+                                                setEditForm({ ...(editForm || {}), related_people: newRelated });
                                             }}
                                             className="text-gray-400 hover:text-red-500"
                                         >
@@ -1362,9 +1370,10 @@ export default function PersonalityManager() {
                                 </div>
                             ))}
                         </div>
-                    ) : (
+                      ) : (
                         <div className="text-sm text-gray-400 italic">暂无关联人物</div>
-                    )}
+                      );
+                    })()}
                 </div>
 
                 <button className="w-full py-3 bg-white border border-primary text-primary rounded-xl font-medium hover:bg-primary/5 transition-colors flex items-center justify-center mt-6">
