@@ -44,17 +44,24 @@ export const api = {
         });
         
         const text = await response.text();
+        const statusHint = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+
+        if (!response.ok) {
+            if (!text) throw new Error(`创建失败（${statusHint}）：服务无响应或返回空内容`);
+            try {
+                const data = JSON.parse(text);
+                throw new Error(data.error || `创建失败（${statusHint}）`);
+            } catch {
+                throw new Error(`创建失败（${statusHint}）：${text.substring(0, 120)}`);
+            }
+        }
+
         if (!text) {
-             // If response is empty, it's a critical failure for creation as we need the ID
-             console.error("Empty response received from server for createSOP");
-             throw new Error('Server returned empty response (no ID received)');
+            throw new Error(`创建失败（${statusHint}）：服务返回空内容（未拿到 ID）`);
         }
 
         try {
             const data = JSON.parse(text);
-            if (!response.ok) {
-                throw new Error(data.error || 'Failed to create SOP');
-            }
             if (!data.id) {
                 throw new Error('Server response missing SOP ID');
             }
@@ -126,6 +133,82 @@ export const api = {
         return response.json();
     },
 
+    getPlannerLists: async (userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/planner/lists/${userId}`);
+        if (!response.ok) throw new Error('Failed to fetch planner lists');
+        return response.json();
+    },
+
+    getPlannerItems: async (userId: string = CURRENT_USER_ID, opts?: { view?: 'today' | 'overdue' | 'upcoming'; listId?: string }) => {
+        const params = new URLSearchParams();
+        if (opts?.view) params.set('view', opts.view);
+        if (opts?.listId) params.set('listId', opts.listId);
+        const q = params.toString();
+        const response = await fetch(`${API_BASE_URL}/planner/items/${userId}${q ? `?${q}` : ''}`);
+        if (!response.ok) throw new Error('Failed to fetch planner items');
+        return response.json();
+    },
+
+    getPlannerEvents: async (userId: string = CURRENT_USER_ID, opts: { startAt: string; endAt: string; listId?: string }) => {
+        const params = new URLSearchParams();
+        params.set('type', 'event');
+        params.set('startAt', opts.startAt);
+        params.set('endAt', opts.endAt);
+        if (opts.listId) params.set('listId', opts.listId);
+        const response = await fetch(`${API_BASE_URL}/planner/items/${userId}?${params.toString()}`);
+        if (!response.ok) throw new Error('Failed to fetch planner events');
+        return response.json();
+    },
+
+    getPlannerCalendarItems: async (userId: string = CURRENT_USER_ID, opts: { startAt: string; endAt: string; listId?: string }) => {
+        const params = new URLSearchParams();
+        params.set('type', 'calendar');
+        params.set('startAt', opts.startAt);
+        params.set('endAt', opts.endAt);
+        if (opts.listId) params.set('listId', opts.listId);
+        const response = await fetch(`${API_BASE_URL}/planner/items/${userId}?${params.toString()}`);
+        if (!response.ok) throw new Error('Failed to fetch planner calendar items');
+        return response.json();
+    },
+
+    createPlannerItem: async (userId: string, item: any) => {
+        const response = await fetch(`${API_BASE_URL}/planner/items`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, item })
+        });
+        if (!response.ok) throw new Error('Failed to create planner item');
+        return response.json();
+    },
+
+    updatePlannerItem: async (id: string, userId: string, patch: any) => {
+        const response = await fetch(`${API_BASE_URL}/planner/items/${id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, patch })
+        });
+        if (!response.ok) throw new Error('Failed to update planner item');
+        return response.json();
+    },
+
+    deletePlannerItem: async (id: string, userId: string) => {
+        const response = await fetch(`${API_BASE_URL}/planner/items/${id}?userId=${encodeURIComponent(userId)}`, {
+            method: 'DELETE'
+        });
+        if (!response.ok) throw new Error('Failed to delete planner item');
+        return response.json();
+    },
+
+    parsePlannerText: async (userId: string, payload: { text: string; listId?: string | null; tzOffsetMinutes?: number }) => {
+        const response = await fetch(`${API_BASE_URL}/planner/nl/parse`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, ...payload })
+        });
+        if (!response.ok) throw new Error('Failed to parse planner text');
+        return response.json();
+    },
+
     updatePersonReactionLibrary: async (id: string, reactionLibrary: any[]) => {
         const response = await fetch(`${API_BASE_URL}/people/${id}/reaction-library`, {
             method: 'PATCH',
@@ -143,6 +226,12 @@ export const api = {
             body: JSON.stringify({ personId, currentData })
         });
         if (!response.ok) throw new Error('Failed to analyze person');
+        return response.json();
+    },
+
+    getSecretaryDaily: async (userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/secretary/daily/${encodeURIComponent(userId)}`);
+        if (!response.ok) throw new Error('Failed to fetch secretary daily');
         return response.json();
     },
 

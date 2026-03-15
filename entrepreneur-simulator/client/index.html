@@ -6,7 +6,36 @@
     <title>Entrepreneur Simulator</title>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div style="font-family: ui-sans-serif, system-ui; padding: 24px; color: #111827;">
+        Loading…
+      </div>
+    </div>
+    <script>
+      (function () {
+        var root = document.getElementById('root');
+        var show = function (title, detail) {
+          if (!root) return;
+          root.innerHTML =
+            '<div style="min-height:100vh;background:#f9fafb;color:#111827;padding:24px;font-family:ui-sans-serif,system-ui">' +
+            '<div style="max-width:760px;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:16px;padding:20px">' +
+            '<div style="font-size:18px;font-weight:700">' + title + '</div>' +
+            '<div style="font-size:13px;color:#4b5563;margin-top:8px">' + (detail || '') + '</div>' +
+            '<div style="margin-top:14px;font-size:12px;color:#6b7280">当前地址：' + location.href + '</div>' +
+            '</div></div>';
+        };
+
+        window.addEventListener('error', function (e) {
+          var msg = (e && e.error && e.error.message) ? e.error.message : (e && e.message) ? e.message : 'Unknown error';
+          show('页面启动失败', msg);
+        });
+        window.addEventListener('unhandledrejection', function (e) {
+          var r = e && e.reason;
+          var msg = r && r.message ? r.message : String(r || 'Unknown error');
+          show('页面启动失败', msg);
+        });
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

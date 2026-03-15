@@ -531,6 +531,178 @@ const deletePersonProfile = async (personId) => {
   return personId;
 };
 
+const getPlannerLists = async (userId) => {
+  if (!supabase || !userId) return [];
+  const { data, error } = await supabase
+    .from('planner_lists')
+    .select('*')
+    .eq('user_id', userId)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data || [];
+};
+
+const ensurePlannerInbox = async (userId) => {
+  if (!supabase || !userId) return null;
+  const { data: existing, error: existingError } = await supabase
+    .from('planner_lists')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_default_inbox', true)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (existingError) throw existingError;
+  if (existing) return existing;
+
+  const { data, error } = await supabase
+    .from('planner_lists')
+    .insert([{ user_id: userId, name: '收集箱', sort_order: 0, is_default_inbox: true }])
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+const createPlannerList = async ({ userId, name }) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+  const cleanName = String(name || '').trim();
+  if (!cleanName) throw new Error('List name is required');
+  const { data, error } = await supabase
+    .from('planner_lists')
+    .insert([{ user_id: userId, name: cleanName, updated_at: new Date() }])
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+const updatePlannerList = async ({ id, userId, patch }) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+  const next = { ...patch, updated_at: new Date() };
+  const { data, error } = await supabase
+    .from('planner_lists')
+    .update(next)
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+const deletePlannerList = async ({ id, userId }) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+  const { error } = await supabase
+    .from('planner_lists')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error) throw error;
+  return id;
+};
+
+const normalizeTs = (v) => {
+  if (!v) return null;
+  const s = String(v).trim();
+  if (!s) return null;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toISOString();
+};
+
+const createPlannerItem = async ({ userId, item }) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+  const type = item?.type === 'event' ? 'event' : 'task';
+  const title = String(item?.title || '').trim();
+  if (!title) throw new Error('Title is required');
+  const payload = {
+    user_id: userId,
+    type,
+    title,
+    note: item?.note ?? null,
+    start_at: normalizeTs(item?.start_at),
+    end_at: normalizeTs(item?.end_at),
+    is_all_day: !!item?.is_all_day,
+    due_at: normalizeTs(item?.due_at),
+    status: item?.status || 'open',
+    priority: item?.priority || 'medium',
+    list_id: item?.list_id ?? null,
+    remind_at: normalizeTs(item?.remind_at),
+    updated_at: new Date(),
+  };
+  const { data, error } = await supabase
+    .from('planner_items')
+    .insert([payload])
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+const updatePlannerItem = async ({ id, userId, patch }) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+  const next = { ...patch };
+  if ('title' in next) next.title = String(next.title || '').trim();
+  if ('start_at' in next) next.start_at = normalizeTs(next.start_at);
+  if ('end_at' in next) next.end_at = normalizeTs(next.end_at);
+  if ('due_at' in next) next.due_at = normalizeTs(next.due_at);
+  if ('remind_at' in next) next.remind_at = normalizeTs(next.remind_at);
+  next.updated_at = new Date();
+
+  const { data, error } = await supabase
+    .from('planner_items')
+    .update(next)
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+const deletePlannerItem = async ({ id, userId }) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+  const { error } = await supabase
+    .from('planner_items')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId);
+  if (error) throw error;
+  return id;
+};
+
+const listPlannerItems = async ({ userId, type, status, listId, startAt, endAt, dueBefore, dueAfter }) => {
+  if (!supabase || !userId) return [];
+  let q = supabase
+    .from('planner_items')
+    .select('*')
+    .eq('user_id', userId);
+  if (type) q = q.eq('type', type);
+  if (status) q = q.eq('status', status);
+  else q = q.neq('status', 'archived');
+  if (listId) q = q.eq('list_id', listId);
+
+  if (type === 'event') {
+    if (startAt && endAt) {
+      q = q.lt('start_at', endAt).gt('end_at', startAt);
+    } else {
+      if (startAt) q = q.gte('start_at', startAt);
+      if (endAt) q = q.lte('start_at', endAt);
+    }
+    q = q.order('start_at', { ascending: true }).order('created_at', { ascending: true });
+  } else {
+    if (dueAfter) q = q.gte('due_at', dueAfter);
+    if (dueBefore) q = q.lte('due_at', dueBefore);
+    q = q.order('due_at', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true });
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+};
+
 const getPeopleProfiles = async (userId) => {
   if (!supabase) return [];
 
@@ -551,14 +723,15 @@ const getPeopleProfiles = async (userId) => {
       // For now, doing N+1 query is acceptable for MVP with small data
       const { data: logs } = await supabase
           .from('interaction_logs')
-          .select('event_context')
+          .select('event_context, event_date')
           .eq('person_id', person.id)
           .order('event_date', { ascending: false })
           .limit(1);
       
       return {
           ...person,
-          last_interaction: logs && logs.length > 0 ? logs[0].event_context : null
+          last_interaction: logs && logs.length > 0 ? logs[0].event_context : null,
+          last_interaction_date: logs && logs.length > 0 ? logs[0].event_date : null
       };
   }));
 
@@ -825,10 +998,17 @@ const getAllUserData = async (userId) => {
 
   try {
     const { data: scenes } = await supabase.from('scenes').select('*').eq('user_id', userId);
-    const { data: sops } = await supabase.from('sops').select('*, sop_versions(*), sop_usage_logs(*)').eq('user_id', userId);
+    const { data: sops } = await supabase
+      .from('sops')
+      .select('*, sop_versions(*), sop_usage_logs(*), scene_sop_rel(*), people_sop_rel(*)')
+      .eq('user_id', userId);
     const { data: people } = await supabase.from('people_profiles').select('*').eq('user_id', userId);
     const { data: reviews } = await supabase.from('review_sessions').select('*').eq('user_id', userId);
     const { data: npcRelations } = await supabase.from('user_npc_relations').select('*').eq('user_id', userId);
+    const { data: plannerLists } = await supabase.from('planner_lists').select('*').eq('user_id', userId);
+    const { data: plannerItems } = await supabase.from('planner_items').select('*').eq('user_id', userId);
+    const { data: plannerTags } = await supabase.from('planner_tags').select('*').eq('user_id', userId);
+    const { data: plannerItemTags } = await supabase.from('planner_item_tags').select('*').eq('user_id', userId);
     
     // Interaction logs (need to fetch all related to the user's people profiles)
     let logs = [];
@@ -838,6 +1018,89 @@ const getAllUserData = async (userId) => {
         logs = interactionLogs || [];
     }
 
+    let relations = {};
+    try {
+      const sopIds = (sops || []).map((s) => s.id).filter(Boolean);
+      const sceneIds = (scenes || []).map((s) => s.id).filter(Boolean);
+      const peopleIds = (people || []).map((p) => p.id).filter(Boolean);
+
+      const relOut = {};
+
+      const uniqBy = (arr, key) => {
+        const seen = new Set();
+        const out = [];
+        (arr || []).forEach((x) => {
+          const k = x && x[key];
+          if (!k || seen.has(k)) return;
+          seen.add(k);
+          out.push(x);
+        });
+        return out;
+      };
+
+      let sceneSopRel = [];
+      if (sopIds.length) {
+        const { data } = await supabase.from('scene_sop_rel').select('*').in('sop_id', sopIds);
+        sceneSopRel = sceneSopRel.concat(data || []);
+      }
+      if (sceneIds.length) {
+        const { data } = await supabase.from('scene_sop_rel').select('*').in('scene_id', sceneIds);
+        sceneSopRel = sceneSopRel.concat(data || []);
+      }
+      relOut.scene_sop_rel = uniqBy(sceneSopRel, 'id');
+
+      let peopleSopRel = [];
+      if (sopIds.length) {
+        const { data } = await supabase.from('people_sop_rel').select('*').in('sop_id', sopIds);
+        peopleSopRel = peopleSopRel.concat(data || []);
+      }
+      if (peopleIds.length) {
+        const { data } = await supabase.from('people_sop_rel').select('*').in('people_id', peopleIds);
+        peopleSopRel = peopleSopRel.concat(data || []);
+      }
+      relOut.people_sop_rel = uniqBy(peopleSopRel, 'id');
+
+      relations = relOut;
+    } catch (e) {
+      relations = { _error: e?.message || 'Failed to fetch relation tables' };
+    }
+
+    let sopVersions = [];
+    try {
+      const sopIds = (sops || []).map((s) => s.id).filter(Boolean);
+      if (sopIds.length) {
+        const { data } = await supabase.from('sop_versions').select('*').in('sop_id', sopIds);
+        sopVersions = data || [];
+      }
+    } catch {
+      sopVersions = [];
+    }
+
+    let sopUsageLogs = [];
+    try {
+      const { data } = await supabase.from('sop_usage_logs').select('*').eq('user_id', userId);
+      sopUsageLogs = data || [];
+    } catch {
+      sopUsageLogs = [];
+    }
+
+    const tables = {
+      scenes: scenes || [],
+      sops: sops || [],
+      sop_versions: sopVersions,
+      sop_usage_logs: sopUsageLogs,
+      scene_sop_rel: Array.isArray(relations?.scene_sop_rel) ? relations.scene_sop_rel : [],
+      people_sop_rel: Array.isArray(relations?.people_sop_rel) ? relations.people_sop_rel : [],
+      people_profiles: people || [],
+      interaction_logs: logs,
+      review_sessions: reviews || [],
+      user_npc_relations: npcRelations || [],
+      planner_lists: plannerLists || [],
+      planner_items: plannerItems || [],
+      planner_tags: plannerTags || [],
+      planner_item_tags: plannerItemTags || [],
+    };
+
     return {
         timestamp: new Date().toISOString(),
         userId,
@@ -846,7 +1109,15 @@ const getAllUserData = async (userId) => {
         people: people || [],
         interactionLogs: logs,
         reviewSessions: reviews || [],
-        npcRelations: npcRelations || []
+        npcRelations: npcRelations || [],
+        planner: {
+          lists: plannerLists || [],
+          items: plannerItems || [],
+          tags: plannerTags || [],
+          itemTags: plannerItemTags || [],
+        },
+        tables,
+        relations,
     };
   } catch (err) {
     console.error("Export Error:", err);
@@ -880,5 +1151,7 @@ module.exports = {
   initDB, saveScene, getRecentScenes, saveSOP, getSOPs, deleteSOP, deleteSOPsByTitle,
   savePersonProfile, updatePersonPrivateInfo, updatePersonTriggersPleasers, updatePersonReactionLibrary, deletePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog,
   saveReviewSession, getReviewSessions, getReviewSession, getUserStats,
+  getPlannerLists, ensurePlannerInbox, createPlannerList, updatePlannerList, deletePlannerList,
+  createPlannerItem, updatePlannerItem, deletePlannerItem, listPlannerItems,
   saveNPCRelation, getNPCRelations, updateNPCRelation, getAllUserData, uploadFile
 };

@@ -1,6 +1,8 @@
 const sceneService = require('../services/sceneService');
 const chatService = require('../services/chatService');
 const dbService = require('../services/dbService');
+const plannerAssistantService = require('../services/plannerAssistantService');
+const secretaryService = require('../services/secretaryService');
 const crypto = require('crypto');
 
 const normalizeForHash = (v) => {
@@ -229,6 +231,164 @@ async function routes(fastify, options) {
     } catch (err) {
       request.log.error(err);
       reply.code(500).send({ error: 'Failed to delete Person Profile', detail: err?.message });
+    }
+  });
+
+  fastify.get('/planner/lists/:userId', async (request, reply) => {
+    try {
+      const { userId } = request.params;
+      await dbService.ensurePlannerInbox(userId);
+      const lists = await dbService.getPlannerLists(userId);
+      return lists;
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to fetch planner lists', detail: err?.message });
+    }
+  });
+
+  fastify.post('/planner/lists', async (request, reply) => {
+    try {
+      const { userId, name } = request.body || {};
+      const list = await dbService.createPlannerList({ userId, name });
+      return list;
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to create planner list', detail: err?.message });
+    }
+  });
+
+  fastify.patch('/planner/lists/:id', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const { userId, patch } = request.body || {};
+      const list = await dbService.updatePlannerList({ id, userId, patch: patch || {} });
+      return list;
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to update planner list', detail: err?.message });
+    }
+  });
+
+  fastify.delete('/planner/lists/:id', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.query?.userId || request.body?.userId;
+      const deletedId = await dbService.deletePlannerList({ id, userId });
+      return { id: deletedId };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to delete planner list', detail: err?.message });
+    }
+  });
+
+  const dayRange = (nowInput) => {
+    const now = nowInput ? new Date(String(nowInput)) : new Date();
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    return { start: start.toISOString(), end: end.toISOString() };
+  };
+
+  fastify.get('/planner/items/:userId', async (request, reply) => {
+    try {
+      const { userId } = request.params;
+      const { type, status, listId, view, startAt, endAt, now } = request.query || {};
+
+      if (type === 'calendar') {
+        const [events, tasks] = await Promise.all([
+          dbService.listPlannerItems({ userId, type: 'event', status, listId, startAt, endAt }),
+          dbService.listPlannerItems({ userId, type: 'task', status, listId, dueAfter: startAt, dueBefore: endAt }),
+        ]);
+        const combined = [...(events || []), ...(tasks || [])].filter(Boolean);
+        combined.sort((a, b) => {
+          const ta = a.type === 'task' ? a.due_at : a.start_at;
+          const tb = b.type === 'task' ? b.due_at : b.start_at;
+          const na = ta ? new Date(ta).getTime() : 0;
+          const nb = tb ? new Date(tb).getTime() : 0;
+          return na - nb;
+        });
+        return combined;
+      }
+
+      if (view === 'today' || view === 'overdue' || view === 'upcoming') {
+        const { start, end } = dayRange(now);
+        if (view === 'today') {
+          return await dbService.listPlannerItems({ userId, type: 'task', status, listId, dueAfter: start, dueBefore: end });
+        }
+        if (view === 'overdue') {
+          return await dbService.listPlannerItems({ userId, type: 'task', status, listId, dueBefore: start });
+        }
+        return await dbService.listPlannerItems({ userId, type: 'task', status, listId, dueAfter: end });
+      }
+
+      return await dbService.listPlannerItems({ userId, type, status, listId, startAt, endAt });
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to fetch planner items', detail: err?.message });
+    }
+  });
+
+  fastify.post('/planner/items', async (request, reply) => {
+    try {
+      const { userId, item } = request.body || {};
+      const inbox = await dbService.ensurePlannerInbox(userId);
+      const next = { ...(item || {}) };
+      if (!next.list_id && inbox?.id) next.list_id = inbox.id;
+      const created = await dbService.createPlannerItem({ userId, item: next });
+      return created;
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to create planner item', detail: err?.message });
+    }
+  });
+
+  fastify.post('/planner/nl/parse', async (request, reply) => {
+    try {
+      const { userId, text, listId, tzOffsetMinutes } = request.body || {};
+      const uid = userId || 'user-1';
+      const parsed = await plannerAssistantService.parsePlannerText({ text, tzOffsetMinutes });
+      if (!parsed?.ok) {
+        reply.code(400).send({ error: 'Invalid input' });
+        return;
+      }
+      const built = plannerAssistantService.buildPlannerItemFromSuggestion({
+        suggestion: parsed.suggestion,
+        tzOffsetMinutes,
+        listId,
+      });
+      if (!built.ok) {
+        reply.code(200).send({ ...parsed, item: null, needConfirm: true });
+        return;
+      }
+      reply.code(200).send({ ...parsed, item: built.item, needConfirm: !!parsed.warning || !parsed.suggestion?.date });
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to parse' });
+    }
+  });
+
+  fastify.put('/planner/items/:id', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const { userId, patch } = request.body || {};
+      const updated = await dbService.updatePlannerItem({ id, userId, patch: patch || {} });
+      return updated;
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to update planner item', detail: err?.message });
+    }
+  });
+
+  fastify.delete('/planner/items/:id', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.query?.userId || request.body?.userId;
+      const deletedId = await dbService.deletePlannerItem({ id, userId });
+      return { id: deletedId };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to delete planner item', detail: err?.message });
     }
   });
 
@@ -644,6 +804,17 @@ async function routes(fastify, options) {
     } catch (err) {
       request.log.error(err);
       reply.code(500).send({ error: 'Backup export failed' });
+    }
+  });
+
+  fastify.get('/secretary/daily/:userId', async (request, reply) => {
+    try {
+      const { userId } = request.params;
+      const data = await secretaryService.getSecretaryDaily({ userId });
+      return data;
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to generate secretary reminders' });
     }
   });
 

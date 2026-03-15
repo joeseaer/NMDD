@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from 'react'
-import { Routes, Route, Link, useLocation } from 'react-router-dom'
-import { Brain, MessageSquare, User, Settings, LayoutDashboard, BookOpen, Users, FileText, Menu, X, Notebook, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Routes, Route, Link, Navigate, useLocation } from 'react-router-dom'
+import { Brain, MessageSquare, User, Settings, LayoutDashboard, Users, FileText, Menu, X, Notebook, ChevronLeft, ChevronRight, Calendar } from 'lucide-react'
 
 // Pages
 import Dashboard from './pages/Dashboard'
 import Training from './pages/Training'
 import Review from './pages/Review'
-import SOPManager from './pages/SOPManager'
 import NoteManager from './pages/NoteManager'
 import PersonalityManager from './pages/PersonalityManager'
 import RealReview from './pages/RealReview'
 import ChatAssistant from './pages/ChatAssistant'
 import EvolutionTree from './pages/EvolutionTree'
 import SettingsPage from './pages/Settings'
+import Planner from './pages/Planner'
+import FloatingAssistant from './components/FloatingAssistant'
 
 function App() {
   const location = useLocation();
@@ -28,7 +29,8 @@ function App() {
 
   useEffect(() => {
     if (location.pathname.includes('/training') || location.pathname.includes('/evolution-tree')) setActiveTab('dashboard');
-    else if (location.pathname.includes('/sop')) setActiveTab('sop');
+    else if (location.pathname.includes('/planner')) setActiveTab('planner');
+    else if (location.pathname.includes('/dashboard')) setActiveTab('dashboard');
     else if (location.pathname.includes('/notes')) setActiveTab('notes');
     else if (location.pathname.includes('/personality')) setActiveTab('personality');
     else if (location.pathname.includes('/real-review')) setActiveTab('real-review');
@@ -67,6 +69,12 @@ function App() {
         }
     }
   }, []);
+
+  const defaultHome = (import.meta as any).env?.VITE_DEFAULT_HOME || 'planner';
+  const Home = () => {
+    if (defaultHome === 'planner') return <Navigate to="/planner" replace />;
+    return <Dashboard />;
+  };
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden font-sans text-gray-900">
@@ -109,13 +117,13 @@ function App() {
         <nav className={`flex-1 overflow-y-auto ${isSidebarCollapsed ? 'p-2 space-y-4' : 'p-4 space-y-6'}`}>
           <div>
             {!isSidebarCollapsed && <h3 className="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">训练中心</h3>}
-            <SidebarLink collapsed={isSidebarCollapsed} to="/" icon={<LayoutDashboard size={20} />} label="训练仪表盘" active={activeTab === 'dashboard'} />
+            <SidebarLink collapsed={isSidebarCollapsed} to="/dashboard" icon={<LayoutDashboard size={20} />} label="训练仪表盘" active={activeTab === 'dashboard'} />
           </div>
 
           <div>
             {!isSidebarCollapsed && <h3 className="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">记录中心</h3>}
-            <SidebarLink collapsed={isSidebarCollapsed} to="/sop" icon={<BookOpen size={20} />} label="SOP 方法论库" active={activeTab === 'sop'} />
-            <SidebarLink collapsed={isSidebarCollapsed} to="/notes" icon={<Notebook size={20} />} label="随笔/文档" active={activeTab === 'notes'} />
+            <SidebarLink collapsed={isSidebarCollapsed} to="/planner" icon={<Calendar size={20} />} label="日程待办" active={activeTab === 'planner'} />
+            <SidebarLink collapsed={isSidebarCollapsed} to="/notes?view=notes" icon={<Notebook size={20} />} label="随笔/文档" active={activeTab === 'notes'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/personality" icon={<Users size={20} />} label="性格分析档案" active={activeTab === 'personality'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/real-review" icon={<FileText size={20} />} label="真实场景复盘" active={activeTab === 'real-review'} />
           </div>
@@ -170,10 +178,12 @@ function App() {
         <div className="flex-1 overflow-auto p-2 sm:p-4 lg:p-8 w-full">
           <div className="max-w-7xl mx-auto h-full">
             <Routes>
-              <Route path="/" element={<Dashboard />} />
+              <Route path="/" element={<Home />} />
+              <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/training/:sceneId" element={<Training />} />
               <Route path="/review/:sceneId" element={<Review />} />
-              <Route path="/sop" element={<SOPManager />} />
+              <Route path="/planner" element={<Planner />} />
+              <Route path="/sop" element={<Navigate to="/notes?view=sop" replace />} />
               <Route path="/notes" element={<NoteManager />} />
               <Route path="/personality" element={<PersonalityManager />} />
               <Route path="/real-review" element={<RealReview />} />
@@ -184,6 +194,8 @@ function App() {
           </div>
         </div>
       </main>
+
+      <FloatingAssistant />
     </div>
   )
 }

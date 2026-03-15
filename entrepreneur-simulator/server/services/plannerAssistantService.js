@@ -1,0 +1,255 @@
+const OpenAI = require('openai');
+
+let openaiClient = null;
+
+function getModel() {
+  const m = process.env.OPENAI_MODEL;
+  if (m && String(m).trim()) return String(m).trim();
+  const base = String(process.env.OPENAI_BASE_URL || '');
+  if (base.includes('dashscope.aliyuncs.com')) return 'qwen-plus';
+  return 'doubao-seed-2-0-pro-260215';
+}
+
+function extractJsonObject(text) {
+  if (!text || typeof text !== 'string') return null;
+  const cleaned = text.replace(/```json\n|```/g, '').trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch {}
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  const candidate = cleaned.slice(start, end + 1);
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function getOpenAIClientOrNull() {
+  if (openaiClient) return openaiClient;
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return null;
+  openaiClient = new OpenAI({
+    apiKey,
+    baseURL: process.env.OPENAI_BASE_URL,
+  });
+  return openaiClient;
+}
+
+function toUtcIsoFromLocalParts({ yyyy, mm, dd, hh, mi, tzOffsetMinutes }) {
+  const utcMillis = Date.UTC(yyyy, mm - 1, dd, hh, mi, 0, 0) + (Number(tzOffsetMinutes) || 0) * 60000;
+  return new Date(utcMillis).toISOString();
+}
+
+function toYmd(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function sanitizeTitle(inputTitle, rawText) {
+  const base = String(inputTitle || rawText || '').trim();
+  const stripped = base
+    .replace(/\d{4}-\d{1,2}-\d{1,2}/g, '')
+    .replace(/\d{1,2}月\d{1,2}日/g, '')
+    .replace(/\d{1,2}号/g, '')
+    .replace(/(今天|明天|后天|下周[一二三四五六日天])/g, '')
+    .replace(/[，,。\.、\s]+/g, ' ')
+    .trim();
+  return stripped || base;
+}
+
+function guessDueDateFromText(text, baseDate) {
+  const s = String(text || '').trim();
+  if (!s) return '';
+  if (s.includes('后天')) {
+    const d = new Date(baseDate);
+    d.setDate(d.getDate() + 2);
+    return toYmd(d);
+  }
+  if (s.includes('明天')) {
+    const d = new Date(baseDate);
+    d.setDate(d.getDate() + 1);
+    return toYmd(d);
+  }
+  if (s.includes('今天')) return toYmd(baseDate);
+
+  const nextWeekMatch = s.match(/下周([一二三四五六日天])/);
+  if (nextWeekMatch) {
+    const map = { '日': 0, '天': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6 };
+    const wd = map[nextWeekMatch[1]];
+    if (typeof wd === 'number') {
+      const d = new Date(baseDate);
+      const delta = (7 - d.getDay()) + wd;
+      d.setDate(d.getDate() + delta);
+      return toYmd(d);
+    }
+  }
+
+  const ymd = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (ymd) {
+    const yy = parseInt(ymd[1], 10);
+    const mm = parseInt(ymd[2], 10);
+    const dd = parseInt(ymd[3], 10);
+    if ([yy, mm, dd].every(Number.isFinite)) return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+  }
+
+  const md = s.match(/(\d{1,2})月(\d{1,2})日/);
+  if (md) {
+    const mm = parseInt(md[1], 10);
+    const dd = parseInt(md[2], 10);
+    if ([mm, dd].every(Number.isFinite)) {
+      const d = new Date(baseDate);
+      d.setMonth(mm - 1, dd);
+      d.setHours(0, 0, 0, 0);
+      const b = new Date(baseDate);
+      b.setHours(0, 0, 0, 0);
+      if (d.getTime() < b.getTime()) d.setFullYear(d.getFullYear() + 1);
+      return toYmd(d);
+    }
+  }
+
+  return '';
+}
+
+async function parsePlannerText({ text, tzOffsetMinutes }) {
+  const raw = String(text || '').trim();
+  if (!raw) return { ok: false, error: 'empty_text' };
+
+  const baseDate = new Date();
+  const fallbackDate = guessDueDateFromText(raw, baseDate) || toYmd(baseDate);
+  const fallbackTitle = sanitizeTitle(raw, raw);
+  const fallback = {
+    ok: true,
+    source: 'fallback',
+    suggestion: {
+      type: 'task',
+      title: fallbackTitle,
+      date: fallbackDate,
+      start_time: null,
+      end_time: null,
+    },
+    warning: null,
+  };
+
+  const client = getOpenAIClientOrNull();
+  if (!client) return fallback;
+
+  const now = new Date();
+  const nowText = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+  const prompt = `你是一个日程/待办的自然语言解析器。\n\n当前日期：${nowText}\n用户原话：${raw}\n\n任务：把用户原话解析为一个“待办(task)”或“日程(event)”。\n- 如果原话是某一天要做某事、提醒、记得、要完成：更像 task。\n- 如果原话是某天的活动、会议、约见、出去玩：更像 event。\n- 需要识别日期（支持：YYYY-MM-DD、X月X日、今天/明天/后天、下周一~下周日）。\n- 如果用户写了明显不合法的日期（例如 36月），请推断最可能的真实日期，并在 warnings 里说明；如果无法推断，则把 date 留空并在 warnings 里说明需要用户确认。\n- title 必须尽量去掉日期/时间词，只保留事情本身。例如“3月26号出去玩”应输出 title="出去玩"。\n\n只输出 JSON（不要 markdown）。字段：\n{\n  "type": "task"|"event",\n  "title": string,\n  "date": "YYYY-MM-DD"|"",\n  "start_time": "HH:MM"|"" ,\n  "end_time": "HH:MM"|"" ,\n  "confidence": 0-1,\n  "warnings": string[]\n}`;
+
+  try {
+    const completion = await client.chat.completions.create({
+      model: getModel(),
+      messages: [{ role: 'system', content: prompt }],
+    });
+    const parsed = extractJsonObject(completion?.choices?.[0]?.message?.content);
+    if (!parsed || typeof parsed !== 'object') return fallback;
+
+    const t = parsed.type === 'event' ? 'event' : 'task';
+    const title = sanitizeTitle(parsed.title, raw);
+    const date = typeof parsed.date === 'string' ? parsed.date.trim() : '';
+    const start_time = typeof parsed.start_time === 'string' ? parsed.start_time.trim() : '';
+    const end_time = typeof parsed.end_time === 'string' ? parsed.end_time.trim() : '';
+    const warnings = Array.isArray(parsed.warnings) ? parsed.warnings.map((x) => String(x)).filter(Boolean) : [];
+
+    const okDate = /^\d{4}-\d{2}-\d{2}$/.test(date);
+    if (!okDate) {
+      return {
+        ok: true,
+        source: 'llm',
+        suggestion: { type: t, title, date: '', start_time: start_time || null, end_time: end_time || null },
+        warning: warnings.length ? warnings.join('；') : '无法确认日期，请手动选择',
+      };
+    }
+
+    return {
+      ok: true,
+      source: 'llm',
+      suggestion: {
+        type: t,
+        title,
+        date,
+        start_time: start_time || null,
+        end_time: end_time || null,
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : null,
+      },
+      warning: warnings.length ? warnings.join('；') : null,
+    };
+  } catch {
+    return fallback;
+  }
+}
+
+function buildPlannerItemFromSuggestion({ suggestion, tzOffsetMinutes, listId }) {
+  const date = String(suggestion.date || '').trim();
+  const [yy, mm, dd] = date.split('-').map((x) => parseInt(x, 10));
+  if (![yy, mm, dd].every(Number.isFinite)) {
+    return { ok: false, error: 'invalid_date' };
+  }
+  const type = suggestion.type === 'event' ? 'event' : 'task';
+  const title = String(suggestion.title || '').trim();
+  if (!title) return { ok: false, error: 'empty_title' };
+
+  if (type === 'task') {
+    const now = new Date();
+    const dueIso = toUtcIsoFromLocalParts({
+      yyyy: yy,
+      mm,
+      dd,
+      hh: now.getHours(),
+      mi: now.getMinutes(),
+      tzOffsetMinutes,
+    });
+    return {
+      ok: true,
+      item: {
+        type: 'task',
+        title,
+        due_at: dueIso,
+        status: 'open',
+        priority: 'medium',
+        list_id: listId || null,
+      },
+    };
+  }
+
+  const start = String(suggestion.start_time || '').trim();
+  const end = String(suggestion.end_time || '').trim();
+  let sh = 9;
+  let smi = 0;
+  let eh = 18;
+  let emi = 0;
+  if (/^\d{2}:\d{2}$/.test(start)) {
+    sh = parseInt(start.slice(0, 2), 10);
+    smi = parseInt(start.slice(3, 5), 10);
+  }
+  if (/^\d{2}:\d{2}$/.test(end)) {
+    eh = parseInt(end.slice(0, 2), 10);
+    emi = parseInt(end.slice(3, 5), 10);
+  }
+
+  const startIso = toUtcIsoFromLocalParts({ yyyy: yy, mm, dd, hh: sh, mi: smi, tzOffsetMinutes });
+  const endIso = toUtcIsoFromLocalParts({ yyyy: yy, mm, dd, hh: eh, mi: emi, tzOffsetMinutes });
+
+  return {
+    ok: true,
+    item: {
+      type: 'event',
+      title,
+      start_at: startIso,
+      end_at: endIso,
+      status: 'open',
+      priority: 'medium',
+      list_id: listId || null,
+    },
+  };
+}
+
+module.exports = {
+  parsePlannerText,
+  buildPlannerItemFromSuggestion,
+};
+
