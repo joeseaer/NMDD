@@ -183,7 +183,7 @@ export default function PlannerCalendarPanel({
                     </button>
                   )}
                   <div className="flex-1 min-w-0">
-                    <div className={`text-sm font-medium truncate ${it.type === 'task' && it.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{it.title}</div>
+                    <div className={`text-sm font-medium whitespace-normal break-words ${it.type === 'task' && it.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{it.title}</div>
                     {it.type === 'event' ? (
                       <div className="text-xs text-gray-500 mt-0.5">
                         {formatMdHm(it.start_at)}

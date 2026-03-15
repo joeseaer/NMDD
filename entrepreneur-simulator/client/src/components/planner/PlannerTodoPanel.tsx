@@ -106,7 +106,7 @@ function TaskSection({
                   </div>
                 ) : (
                   <>
-                    <div className={`text-sm font-medium truncate ${it.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{it.title}</div>
+                    <div className={`text-sm font-medium whitespace-normal break-words ${it.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{it.title}</div>
                     {it.due_at && (
                       <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
                         <Clock className="w-3 h-3" />
