@@ -111,7 +111,17 @@ export const api = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(personData)
         });
-        if (!response.ok) throw new Error('Failed to update person');
+        if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            const statusHint = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+            if (!text) throw new Error(`Failed to update person (${statusHint})`);
+            try {
+                const data = JSON.parse(text);
+                throw new Error(data.error || data.detail || `Failed to update person (${statusHint})`);
+            } catch {
+                throw new Error(`Failed to update person (${statusHint}): ${text.substring(0, 160)}`);
+            }
+        }
         return response.json();
     },
 

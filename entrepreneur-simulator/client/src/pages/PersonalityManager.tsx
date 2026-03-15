@@ -472,20 +472,21 @@ export default function PersonalityManager() {
 
   // New: Handle Avatar Upload (Mock for now or use Base64 if small)
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files && e.target.files[0]) {
-          const file = e.target.files[0];
-          // Convert to base64 for demo simplicity (In prod, upload to server)
-          const reader = new FileReader();
-          reader.onloadend = async () => {
-              const base64 = reader.result as string;
-              if (selectedPerson) {
-                  const updated = { ...selectedPerson, avatar_real: base64, avatar_type: 'real' };
-                  await api.updatePerson(selectedPerson.id, updated);
-                  setSelectedPerson(updated);
-                  setPeople(prev => prev.map(p => p.id === updated.id ? updated : p));
-              }
-          };
-          reader.readAsDataURL(file);
+      const file = e.target.files && e.target.files[0];
+      if (!file || !selectedPerson) return;
+      try {
+          const uploaded = await api.uploadImage(file);
+          const imageUrl = uploaded?.url;
+          if (!imageUrl) throw new Error('上传失败：未返回图片地址');
+          const updated = { ...selectedPerson, avatar_real: imageUrl, avatar_type: 'real' };
+          await api.updatePerson(selectedPerson.id, updated);
+          setSelectedPerson(updated);
+          setPeople(prev => prev.map(p => p.id === updated.id ? updated : p));
+      } catch (err: any) {
+          console.error('Avatar upload failed', err);
+          alert(err?.message || '头像上传失败');
+      } finally {
+          e.target.value = '';
       }
   };
 
