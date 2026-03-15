@@ -103,6 +103,8 @@ export default function NoteManager() {
 
   const selectedNote = items.find(n => n.id === selectedNoteId) || null;
 
+  const shouldShowSidebar = showMobileSidebar || !selectedNoteId;
+
   const fetchData = async () => {
     try {
         setLoading(true);
@@ -225,14 +227,14 @@ export default function NoteManager() {
     <div className="flex h-full bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
       
       {/* Mobile Sidebar Overlay */}
-      {showMobileSidebar && (
+      {showMobileSidebar && selectedNoteId && (
         <div className="fixed inset-0 bg-black/50 z-40 lg:hidden" onClick={() => setShowMobileSidebar(false)} />
       )}
 
       {/* Sidebar List */}
       <div className={`
         fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-100 flex flex-col transform transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 lg:flex
-        ${showMobileSidebar ? 'translate-x-0' : '-translate-x-full'}
+        ${shouldShowSidebar ? 'translate-x-0' : '-translate-x-full'}
         ${selectedNoteId ? 'hidden lg:flex' : 'flex'}
       `}>
         <div className="p-4 border-b border-gray-100 flex justify-between items-center">
