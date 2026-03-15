@@ -475,7 +475,24 @@ export default function PersonalityManager() {
       const file = e.target.files && e.target.files[0];
       if (!file || !selectedPerson) return;
       try {
-          const uploaded = await api.uploadImage(file);
+          let uploadFile: File = file;
+          if (file.size > 2 * 1024 * 1024 && file.type.startsWith('image/')) {
+              const bmp = await createImageBitmap(file);
+              const max = 900;
+              const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+              const w = Math.max(1, Math.round(bmp.width * scale));
+              const h = Math.max(1, Math.round(bmp.height * scale));
+              const canvas = document.createElement('canvas');
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              if (ctx) ctx.drawImage(bmp, 0, 0, w, h);
+              const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+              if (blob) {
+                  uploadFile = new File([blob], file.name.replace(/\.(png|jpg|jpeg|webp|gif)$/i, '.jpg'), { type: 'image/jpeg' });
+              }
+          }
+          const uploaded = await api.uploadImage(uploadFile);
           const imageUrl = uploaded?.url;
           if (!imageUrl) throw new Error('上传失败：未返回图片地址');
           const updated = { ...selectedPerson, avatar_real: imageUrl, avatar_type: 'real' };
@@ -1344,6 +1361,12 @@ export default function PersonalityManager() {
                     {(() => {
                       const source = (isEditing && editForm) ? editForm : selectedPerson;
                       const related = Array.isArray(source?.related_people) ? source.related_people : [];
+                      const updateRelation = (idx: number, nextRelation: string) => {
+                        const base = Array.isArray(editForm?.related_people) ? editForm.related_people : [];
+                        const next = base.map((r: any, i: number) => (i === idx ? { ...(r || {}), relation: nextRelation } : r));
+                        setEditForm({ ...(editForm || {}), related_people: next });
+                      };
+
                       return related.length > 0 ? (
                         <div className="space-y-3">
                             {related.map((rel: any, i: number) => (
@@ -1353,7 +1376,16 @@ export default function PersonalityManager() {
                                     </div>
                                     <div className="flex-1 min-w-0">
                                         <div className="text-sm font-bold text-gray-900 truncate">{rel.name}</div>
-                                        <div className="text-xs text-gray-500 truncate">{rel.relation}</div>
+                                        {isEditing ? (
+                                          <input
+                                            value={String(rel.relation || '')}
+                                            onChange={(e) => updateRelation(i, e.target.value)}
+                                            className="mt-0.5 w-full bg-white border border-gray-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                            placeholder="请输入你与TA的关系（例如：同事/导师/同学/合作伙伴）"
+                                          />
+                                        ) : (
+                                          <div className="text-xs text-gray-500 truncate">{rel.relation}</div>
+                                        )}
                                     </div>
                                     {isEditing && (
                                         <button 
@@ -1866,7 +1898,8 @@ export default function PersonalityManager() {
                         <div 
                             key={p.id}
                             onClick={() => {
-                                const newRelated = [...(editForm.related_people || []), { id: p.id, name: p.name, role: p.identity, relation: 'unknown' }];
+                                const rel = window.prompt('请输入你与TA的关系（例如：同事/导师/同学/合作伙伴）', '') || 'unknown';
+                                const newRelated = [...(editForm.related_people || []), { id: p.id, name: p.name, role: p.identity, relation: rel }];
                                 setEditForm({ ...editForm, related_people: newRelated });
                                 setShowRelatedModal(false);
                             }}

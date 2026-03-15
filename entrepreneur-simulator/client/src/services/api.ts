@@ -20,8 +20,15 @@ export const api = {
         });
         
         if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to upload image');
+            const text = await response.text().catch(() => '');
+            const statusHint = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+            if (!text) throw new Error(`Failed to upload image (${statusHint})`);
+            try {
+                const errorData = JSON.parse(text);
+                throw new Error(errorData.error || errorData.detail || `Failed to upload image (${statusHint})`);
+            } catch {
+                throw new Error(`Failed to upload image (${statusHint}): ${text.substring(0, 160)}`);
+            }
         }
         return response.json();
     },

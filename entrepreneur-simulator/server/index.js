@@ -5,7 +5,11 @@ require('dotenv').config();
 // Plugins
 fastify.register(require('@fastify/cors'), { origin: true });
 fastify.register(require('@fastify/websocket'));
-fastify.register(require('@fastify/multipart'));
+fastify.register(require('@fastify/multipart'), {
+  limits: {
+    fileSize: 15 * 1024 * 1024,
+  },
+});
 
 // Services
 const dbService = require('./services/dbService');
