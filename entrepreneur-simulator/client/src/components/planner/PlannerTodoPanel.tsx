@@ -53,7 +53,14 @@ function TaskSection({
       ) : (
         <div className="mt-3 space-y-2">
           {ordered.map((it) => (
-            <div key={it.id} className="flex items-center gap-3 bg-white rounded-lg border border-gray-100 px-3 py-2">
+            <div 
+              key={it.id} 
+              className="flex items-center gap-3 bg-white rounded-lg border border-gray-100 px-3 py-2 cursor-move"
+              draggable
+              onDragStart={(e) => {
+                e.dataTransfer.setData('taskId', it.id);
+              }}
+            >
               <button
                 onClick={() => onToggleDone(it)}
                 className={`w-5 h-5 rounded border flex items-center justify-center ${it.status === 'done' ? 'bg-green-600 border-green-600' : 'border-gray-300 hover:border-gray-400'}`}

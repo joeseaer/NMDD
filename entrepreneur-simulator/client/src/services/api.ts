@@ -156,10 +156,11 @@ export const api = {
         return response.json();
     },
 
-    getPlannerItems: async (userId: string = CURRENT_USER_ID, opts?: { view?: 'today' | 'overdue' | 'upcoming'; listId?: string }) => {
+    getPlannerItems: async (userId: string = CURRENT_USER_ID, opts?: { view?: 'today' | 'overdue' | 'upcoming'; listId?: string; dueBefore?: string }) => {
         const params = new URLSearchParams();
         if (opts?.view) params.set('view', opts.view);
         if (opts?.listId) params.set('listId', opts.listId);
+        if (opts?.dueBefore) params.set('dueBefore', opts.dueBefore);
         const q = params.toString();
         const response = await fetch(`${API_BASE_URL}/planner/items/${userId}${q ? `?${q}` : ''}`);
         if (!response.ok) throw new Error('Failed to fetch planner items');

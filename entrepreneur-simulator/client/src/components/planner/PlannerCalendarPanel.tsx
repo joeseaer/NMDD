@@ -23,6 +23,7 @@ export default function PlannerCalendarPanel({
   onDeleteEvent,
   onToggleTaskDone,
   onDeleteTask,
+  onMoveTaskToDate,
 }: {
   focusDay: Date;
   setFocusDay: (d: Date) => void;
@@ -35,6 +36,7 @@ export default function PlannerCalendarPanel({
   onDeleteEvent: (id: string, title: string) => void;
   onToggleTaskDone: (it: PlannerCalendarItem) => void;
   onDeleteTask: (it: PlannerCalendarItem) => void;
+  onMoveTaskToDate?: (taskId: string, date: string) => void;
 }) {
   const [title, setTitle] = useState('');
   const [startLocal, setStartLocal] = useState('');
@@ -141,6 +143,13 @@ export default function PlannerCalendarPanel({
             <button
               key={d.toISOString()}
               onClick={() => setFocusDay(d)}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                const taskId = e.dataTransfer.getData('taskId');
+                if (taskId && onMoveTaskToDate) {
+                  onMoveTaskToDate(taskId, toKey(d));
+                }
+              }}
               className={`rounded-lg border px-2 py-2 text-left ${isActive ? 'border-primary bg-primary/5' : 'border-gray-200 hover:bg-gray-50'} ${!isInMonth ? 'opacity-50' : ''}`}
             >
               <div className="text-xs text-gray-500">{['日','一','二','三','四','五','六'][d.getDay()]}</div>
@@ -172,7 +181,14 @@ export default function PlannerCalendarPanel({
           ) : (
             <div className="mt-3 space-y-2">
               {dayEvents.map((it) => (
-                <div key={it.id} className="flex items-center gap-3 bg-gray-50/60 border border-gray-100 rounded-lg px-3 py-2">
+                <div 
+                  key={it.id} 
+                  className={`flex items-center gap-3 bg-gray-50/60 border border-gray-100 rounded-lg px-3 py-2 ${it.type === 'task' ? 'cursor-move' : ''}`}
+                  draggable={it.type === 'task'}
+                  onDragStart={(e) => {
+                    if (it.type === 'task') e.dataTransfer.setData('taskId', it.id);
+                  }}
+                >
                   {it.type === 'task' && (
                     <button
                       onClick={() => onToggleTaskDone(it)}

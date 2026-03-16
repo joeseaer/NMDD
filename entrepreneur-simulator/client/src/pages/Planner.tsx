@@ -137,9 +137,13 @@ export default function Planner() {
   const refresh = async () => {
     setLoading(true);
     try {
+      const now = new Date();
+      now.setHours(0, 0, 0, 0);
+      const dueBefore = now.toISOString();
+
       const [l, o, u] = await Promise.all([
         api.getPlannerLists(userId),
-        api.getPlannerItems(userId, { view: 'overdue', listId: activeListId || undefined }),
+        api.getPlannerItems(userId, { view: 'overdue', listId: activeListId || undefined, dueBefore }),
         api.getPlannerItems(userId, { view: 'upcoming', listId: activeListId || undefined }),
       ]);
       setLists(Array.isArray(l) ? l : []);
@@ -247,6 +251,26 @@ export default function Planner() {
     const d = new Date(focusDay);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }, [focusDay]);
+
+  const handleMoveTaskToDate = async (taskId: string, date: string) => {
+    const all = [...overdue, ...upcoming, ...focusDayTasks, ...(calendarItems.filter(it => it.type === 'task') as unknown as PlannerItem[])];
+    const target = all.find(it => it.id === taskId);
+    
+    const parts = date.split('-').map(x => parseInt(x, 10));
+    const d = new Date();
+    d.setFullYear(parts[0], parts[1] - 1, parts[2]);
+
+    if (target && target.due_at) {
+        const old = new Date(target.due_at);
+        if (!Number.isNaN(old.getTime())) {
+            d.setHours(old.getHours(), old.getMinutes(), 0, 0);
+        }
+    }
+
+    const nextDueAt = d.toISOString();
+    await api.updatePlannerItem(taskId, userId, { due_at: nextDueAt });
+    await Promise.all([refresh(), refreshEvents(focusDay)]);
+  };
 
   const focusDayTasks = useMemo(() => {
     return dayEvents.filter((it) => it.type === 'task') as unknown as PlannerItem[];
@@ -494,6 +518,7 @@ export default function Planner() {
             await api.deletePlannerItem(it.id, userId);
             await Promise.all([refreshEvents(focusDay), refresh()]);
           }}
+          onMoveTaskToDate={handleMoveTaskToDate}
         />
 
         <PlannerTodoPanel

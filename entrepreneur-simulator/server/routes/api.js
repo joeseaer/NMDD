@@ -293,7 +293,7 @@ async function routes(fastify, options) {
   fastify.get('/planner/items/:userId', async (request, reply) => {
     try {
       const { userId } = request.params;
-      const { type, status, listId, view, startAt, endAt, now } = request.query || {};
+      const { type, status, listId, view, startAt, endAt, now, dueBefore: queryDueBefore } = request.query || {};
 
       if (type === 'calendar') {
         const [events, tasks] = await Promise.all([
@@ -317,7 +317,8 @@ async function routes(fastify, options) {
           return await dbService.listPlannerItems({ userId, type: 'task', status, listId, dueAfter: start, dueBefore: end });
         }
         if (view === 'overdue') {
-          return await dbService.listPlannerItems({ userId, type: 'task', status, listId, dueBefore: start });
+          const limit = queryDueBefore || start;
+          return await dbService.listPlannerItems({ userId, type: 'task', status, listId, dueBefore: limit });
         }
         return await dbService.listPlannerItems({ userId, type: 'task', status, listId, dueAfter: end });
       }
