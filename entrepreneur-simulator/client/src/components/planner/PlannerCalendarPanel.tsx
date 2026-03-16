@@ -24,6 +24,8 @@ export default function PlannerCalendarPanel({
   onToggleTaskDone,
   onDeleteTask,
   onMoveTaskToDate,
+  isDragging,
+  setIsDragging,
 }: {
   focusDay: Date;
   setFocusDay: (d: Date) => void;
@@ -37,6 +39,8 @@ export default function PlannerCalendarPanel({
   onToggleTaskDone: (it: PlannerCalendarItem) => void;
   onDeleteTask: (it: PlannerCalendarItem) => void;
   onMoveTaskToDate?: (taskId: string, date: string) => void;
+  isDragging?: boolean;
+  setIsDragging?: (v: boolean) => void;
 }) {
   const [title, setTitle] = useState('');
   const [startLocal, setStartLocal] = useState('');
@@ -150,7 +154,13 @@ export default function PlannerCalendarPanel({
                   onMoveTaskToDate(taskId, toKey(d));
                 }
               }}
-              className={`rounded-lg border px-2 py-2 text-left ${isActive ? 'border-primary bg-primary/5' : 'border-gray-200 hover:bg-gray-50'} ${!isInMonth ? 'opacity-50' : ''}`}
+              className={`rounded-lg border px-2 py-2 text-left transition-all duration-200 ${
+                isActive 
+                  ? 'border-primary bg-primary/5' 
+                  : isDragging 
+                    ? 'border-indigo-300 bg-indigo-50/30 scale-[1.02] shadow-sm' 
+                    : 'border-gray-200 hover:bg-gray-50'
+              } ${!isInMonth ? 'opacity-50' : ''}`}
             >
               <div className="text-xs text-gray-500">{['日','一','二','三','四','五','六'][d.getDay()]}</div>
               <div className={`text-sm font-bold ${isActive ? 'text-primary' : 'text-gray-900'}`}>{d.getDate()}</div>
@@ -183,10 +193,16 @@ export default function PlannerCalendarPanel({
               {dayEvents.map((it) => (
                 <div 
                   key={it.id} 
-                  className={`flex items-center gap-3 bg-gray-50/60 border border-gray-100 rounded-lg px-3 py-2 ${it.type === 'task' ? 'cursor-move' : ''}`}
+                  className={`flex items-center gap-3 bg-gray-50/60 border border-gray-100 rounded-lg px-3 py-2 ${it.type === 'task' ? 'cursor-move hover:shadow-sm transition-all duration-200 active:scale-95 active:bg-gray-50' : ''}`}
                   draggable={it.type === 'task'}
                   onDragStart={(e) => {
-                    if (it.type === 'task') e.dataTransfer.setData('taskId', it.id);
+                    if (it.type === 'task') {
+                      e.dataTransfer.setData('taskId', it.id);
+                      if (setIsDragging) setIsDragging(true);
+                    }
+                  }}
+                  onDragEnd={() => {
+                    if (setIsDragging) setIsDragging(false);
                   }}
                 >
                   {it.type === 'task' && (

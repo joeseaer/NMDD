@@ -157,6 +157,8 @@ export default function Planner() {
     }
   };
 
+  const [isDragging, setIsDragging] = useState(false);
+
   const refreshEvents = async (day: Date) => {
     const d = new Date(day);
     let start: Date;
@@ -519,6 +521,8 @@ export default function Planner() {
             await Promise.all([refreshEvents(focusDay), refresh()]);
           }}
           onMoveTaskToDate={handleMoveTaskToDate}
+          isDragging={isDragging}
+          setIsDragging={setIsDragging}
         />
 
         <PlannerTodoPanel
@@ -588,6 +592,7 @@ export default function Planner() {
             await api.deletePlannerItem(it.id, userId);
             await Promise.all([refresh(), refreshEvents(focusDay)]);
           }}
+          setIsDragging={setIsDragging}
         />
       </div>
 

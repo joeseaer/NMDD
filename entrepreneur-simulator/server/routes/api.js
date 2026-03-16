@@ -318,7 +318,7 @@ async function routes(fastify, options) {
         }
         if (view === 'overdue') {
           const limit = queryDueBefore || start;
-          return await dbService.listPlannerItems({ userId, type: 'task', status, listId, dueBefore: limit });
+          return await dbService.listPlannerItems({ userId, type: 'task', status: 'open', listId, dueBefore: limit });
         }
         return await dbService.listPlannerItems({ userId, type: 'task', status, listId, dueAfter: end });
       }
