@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { BrainCircuit, ChevronDown, Sparkles } from 'lucide-react';
 import { api, CURRENT_USER_ID } from '../services/api';
 import PlannerTodoPanel, { PlannerItem } from '../components/planner/PlannerTodoPanel';
 import PlannerCalendarPanel, { PlannerCalendarItem } from '../components/planner/PlannerCalendarPanel';
@@ -24,13 +24,6 @@ export default function Planner() {
   const [secretary, setSecretary] = useState<any>(null);
   const [secretaryLoading, setSecretaryLoading] = useState(false);
 
-  const [quickReminderText, setQuickReminderText] = useState('');
-  const [quickReminderDate, setQuickReminderDate] = useState(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  });
-  const [quickReminderTouched, setQuickReminderTouched] = useState(false);
-
   const [creatingTask, setCreatingTask] = useState(false);
   const [creatingEvent, setCreatingEvent] = useState(false);
 
@@ -45,63 +38,6 @@ export default function Planner() {
   }, [lists]);
 
   const activeListId = selectedListId || inboxId;
-
-  const toYmd = (d: Date) => {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
-
-  const guessDueDateFromText = (text: string, base: Date) => {
-    const s = String(text || '').trim();
-    if (!s) return '';
-    if (s.includes('后天')) {
-      const d = new Date(base);
-      d.setDate(d.getDate() + 2);
-      return toYmd(d);
-    }
-    if (s.includes('明天')) {
-      const d = new Date(base);
-      d.setDate(d.getDate() + 1);
-      return toYmd(d);
-    }
-    if (s.includes('今天')) return toYmd(base);
-
-    const nextWeekMatch = s.match(/下周([一二三四五六日天])/);
-    if (nextWeekMatch) {
-      const map: Record<string, number> = { '日': 0, '天': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6 };
-      const wd = map[nextWeekMatch[1]];
-      if (typeof wd === 'number') {
-        const d = new Date(base);
-        const delta = (7 - d.getDay()) + wd;
-        d.setDate(d.getDate() + delta);
-        return toYmd(d);
-      }
-    }
-
-    const ymd = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if (ymd) {
-      const yy = parseInt(ymd[1], 10);
-      const mm = parseInt(ymd[2], 10);
-      const dd = parseInt(ymd[3], 10);
-      if ([yy, mm, dd].every(Number.isFinite)) return `${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
-    }
-
-    const md = s.match(/(\d{1,2})月(\d{1,2})日/);
-    if (md) {
-      const mm = parseInt(md[1], 10);
-      const dd = parseInt(md[2], 10);
-      if ([mm, dd].every(Number.isFinite)) {
-        const d = new Date(base);
-        d.setMonth(mm - 1, dd);
-        d.setHours(0, 0, 0, 0);
-        const b = new Date(base);
-        b.setHours(0, 0, 0, 0);
-        if (d.getTime() < b.getTime()) d.setFullYear(d.getFullYear() + 1);
-        return toYmd(d);
-      }
-    }
-
-    return '';
-  };
 
   const loadPeople = async () => {
     setPeopleLoading(true);
@@ -390,85 +326,69 @@ export default function Planner() {
               )}
             </div>
 
-            <div className="bg-white rounded-lg border border-gray-100 p-3">
-              <div className="text-xs font-bold text-gray-900">快速提醒（会进入待办）</div>
-              <div className="mt-2 flex flex-col sm:flex-row gap-2">
-                <input
-                  value={quickReminderText}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setQuickReminderText(v);
-                    if (!quickReminderTouched) {
-                      const g = guessDueDateFromText(v, new Date());
-                      if (g) setQuickReminderDate(g);
-                    }
-                  }}
-                  className="flex-1 bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  placeholder="例如：下周三提醒我给张三打电话"
-                />
-                <input
-                  type="date"
-                  value={quickReminderDate}
-                  onChange={(e) => { setQuickReminderTouched(true); setQuickReminderDate(e.target.value); }}
-                  className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                />
-                <button
-                  onClick={async () => {
-                    const t = String(quickReminderText || '').trim();
-                    if (!t) return;
-                    const base = new Date();
-                    let dueAt: string | null = null;
-                    if (quickReminderDate) {
-                      const parts = String(quickReminderDate).split('-').map((x) => parseInt(x, 10));
-                      if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
-                        const d = new Date(base);
-                        d.setFullYear(parts[0], parts[1] - 1, parts[2]);
-                        d.setHours(base.getHours(), base.getMinutes(), 0, 0);
-                        dueAt = d.toISOString();
-                      }
-                    }
-                    await api.createPlannerItem(userId, {
-                      type: 'task',
-                      title: `提醒：${t}`,
-                      due_at: dueAt,
-                      status: 'open',
-                      priority: 'medium',
-                      list_id: activeListId || null,
-                    });
-                    setQuickReminderText('');
-                    setQuickReminderTouched(false);
-                    await Promise.all([refresh(), refreshEvents(focusDay)]);
-                  }}
-                  className="bg-primary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-primary/90"
-                >
-                  添加
-                </button>
-              </div>
-              <div className="mt-2 text-[11px] text-gray-400">支持：今天/明天/后天/下周一~下周日、或直接选择日期。</div>
-            </div>
-
-            <div className="bg-white rounded-lg border border-gray-100 p-3 lg:col-span-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs font-bold text-gray-900">AI 建议（联系/约活动）</div>
-                <button onClick={() => loadSecretary({ refresh: true })} className="text-xs text-gray-500 hover:underline">刷新</button>
-              </div>
-              {secretaryLoading ? (
-                <div className="mt-2 text-xs text-gray-400">生成中…</div>
-              ) : secretary?.available === false ? (
-                <div className="mt-2 text-xs text-gray-400">{secretary?.message || 'AI 未配置，暂只显示规则提醒'}</div>
-              ) : (Array.isArray(secretary?.suggestions) && secretary.suggestions.length > 0) ? (
-                <div className="mt-2 space-y-2">
-                  {secretary.suggestions.map((s: any, idx: number) => (
-                    <div key={s.person_id || idx} className="text-xs text-gray-700">
-                      <div className="font-medium text-gray-900">{s.person_name}</div>
-                      <div className="text-gray-500 mt-0.5">{s.reason}</div>
-                      <div className="mt-1">建议：{s.action}</div>
-                    </div>
-                  ))}
+            <div className="bg-white rounded-lg border border-gray-100 p-3 lg:col-span-2 flex flex-col gap-4">
+              {/* Section 1: AI Suggestions */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                    <div className="text-xs font-bold text-gray-900">AI 建议（人脉维护）</div>
+                  </div>
+                  <button onClick={() => loadSecretary({ refresh: true })} className="text-xs text-gray-500 hover:underline">刷新</button>
                 </div>
-              ) : (
-                <div className="mt-2 text-xs text-gray-400 italic">暂无建议</div>
-              )}
+                {secretaryLoading ? (
+                  <div className="text-xs text-gray-400">正在思考中…</div>
+                ) : secretary?.available === false ? (
+                  <div className="text-xs text-red-500">{secretary?.message || '服务不可用'}</div>
+                ) : (Array.isArray(secretary?.suggestions) && secretary.suggestions.length > 0) ? (
+                  <div className="space-y-2">
+                    {secretary.suggestions.map((s: any, idx: number) => (
+                      <div key={s.person_id || idx} className="text-xs text-gray-700 bg-blue-50/30 p-2 rounded border border-blue-100/50">
+                        <div className="flex justify-between items-start">
+                          <span className="font-bold text-gray-900">{s.person_name}</span>
+                          <span className="text-[10px] text-blue-600 bg-blue-100/50 px-1.5 py-0.5 rounded">{s.when === 'today' ? '今天' : s.when === 'tomorrow' ? '明天' : '本周'}</span>
+                        </div>
+                        <div className="text-gray-500 mt-0.5">{s.reason}</div>
+                        <div className="mt-1 font-medium text-blue-800">建议：{s.action}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-400 italic">目前人脉维护良好，暂无特别建议。</div>
+                )}
+              </div>
+
+              {/* Section 2: AI Comprehensive Reminders */}
+              <div className="pt-3 border-t border-gray-100">
+                <div className="flex items-center gap-1.5 mb-2">
+                  <BrainCircuit className="w-3.5 h-3.5 text-purple-600" />
+                  <div className="text-xs font-bold text-gray-900">AI 综合提醒（事务与认知）</div>
+                </div>
+                {secretaryLoading ? (
+                  <div className="text-xs text-gray-400">正在分析上下文…</div>
+                ) : (Array.isArray(secretary?.general_reminders) && secretary.general_reminders.length > 0) ? (
+                  <div className="space-y-2">
+                    {secretary.general_reminders.map((r: any, idx: number) => {
+                      const isHigh = r.priority === 'high';
+                      const tone = isHigh ? 'red' : r.type === 'idea' ? 'purple' : 'gray';
+                      const bg = tone === 'red' ? 'bg-red-50/30 border-red-100/50' : tone === 'purple' ? 'bg-purple-50/30 border-purple-100/50' : 'bg-gray-50/50 border-gray-100';
+                      const text = tone === 'red' ? 'text-red-900' : tone === 'purple' ? 'text-purple-900' : 'text-gray-900';
+                      
+                      return (
+                        <div key={idx} className={`text-xs p-2 rounded border ${bg}`}>
+                          <div className={`font-bold ${text} mb-0.5 flex justify-between`}>
+                            <span>{r.title}</span>
+                            {isHigh && <span className="text-[10px] text-red-600 bg-red-100/50 px-1.5 py-0.5 rounded">重要</span>}
+                          </div>
+                          <div className="text-gray-600 leading-relaxed">{r.content}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-xs text-gray-400 italic">今日事务井井有条，无需额外提醒。</div>
+                )}
+              </div>
             </div>
           </div>
         </div>
