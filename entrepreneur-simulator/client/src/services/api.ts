@@ -252,7 +252,10 @@ export const api = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
-        if (!response.ok) throw new Error('Failed to generate AI follow up suggestion');
+        if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            throw new Error(text || 'Failed to generate AI follow up suggestion');
+        }
         return response.json();
     },
 

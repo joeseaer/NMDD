@@ -552,13 +552,21 @@ export default function PersonalityManager() {
           }
       } catch (err) {
           console.error('Failed to generate AI follow-up', err);
+          alert('刷新建议失败，请稍后重试');
       } finally {
           setGeneratingAIFollowUp(null);
       }
   };
 
   const renderAIFollowUpTag = (person: any) => {
-      const suggestion = person.ai_followup_suggestion;
+      const suggestion = (() => {
+          const raw = person.ai_followup_suggestion;
+          if (!raw) return null;
+          if (typeof raw === 'string') {
+              try { return JSON.parse(raw); } catch { return null; }
+          }
+          return raw;
+      })();
       const isGenerating = generatingAIFollowUp === person.id;
       
       return (

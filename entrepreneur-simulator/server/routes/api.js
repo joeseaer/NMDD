@@ -464,42 +464,61 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
   "color": "bg-red-100 text-red-700"
 }`;
 
+      const fallbackSuggestion = (() => {
+        const strength = Number(profile.relationship_strength || 0);
+        const last = profile.last_interaction_date ? new Date(String(profile.last_interaction_date)) : null;
+        const nowTs = Date.now();
+        const lastTs = last && !Number.isNaN(last.getTime()) ? last.getTime() : null;
+        const days = lastTs ? Math.floor((nowTs - lastTs) / (24 * 60 * 60 * 1000)) : null;
+        if (days === null) return { label: '🕒 建议尽快破冰', color: 'bg-orange-100 text-orange-700' };
+        if (days >= 45 || (strength >= 70 && days >= 21)) return { label: '🔥 建议本周联系', color: 'bg-red-100 text-red-700' };
+        if (days >= 14) return { label: '📩 建议近期问候', color: 'bg-blue-100 text-blue-700' };
+        if (days <= 3 && strength >= 60) return { label: '✅ 关系稳固', color: 'bg-green-100 text-green-700' };
+        return { label: '🕒 下周可跟进', color: 'bg-blue-100 text-blue-700' };
+      })();
+
       const client = secretaryService.getOpenAIClientOrNull ? secretaryService.getOpenAIClientOrNull() : null;
-      let suggestionObj = { label: '暂无建议', color: 'bg-gray-100 text-gray-700' };
+      let suggestionObj = fallbackSuggestion;
+      let source = 'rule';
 
       if (client) {
-        const completion = await client.chat.completions.create({
-          model: secretaryService.getModel ? secretaryService.getModel() : 'gpt-3.5-turbo',
-          messages: [{ role: 'system', content: prompt }],
-        });
-        
         try {
+          const completion = await client.chat.completions.create({
+            model: secretaryService.getModel ? secretaryService.getModel() : 'gpt-3.5-turbo',
+            messages: [{ role: 'system', content: prompt }],
+          });
           const content = completion?.choices?.[0]?.message?.content || '{}';
           request.log.info({ msg: 'AI suggestion response', content, personId: id });
-          
-          let cleaned = content.replace(/```json\n|```/g, '').trim();
+          let cleaned = content.replace(/```(?:json)?\s*|```/g, '').trim();
           const start = cleaned.indexOf('{');
           const end = cleaned.lastIndexOf('}');
-          if (start !== -1 && end !== -1 && end >= start) {
-            cleaned = cleaned.slice(start, end + 1);
-          }
-          
+          if (start !== -1 && end !== -1 && end >= start) cleaned = cleaned.slice(start, end + 1);
           const parsed = JSON.parse(cleaned);
-          if (parsed.label) {
+          if (parsed && typeof parsed.label === 'string' && parsed.label.trim()) {
             suggestionObj = {
-              label: parsed.label.slice(0, 20), // 强制截断防溢出
-              color: parsed.color || 'bg-gray-100 text-gray-700'
+              label: parsed.label.trim().slice(0, 20),
+              color: typeof parsed.color === 'string' && parsed.color.trim() ? parsed.color.trim() : fallbackSuggestion.color,
             };
+            source = 'ai';
           }
-        } catch(e) {
-          request.log.error({ msg: 'Failed to parse AI suggestion JSON', error: e.message });
+        } catch (e) {
+          request.log.error({ msg: 'AI suggestion generate/parse failed, fallback to rule', error: e?.message });
         }
       } else {
-        request.log.warn('OpenAI client not initialized for ai-suggestion');
+        request.log.warn('OpenAI client not initialized for ai-suggestion, fallback to rule');
       }
 
-      const updatedId = await dbService.updatePersonAIFollowUp(id, suggestionObj);
-      return { id: updatedId, suggestion: suggestionObj };
+      let persisted = true;
+      let persistError = null;
+      try {
+        await dbService.updatePersonAIFollowUp(id, suggestionObj);
+      } catch (e) {
+        persisted = false;
+        persistError = e?.message || 'persist failed';
+        request.log.error({ msg: 'Persist ai followup failed, but returning suggestion anyway', error: persistError, personId: id });
+      }
+
+      return { id, suggestion: suggestionObj, source, persisted, persistError };
 
     } catch (err) {
       request.log.error(err);
