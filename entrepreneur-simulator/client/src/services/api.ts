@@ -255,7 +255,13 @@ export const api = {
         });
         if (!response.ok) {
             const text = await response.text().catch(() => '');
-            throw new Error(text || 'Failed to generate AI follow up suggestion');
+            if (!text) throw new Error('刷新 AI 建议失败');
+            try {
+                const json = JSON.parse(text);
+                throw new Error(json?.detail || json?.error || '刷新 AI 建议失败');
+            } catch {
+                throw new Error(text.substring(0, 160));
+            }
         }
         return response.json();
     },
