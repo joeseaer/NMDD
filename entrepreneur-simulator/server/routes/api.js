@@ -444,24 +444,38 @@ async function routes(fastify, options) {
       const logs = await dbService.getInteractionLogs(id);
       
       const prompt = `你是用户的“人脉关系顾问”。
-目标：基于人物档案和过往互动记录，为用户提供【极短的】跟进标签词。
+目标：基于人物档案和过往互动记录，为用户提供【极短且个性化】的跟进标签词。
 
 人物信息：
 姓名：${profile.name}
+身份：${profile.identity || '未知'}
+DISC：${profile.disc_type || '未知'}
+标签：${Array.isArray(profile.tags) ? profile.tags.join('、') : '无'}
 关系强度：${profile.relationship_strength}
 最近互动时间：${profile.last_interaction_date || '无'}
+最近互动摘要：${profile.last_interaction || '无'}
+上一条建议：${(() => {
+  const raw = profile.ai_followup_suggestion;
+  if (!raw) return '无';
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object' && raw.label) return raw.label;
+  return '无';
+})()}
 
 互动历史摘要：
 ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
 
 请输出一段纯 JSON，包含 label 和 color 字段。
 要求：
-1. label: 必须极其简短（5-8个字以内），例如："🔥 建议本周约饭", "🕒 建议下月问候", "✅ 关系稳固", "⚠️ 需紧急破冰"。必须带一个 emoji 开头。
+1. label: 必须极其简短（5-8个字以内），必须带 emoji 开头，且必须包含一个具体动作词（如：问候/约聊/跟进/破冰/致谢/祝贺）。
 2. color: 根据紧迫程度选择 Tailwind CSS 类。例如红色 "bg-red-100 text-red-700" (紧急/久未联系)，蓝色 "bg-blue-100 text-blue-700" (常规维护)，橙色 "bg-orange-100 text-orange-700" (近期需跟进)，绿色 "bg-green-100 text-green-700" (状态良好)。
+3. 不要输出泛化句式（如“近期可问候”“建议本周联系”这类无对象特征句）。
+4. label 要结合身份/互动内容体现差异，例如导师可偏“汇报/请教”，同学可偏“近况/合作”，合作伙伴可偏“进度/资源”。
+5. 若“上一条建议”不是“无”，尽量避免重复相同措辞，除非判断为紧急场景。
 
 只输出 JSON 对象，不要任何多余的字符：
 {
-  "label": "🔥 建议本周约饭",
+  "label": "🔥 跟进论文进展",
   "color": "bg-red-100 text-red-700"
 }`;
 
@@ -475,6 +489,7 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
         const completion = await client.chat.completions.create({
           model: secretaryService.getModel ? secretaryService.getModel() : 'gpt-3.5-turbo',
           messages: [{ role: 'system', content: prompt }],
+          temperature: 0.9,
         });
         const content = completion?.choices?.[0]?.message?.content || '{}';
         request.log.info({ msg: 'AI suggestion response', content, personId: id });
