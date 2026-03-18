@@ -210,6 +210,21 @@ export default function Planner() {
     await Promise.all([refresh(), refreshEvents(focusDay)]);
   };
 
+  const handleReorderTask = async (sourceId: string, targetId: string) => {
+    // A simplified UI reorder logic by slightly modifying due_at time
+    const all = [...overdue, ...upcoming, ...focusDayTasks, ...(calendarItems.filter(it => it.type === 'task') as unknown as PlannerItem[])];
+    const source = all.find(it => it.id === sourceId);
+    const target = all.find(it => it.id === targetId);
+    if (!source || !target || !target.due_at) return;
+    
+    const targetDate = new Date(target.due_at);
+    // Put source slightly before target
+    targetDate.setMinutes(targetDate.getMinutes() - 1);
+    
+    await api.updatePlannerItem(sourceId, userId, { due_at: targetDate.toISOString() });
+    await Promise.all([refresh(), refreshEvents(focusDay)]);
+  };
+
   const focusDayTasks = useMemo(() => {
     return dayEvents.filter((it) => it.type === 'task') as unknown as PlannerItem[];
   }, [dayEvents]);
@@ -513,6 +528,7 @@ export default function Planner() {
             await Promise.all([refresh(), refreshEvents(focusDay)]);
           }}
           setIsDragging={setIsDragging}
+          onReorder={handleReorderTask}
         />
       </div>
 

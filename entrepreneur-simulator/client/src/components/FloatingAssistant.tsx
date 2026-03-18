@@ -79,16 +79,7 @@ export default function FloatingAssistant() {
   const [touched, setTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [parsing, setParsing] = useState(false);
-  const [draft, setDraft] = useState<null | {
-    type: 'task' | 'event';
-    title: string;
-    date: string;
-    start_time?: string | null;
-    end_time?: string | null;
-    warning?: string | null;
-    series?: { start_date: string; end_date: string; frequency: 'daily' } | null;
-    createdIds?: string[];
-  }>(null);
+  const [drafts, setDrafts] = useState<any[]>([]);
   const disabled = useMemo(() => saving || parsing || !text.trim(), [saving, parsing, text]);
 
   const toIsoFromLocal = (date: string, time: string) => {
@@ -106,28 +97,14 @@ export default function FloatingAssistant() {
     return d.toISOString();
   };
 
-  const enumerateDays = (startDate: string, endDate: string) => {
-    const s = new Date(`${startDate}T00:00:00`);
-    const e = new Date(`${endDate}T00:00:00`);
-    if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime())) return [];
-    const out: string[] = [];
-    const maxDays = 62;
-    let cur = new Date(s);
-    let guard = 0;
-    while (cur.getTime() <= e.getTime() && guard < maxDays) {
-      out.push(toYmd(cur));
-      cur.setDate(cur.getDate() + 1);
-      guard += 1;
-    }
-    return out;
-  };
 
   const undoCreated = async () => {
-    if (!draft?.createdIds?.length) return;
+    const allIds = drafts.flatMap(d => d.createdIds || []);
+    if (!allIds.length) return;
     setSaving(true);
     try {
-      await Promise.all(draft.createdIds.map((id) => api.deletePlannerItem(id, userId)));
-      setDraft(null);
+      await Promise.all(allIds.map((id) => api.deletePlannerItem(id, userId)));
+      setDrafts([]);
     } finally {
       setSaving(false);
     }
@@ -172,78 +149,43 @@ export default function FloatingAssistant() {
               />
             </div>
 
-            {draft && (
-              <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-3 space-y-2">
-                <div className="flex items-center justify-between">
-                  <div className="text-xs font-bold text-gray-900">解析结果</div>
-                  <button onClick={() => setDraft(null)} className="text-xs text-gray-500 hover:underline">清除</button>
+            {drafts.length > 0 && (
+              <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-3 space-y-2 max-h-60 overflow-y-auto">
+                <div className="flex items-center justify-between sticky top-0 bg-gray-50/90 backdrop-blur-sm pb-2 z-10">
+                  <div className="text-xs font-bold text-gray-900">解析结果 ({drafts.length}个)</div>
+                  <button onClick={() => setDrafts([])} className="text-xs text-gray-500 hover:underline">清除</button>
                 </div>
-                {draft.warning && <div className="text-[11px] text-amber-700">{draft.warning}</div>}
-                {draft.createdIds?.length ? (
-                  <div className="text-[11px] text-emerald-700">已添加 {draft.createdIds.length} 条，可撤回。</div>
-                ) : null}
-                <div className="grid grid-cols-1 gap-2">
-                  <select
-                    value={draft.type}
-                    onChange={(e) => setDraft({ ...draft, type: e.target.value as any })}
-                    className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  >
-                    <option value="task">待办提醒</option>
-                    <option value="event">日程</option>
-                  </select>
-                  <input
-                    value={draft.title}
-                    onChange={(e) => setDraft({ ...draft, title: e.target.value })}
-                    className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    placeholder="标题"
-                  />
-                  <input
-                    type="date"
-                    value={draft.date}
-                    onChange={(e) => setDraft({ ...draft, date: e.target.value })}
-                    className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  />
-                  {draft.series?.frequency === 'daily' && (
-                    <div className="grid grid-cols-2 gap-2">
+                {drafts.some(d => d.warning) && <div className="text-[11px] text-amber-700">{drafts.find(d => d.warning)?.warning}</div>}
+                
+                {drafts.map((draft, idx) => (
+                  <div key={idx} className="bg-white border border-gray-100 rounded-md p-2 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-gray-700">事件 {idx + 1}</span>
+                      <span className="text-[10px] text-gray-500">{draft.type === 'event' ? '日程' : '待办'}</span>
+                    </div>
+                    <input
+                      value={draft.title}
+                      readOnly
+                      className="w-full bg-gray-50 border border-gray-200 rounded px-2 py-1 text-xs text-gray-600 focus:outline-none"
+                    />
+                    <div className="flex gap-2">
                       <input
                         type="date"
-                        value={draft.series.start_date}
-                        onChange={(e) => setDraft({ ...draft, series: { ...draft.series!, start_date: e.target.value } })}
-                        className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      />
-                      <input
-                        type="date"
-                        value={draft.series.end_date}
-                        onChange={(e) => setDraft({ ...draft, series: { ...draft.series!, end_date: e.target.value } })}
-                        className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                        value={draft.date}
+                        readOnly
+                        className="flex-1 bg-gray-50 border border-gray-200 rounded px-2 py-1 text-xs text-gray-600 focus:outline-none"
                       />
                     </div>
-                  )}
-                  {draft.type === 'event' && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <input
-                        type="time"
-                        value={draft.start_time || '09:00'}
-                        onChange={(e) => setDraft({ ...draft, start_time: e.target.value })}
-                        className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      />
-                      <input
-                        type="time"
-                        value={draft.end_time || '18:00'}
-                        onChange={(e) => setDraft({ ...draft, end_time: e.target.value })}
-                        className="bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-                      />
-                    </div>
-                  )}
-                </div>
+                  </div>
+                ))}
 
                 <button
-                  disabled={saving || !draft.createdIds?.length}
+                  disabled={saving || drafts.flatMap(d => d.createdIds || []).length === 0}
                   onClick={undoCreated}
-                  className="w-full inline-flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-900 px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+                  className="w-full inline-flex items-center justify-center gap-2 bg-white border border-gray-200 text-gray-900 px-4 py-2 mt-2 rounded-lg text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
                 >
                   <X className="w-4 h-4" />
-                  {saving ? '撤回中…' : '撤回'}
+                  {saving ? '撤回中…' : '撤回全部'}
                 </button>
               </div>
             )}
@@ -257,62 +199,54 @@ export default function FloatingAssistant() {
                   const tzOffsetMinutes = new Date().getTimezoneOffset();
                   try {
                     const res = await api.parsePlannerText(userId, { text: t, listId: null, tzOffsetMinutes });
-                    const suggestion = res?.suggestion;
-                    const date = typeof suggestion?.date === 'string' && suggestion.date ? suggestion.date : (dueDate || toYmd(new Date()));
-                    const nextDraft = {
-                      type: suggestion?.type === 'event' ? 'event' : 'task',
-                      title: String(suggestion?.title || sanitizeTitle(t, t)).trim() || t,
-                      date,
-                      start_time: suggestion?.start_time || null,
-                      end_time: suggestion?.end_time || null,
-                      warning: res?.warning || null,
-                      series: suggestion?.series || null,
-                      createdIds: [],
-                    } as any;
+                    const suggestions = Array.isArray(res?.suggestions) ? res.suggestions : (res?.suggestion ? [res.suggestion] : []);
+                    
+                    if (suggestions.length === 0) throw new Error('No suggestions');
 
-                    const createdIds: string[] = [];
-                    if (nextDraft.type === 'task' && nextDraft.series?.frequency === 'daily') {
-                      const days = enumerateDays(nextDraft.series.start_date, nextDraft.series.end_date);
-                      for (const d of days) {
-                        const dueAt = makeDueAtIso(d);
+                    const newDrafts = [];
+                    for (const suggestion of suggestions) {
+                      const date = typeof suggestion?.date === 'string' && suggestion.date ? suggestion.date : (dueDate || toYmd(new Date()));
+                      const draftItem = {
+                        type: suggestion?.type === 'event' ? 'event' : 'task',
+                        title: String(suggestion?.title || sanitizeTitle(t, t)).trim() || t,
+                        date,
+                        start_time: suggestion?.start_time || null,
+                        end_time: suggestion?.end_time || null,
+                        warning: res?.warning || null,
+                        createdIds: [] as string[],
+                      };
+
+                      if (draftItem.type === 'task') {
+                        const dueAt = makeDueAtIso(draftItem.date);
                         const created = await api.createPlannerItem(userId, {
                           type: 'task',
-                          title: `提醒：${String(nextDraft.title).trim()}`,
+                          title: `提醒：${String(draftItem.title).trim()}`,
                           due_at: dueAt,
                           status: 'open',
                           priority: 'medium',
                           list_id: null,
                         });
-                        if (created?.id) createdIds.push(String(created.id));
+                        if (created?.id) draftItem.createdIds.push(String(created.id));
+                      } else {
+                        const s = toIsoFromLocal(draftItem.date, String(draftItem.start_time || '09:00'));
+                        const e = toIsoFromLocal(draftItem.date, String(draftItem.end_time || '18:00'));
+                        const created = await api.createPlannerItem(userId, {
+                          type: 'event',
+                          title: String(draftItem.title).trim(),
+                          start_at: s,
+                          end_at: e,
+                          status: 'open',
+                          priority: 'medium',
+                          list_id: null,
+                        });
+                        if (created?.id) draftItem.createdIds.push(String(created.id));
                       }
-                    } else if (nextDraft.type === 'task') {
-                      const dueAt = makeDueAtIso(nextDraft.date);
-                      const created = await api.createPlannerItem(userId, {
-                        type: 'task',
-                        title: `提醒：${String(nextDraft.title).trim()}`,
-                        due_at: dueAt,
-                        status: 'open',
-                        priority: 'medium',
-                        list_id: null,
-                      });
-                      if (created?.id) createdIds.push(String(created.id));
-                    } else {
-                      const s = toIsoFromLocal(nextDraft.date, String(nextDraft.start_time || '09:00'));
-                      const e = toIsoFromLocal(nextDraft.date, String(nextDraft.end_time || '18:00'));
-                      const created = await api.createPlannerItem(userId, {
-                        type: 'event',
-                        title: String(nextDraft.title).trim(),
-                        start_at: s,
-                        end_at: e,
-                        status: 'open',
-                        priority: 'medium',
-                        list_id: null,
-                      });
-                      if (created?.id) createdIds.push(String(created.id));
+                      newDrafts.push(draftItem);
                     }
 
-                    setDraft({ ...nextDraft, createdIds });
-                    if (!touched && suggestion?.date) setDueDate(suggestion.date);
+                    setDrafts(newDrafts);
+                    if (!touched && suggestions[0]?.date) setDueDate(suggestions[0].date);
+                    setText('');
                   } catch {
                     const date = dueDate || toYmd(new Date());
                     const title = sanitizeTitle(t, t) || t;
@@ -325,16 +259,16 @@ export default function FloatingAssistant() {
                       priority: 'medium',
                       list_id: null,
                     });
-                    setDraft({
+                    setDrafts([{
                       type: 'task',
                       title,
                       date,
                       start_time: null,
                       end_time: null,
-                      warning: 'AI 解析失败，已使用本地解析（可手动调整）',
-                      series: null,
+                      warning: 'AI 解析失败，已使用本地解析',
                       createdIds: created?.id ? [String(created.id)] : [],
-                    });
+                    }]);
+                    setText('');
                   }
                 } finally {
                   setParsing(false);

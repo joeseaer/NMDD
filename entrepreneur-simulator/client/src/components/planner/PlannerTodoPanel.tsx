@@ -24,6 +24,7 @@ function TaskSection({
   onUpdate,
   onDelete,
   setIsDragging,
+  onReorder,
 }: {
   title: string;
   items: PlannerItem[];
@@ -32,12 +33,15 @@ function TaskSection({
   onUpdate: (it: PlannerItem, patch: { title?: string; dueDate?: string | null }) => void;
   onDelete: (it: PlannerItem) => void;
   setIsDragging: (v: boolean) => void;
+  onReorder?: (taskId: string, targetId: string) => void;
 }) {
   const border = tone === 'red' ? 'border-red-200' : tone === 'blue' ? 'border-blue-200' : 'border-gray-200';
   const bg = tone === 'red' ? 'bg-red-50/40' : tone === 'blue' ? 'bg-blue-50/40' : 'bg-gray-50/40';
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState('');
   const [editingDue, setEditingDue] = useState<string>('');
+  const [dragOverId, setDragOverId] = useState<string | null>(null);
+
   const ordered = [...items].sort((a, b) => {
     const sa = a.status === 'done' ? 1 : 0;
     const sb = b.status === 'done' ? 1 : 0;
@@ -57,11 +61,26 @@ function TaskSection({
           {ordered.map((it) => (
             <div 
               key={it.id} 
-              className="flex items-center gap-3 bg-white rounded-lg border border-gray-100 px-3 py-2 cursor-move hover:shadow-sm transition-all duration-200 active:scale-95 active:bg-gray-50"
+              className={`flex items-center gap-3 bg-white rounded-lg border px-3 py-2 cursor-move hover:shadow-sm transition-all duration-200 active:scale-95 active:bg-gray-50 ${dragOverId === it.id ? 'border-indigo-400 bg-indigo-50/30 border-t-2 border-t-indigo-500' : 'border-gray-100'}`}
               draggable
               onDragStart={(e) => {
                 e.dataTransfer.setData('taskId', it.id);
                 setIsDragging(true);
+              }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOverId(it.id);
+              }}
+              onDragLeave={() => {
+                setDragOverId(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverId(null);
+                const sourceId = e.dataTransfer.getData('taskId');
+                if (sourceId && sourceId !== it.id && onReorder) {
+                  onReorder(sourceId, it.id);
+                }
               }}
               onDragEnd={() => setIsDragging(false)}
             >
@@ -163,6 +182,7 @@ export default function PlannerTodoPanel({
   onUpdate,
   onDelete,
   setIsDragging,
+  onReorder,
 }: {
   activeListId: string;
   focusDayLabel: string;
@@ -175,6 +195,7 @@ export default function PlannerTodoPanel({
   onUpdate: (it: PlannerItem, patch: { title?: string; dueDate?: string | null }) => void;
   onDelete: (it: PlannerItem) => void;
   setIsDragging: (v: boolean) => void;
+  onReorder?: (taskId: string, targetId: string) => void;
 }) {
   const [title, setTitle] = useState('');
   const [dueDate, setDueDate] = useState(() => {
@@ -225,9 +246,9 @@ export default function PlannerTodoPanel({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <TaskSection title={`当天（${focusDayLabel}）`} items={focusDayTasks} tone="blue" onToggleDone={onToggleDone} onUpdate={onUpdate} onDelete={onDelete} setIsDragging={setIsDragging} />
-        <TaskSection title="逾期" items={overdue} tone="red" onToggleDone={onToggleDone} onUpdate={onUpdate} onDelete={onDelete} setIsDragging={setIsDragging} />
-        <TaskSection title="未来" items={upcoming} tone="gray" onToggleDone={onToggleDone} onUpdate={onUpdate} onDelete={onDelete} setIsDragging={setIsDragging} />
+        <TaskSection title={`当天（${focusDayLabel}）`} items={focusDayTasks} tone="blue" onToggleDone={onToggleDone} onUpdate={onUpdate} onDelete={onDelete} setIsDragging={setIsDragging} onReorder={onReorder} />
+        <TaskSection title="逾期" items={overdue} tone="red" onToggleDone={onToggleDone} onUpdate={onUpdate} onDelete={onDelete} setIsDragging={setIsDragging} onReorder={onReorder} />
+        <TaskSection title="未来" items={upcoming} tone="gray" onToggleDone={onToggleDone} onUpdate={onUpdate} onDelete={onDelete} setIsDragging={setIsDragging} onReorder={onReorder} />
       </div>
     </div>
   );

@@ -196,13 +196,13 @@ async function parsePlannerText({ text, tzOffsetMinutes }) {
   const fallback = {
     ok: true,
     source: 'fallback',
-    suggestion: {
+    suggestions: [{
       type: 'task',
       title: fallbackTitle,
       date: fallbackDate,
       start_time: null,
       end_time: null,
-    },
+    }],
     warning: null,
   };
 
@@ -212,7 +212,32 @@ async function parsePlannerText({ text, tzOffsetMinutes }) {
   const now = new Date();
   const nowText = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
-  const prompt = `你是一个日程/待办的自然语言解析器。\n\n当前日期：${nowText}\n用户原话：${raw}\n\n任务：把用户原话解析为一个“待办(task)”或“日程(event)”。\n- 如果原话是某一天要做某事、提醒、记得、要完成：更像 task。\n- 如果原话是某天的活动、会议、约见、出去玩：更像 event。\n- 需要识别日期（支持：YYYY-MM-DD、X月X日、今天/明天/后天、下周一~下周日）。\n- 如果用户写了明显不合法的日期（例如 36月），请推断最可能的真实日期，并在 warnings 里说明；如果无法推断，则把 date 留空并在 warnings 里说明需要用户确认。\n- title 必须尽量去掉日期/时间词，只保留事情本身。例如“3月26号出去玩”应输出 title="出去玩"。\n\n只输出 JSON（不要 markdown）。字段：\n{\n  "type": "task"|"event",\n  "title": string,\n  "date": "YYYY-MM-DD"|"",\n  "start_time": "HH:MM"|"" ,\n  "end_time": "HH:MM"|"" ,\n  "confidence": 0-1,\n  "warnings": string[]\n}`;
+  const prompt = `你是一个日程/待办的自然语言解析器。
+
+当前日期：${nowText}
+用户原话：${raw}
+
+任务：把用户原话解析为【一个或多个】“待办(task)”或“日程(event)”。
+- 用户可能会一次性说多个事情（例如：“今天先做A，再做B，再做C”），请将它们拆分为多个独立的 task/event 对象放入数组。
+- 如果原话是某一天要做某事、提醒、记得、要完成：更像 task。
+- 如果原话是某天的活动、会议、约见、出去玩：更像 event。
+- 需要识别日期（支持：YYYY-MM-DD、X月X日、今天/明天/后天、下周一~下周日）。
+- 如果用户写了明显不合法的日期（例如 36月），请推断最可能的真实日期，并在 warnings 里说明；如果无法推断，则把 date 留空并在 warnings 里说明需要用户确认。
+- title 必须尽量去掉日期/时间词，只保留事情本身。例如“3月26号出去玩”应输出 title="出去玩"。
+
+只输出 JSON（不要 markdown）。格式如下：
+{
+  "suggestions": [
+    {
+      "type": "task"|"event",
+      "title": string,
+      "date": "YYYY-MM-DD"|"",
+      "start_time": "HH:MM"|"" ,
+      "end_time": "HH:MM"|""
+    }
+  ],
+  "warnings": string[]
+}`;
 
   try {
     const completion = await client.chat.completions.create({
@@ -222,34 +247,32 @@ async function parsePlannerText({ text, tzOffsetMinutes }) {
     const parsed = extractJsonObject(completion?.choices?.[0]?.message?.content);
     if (!parsed || typeof parsed !== 'object') return fallback;
 
-    const t = parsed.type === 'event' ? 'event' : 'task';
-    const title = sanitizeTitle(parsed.title, raw);
-    const date = typeof parsed.date === 'string' ? parsed.date.trim() : '';
-    const start_time = typeof parsed.start_time === 'string' ? parsed.start_time.trim() : '';
-    const end_time = typeof parsed.end_time === 'string' ? parsed.end_time.trim() : '';
     const warnings = Array.isArray(parsed.warnings) ? parsed.warnings.map((x) => String(x)).filter(Boolean) : [];
+    const suggestionsArray = Array.isArray(parsed.suggestions) ? parsed.suggestions : (parsed.type ? [parsed] : []);
 
-    const okDate = /^\d{4}-\d{2}-\d{2}$/.test(date);
-    if (!okDate) {
+    const finalSuggestions = suggestionsArray.map(item => {
+      const t = item.type === 'event' ? 'event' : 'task';
+      const title = sanitizeTitle(item.title, raw);
+      const date = typeof item.date === 'string' ? item.date.trim() : '';
+      const start_time = typeof item.start_time === 'string' ? item.start_time.trim() : '';
+      const end_time = typeof item.end_time === 'string' ? item.end_time.trim() : '';
+      
+      const okDate = /^\d{4}-\d{2}-\d{2}$/.test(date);
       return {
-        ok: true,
-        source: 'llm',
-        suggestion: { type: t, title, date: '', start_time: start_time || null, end_time: end_time || null },
-        warning: warnings.length ? warnings.join('；') : '无法确认日期，请手动选择',
+        type: t,
+        title,
+        date: okDate ? date : '',
+        start_time: start_time || null,
+        end_time: end_time || null,
       };
-    }
+    }).filter(s => s.title);
+
+    if (finalSuggestions.length === 0) return fallback;
 
     return {
       ok: true,
       source: 'llm',
-      suggestion: {
-        type: t,
-        title,
-        date,
-        start_time: start_time || null,
-        end_time: end_time || null,
-        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : null,
-      },
+      suggestions: finalSuggestions,
       warning: warnings.length ? warnings.join('；') : null,
     };
   } catch {

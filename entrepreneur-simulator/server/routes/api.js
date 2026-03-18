@@ -348,21 +348,31 @@ async function routes(fastify, options) {
     try {
       const { userId, text, listId, tzOffsetMinutes } = request.body || {};
       const uid = userId || 'user-1';
+      if (!text) {
+        reply.code(400).send({ error: 'Text is required' });
+        return;
+      }
       const parsed = await plannerAssistantService.parsePlannerText({ text, tzOffsetMinutes });
-      if (!parsed?.ok) {
-        reply.code(400).send({ error: 'Invalid input' });
-        return;
+      
+      if (parsed.suggestion) {
+        // legacy compat
+        parsed.suggestions = [parsed.suggestion];
+        delete parsed.suggestion;
       }
-      const built = plannerAssistantService.buildPlannerItemFromSuggestion({
-        suggestion: parsed.suggestion,
-        tzOffsetMinutes,
-        listId,
+
+      const items = (parsed.suggestions || []).map(suggestion => {
+        const buildRes = plannerAssistantService.buildPlannerItemFromSuggestion({
+          suggestion,
+          tzOffsetMinutes,
+          listId,
+        });
+        return buildRes.ok ? buildRes.item : null;
+      }).filter(Boolean);
+
+      reply.code(200).send({
+        ...parsed,
+        items
       });
-      if (!built.ok) {
-        reply.code(200).send({ ...parsed, item: null, needConfirm: true });
-        return;
-      }
-      reply.code(200).send({ ...parsed, item: built.item, needConfirm: !!parsed.warning || !parsed.suggestion?.date });
     } catch (err) {
       request.log.error(err);
       reply.code(500).send({ error: 'Failed to parse' });
