@@ -247,6 +247,15 @@ export const api = {
         return response.json();
     },
 
+    generateAIFollowUpSuggestion: async (personId: string) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/ai-suggestion`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        if (!response.ok) throw new Error('Failed to generate AI follow up suggestion');
+        return response.json();
+    },
+
     getSecretaryDaily: async (userId: string = CURRENT_USER_ID, opts?: { refresh?: boolean }) => {
         const url = new URL(`${API_BASE_URL}/secretary/daily/${encodeURIComponent(userId)}`, window.location.origin);
         if (opts?.refresh) url.searchParams.set('refresh', '1');

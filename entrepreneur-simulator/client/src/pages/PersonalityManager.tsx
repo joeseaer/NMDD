@@ -535,14 +535,53 @@ export default function PersonalityManager() {
       }
   };
 
-  // New: Smart Follow-up Logic
-  const getSuggestedFollowUp = (person: any) => {
-      if (!person.disc_type) return null;
-      // Simple logic based on DISC
-      const isExtrovert = ['D型', 'I型', 'D', 'I'].some(t => person.disc_type.includes(t));
-      // In a real app, compare with last interaction date
-      if (isExtrovert) return { label: '🔥 建议3天内联系', color: 'bg-orange-100 text-orange-700' };
-      return { label: '🕒 建议2周后联系', color: 'bg-blue-100 text-blue-700' };
+  // New: Smart Follow-up Logic (Now powered by AI & Backend)
+  const [generatingAIFollowUp, setGeneratingAIFollowUp] = useState<string | null>(null);
+
+  const handleRefreshAIFollowUp = async (e: React.MouseEvent, personId: string) => {
+      e.stopPropagation();
+      if (generatingAIFollowUp === personId) return;
+      setGeneratingAIFollowUp(personId);
+      try {
+          const res = await api.generateAIFollowUpSuggestion(personId);
+          if (res?.suggestion) {
+              setPeople(prev => prev.map(p => p.id === personId ? { ...p, ai_followup_suggestion: res.suggestion } : p));
+              if (selectedPerson?.id === personId) {
+                  setSelectedPerson((prev: any) => ({ ...prev, ai_followup_suggestion: res.suggestion }));
+              }
+          }
+      } catch (err) {
+          console.error('Failed to generate AI follow-up', err);
+      } finally {
+          setGeneratingAIFollowUp(null);
+      }
+  };
+
+  const renderAIFollowUpTag = (person: any) => {
+      const suggestion = person.ai_followup_suggestion;
+      const isGenerating = generatingAIFollowUp === person.id;
+      
+      return (
+          <div className="mt-2 flex items-center gap-2" onClick={e => e.stopPropagation()}>
+              {suggestion ? (
+                  <div className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] ${suggestion.color || 'bg-gray-100 text-gray-700'}`}>
+                      {suggestion.label}
+                  </div>
+              ) : (
+                  <div className="inline-flex items-center px-2 py-0.5 rounded text-[10px] bg-gray-50 text-gray-400">
+                      无建议
+                  </div>
+              )}
+              <button 
+                  onClick={(e) => handleRefreshAIFollowUp(e, person.id)}
+                  disabled={isGenerating}
+                  className={`text-[10px] text-gray-400 hover:text-primary transition-colors ${isGenerating ? 'animate-spin' : ''}`}
+                  title="让AI重新生成建议"
+              >
+                  <Bot className="w-3 h-3" />
+              </button>
+          </div>
+      );
   };
 
   // ... (rest of the component)
@@ -778,14 +817,7 @@ export default function PersonalityManager() {
               )}
 
               {/* New: Suggested Follow Up Tag */}
-              {(() => {
-                  const suggestion = getSuggestedFollowUp(person);
-                  if (suggestion) return (
-                      <div className={`mt-2 inline-block px-2 py-0.5 rounded text-[10px] ${suggestion.color}`}>
-                          {suggestion.label}
-                      </div>
-                  );
-              })()}
+              {renderAIFollowUpTag(person)}
             </div>
           ))}
           

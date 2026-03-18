@@ -418,6 +418,7 @@ const savePersonProfile = async (profileData) => {
             avatar_ai: profileData.avatar_ai,
             avatar_type: profileData.avatar_type,
             related_people: profileData.related_people,
+            ai_followup_suggestion: profileData.ai_followup_suggestion,
             category: profileData.category, // Added category
             basic_info_extra: normalizeBasicInfoExtra(profileData.basic_info_extra),
             reaction_library: Array.isArray(profileData.reaction_library) ? profileData.reaction_library : [],
@@ -457,6 +458,7 @@ const savePersonProfile = async (profileData) => {
             avatar_ai: profileData.avatar_ai,
             avatar_type: profileData.avatar_type,
             related_people: profileData.related_people,
+            ai_followup_suggestion: profileData.ai_followup_suggestion,
             category: profileData.category, // Added category
             basic_info_extra: normalizeBasicInfoExtra(profileData.basic_info_extra),
             reaction_library: Array.isArray(profileData.reaction_library) ? profileData.reaction_library : []
@@ -512,6 +514,22 @@ const updatePersonReactionLibrary = async (personId, reactionLibrary) => {
     .update({
       reaction_library: Array.isArray(reactionLibrary) ? reactionLibrary : [],
       updated_at: new Date(),
+    })
+    .eq('id', personId)
+    .select('id')
+    .single();
+
+  if (error) throw error;
+  return data.id;
+};
+
+const updatePersonAIFollowUp = async (personId, suggestion) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+
+  const { data, error } = await supabase
+    .from('people_profiles')
+    .update({
+      ai_followup_suggestion: suggestion,
     })
     .eq('id', personId)
     .select('id')
@@ -1149,7 +1167,7 @@ const uploadFile = async (fileBuffer, fileName, mimeType) => {
 
 module.exports = { 
   initDB, saveScene, getRecentScenes, saveSOP, getSOPs, deleteSOP, deleteSOPsByTitle,
-  savePersonProfile, updatePersonPrivateInfo, updatePersonTriggersPleasers, updatePersonReactionLibrary, deletePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog,
+  savePersonProfile, updatePersonPrivateInfo, updatePersonTriggersPleasers, updatePersonReactionLibrary, updatePersonAIFollowUp, deletePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog,
   saveReviewSession, getReviewSessions, getReviewSession, getUserStats,
   getPlannerLists, ensurePlannerInbox, createPlannerList, updatePlannerList, deletePlannerList,
   createPlannerItem, updatePlannerItem, deletePlannerItem, listPlannerItems,

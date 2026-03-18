@@ -433,6 +433,69 @@ async function routes(fastify, options) {
     }
   });
 
+  fastify.post('/people/:id/ai-suggestion', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const profiles = await dbService.getPeopleProfiles('user-1');
+      const profile = profiles.find(p => p.id === id);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+
+      const logs = await dbService.getInteractionLogs(id);
+      
+      const prompt = `你是用户的“人脉关系顾问”。
+目标：基于人物档案和过往互动记录，为用户提供【一句】具体、可执行、自然的跟进建议。
+
+人物信息：
+姓名：${profile.name}
+身份：${profile.identity}
+性格类型(DISC)：${profile.disc_type || '未知'}
+关系强度：${profile.relationship_strength}
+最近互动：${profile.last_interaction || '无'}
+最近互动时间：${profile.last_interaction_date || '无'}
+
+互动历史摘要：
+${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}。我：${l.my_behavior}。对方：${l.their_reaction}`).join('\n')}
+
+请输出一段JSON，包含 label 和 color 字段。
+要求：
+1. label: 建议的内容（15个字以内，例如："上周刚聊完，周末可问进度" 或 "很久没联系了，发个微信问候"）
+2. color: 根据紧迫程度或情绪基调选择一个 Tailwind CSS 类（例如："bg-red-100 text-red-700" 表示紧急/重要，"bg-blue-100 text-blue-700" 表示日常维系，"bg-green-100 text-green-700" 表示刚联系过很稳固）。
+
+JSON格式：
+{
+  "label": "🔥 建议文案...",
+  "color": "bg-xxx-100 text-xxx-700"
+}`;
+
+      const client = secretaryService.getOpenAIClientOrNull ? secretaryService.getOpenAIClientOrNull() : null;
+      let suggestionObj = { label: '暂无建议', color: 'bg-gray-100 text-gray-700' };
+
+      if (client) {
+        const completion = await client.chat.completions.create({
+          model: secretaryService.getModel ? secretaryService.getModel() : 'gpt-3.5-turbo',
+          messages: [{ role: 'system', content: prompt }],
+        });
+        
+        try {
+          const content = completion?.choices?.[0]?.message?.content || '{}';
+          const match = content.match(/\{[\s\S]*\}/);
+          if (match) {
+             suggestionObj = JSON.parse(match[0]);
+          }
+        } catch(e) {
+          request.log.error('Failed to parse AI suggestion JSON');
+        }
+      }
+
+      const updatedId = await dbService.updatePersonAIFollowUp(id, suggestionObj);
+      return { id: updatedId, suggestion: suggestionObj };
+
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to generate AI follow-up suggestion' });
+    }
+  });
+
   fastify.patch('/people/:id/reaction-library', async (request, reply) => {
     try {
       const { id } = request.params;

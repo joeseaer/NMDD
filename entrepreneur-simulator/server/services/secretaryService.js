@@ -187,5 +187,5 @@ async function getSecretaryDaily({ userId, refresh }) {
   }
 }
 
-module.exports = { getSecretaryDaily };
+module.exports = { getSecretaryDaily, getOpenAIClientOrNull, getModel };
 
