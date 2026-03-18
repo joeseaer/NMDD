@@ -418,7 +418,6 @@ const savePersonProfile = async (profileData) => {
             avatar_ai: profileData.avatar_ai,
             avatar_type: profileData.avatar_type,
             related_people: profileData.related_people,
-            ai_followup_suggestion: profileData.ai_followup_suggestion,
             category: profileData.category, // Added category
             basic_info_extra: normalizeBasicInfoExtra(profileData.basic_info_extra),
             reaction_library: Array.isArray(profileData.reaction_library) ? profileData.reaction_library : [],
@@ -458,7 +457,6 @@ const savePersonProfile = async (profileData) => {
             avatar_ai: profileData.avatar_ai,
             avatar_type: profileData.avatar_type,
             related_people: profileData.related_people,
-            ai_followup_suggestion: profileData.ai_followup_suggestion,
             category: profileData.category, // Added category
             basic_info_extra: normalizeBasicInfoExtra(profileData.basic_info_extra),
             reaction_library: Array.isArray(profileData.reaction_library) ? profileData.reaction_library : []
@@ -530,13 +528,50 @@ const updatePersonAIFollowUp = async (personId, suggestion) => {
     .from('people_profiles')
     .update({
       ai_followup_suggestion: suggestion,
+      updated_at: new Date(),
     })
     .eq('id', personId)
     .select('id')
     .single();
 
-  if (error) throw error;
-  return data.id;
+  if (!error) return data.id;
+
+  const msg = String(error?.message || '');
+  if (!msg.includes('ai_followup_suggestion')) throw error;
+
+  const { data: personRow, error: getErr } = await supabase
+    .from('people_profiles')
+    .select('private_info')
+    .eq('id', personId)
+    .single();
+  if (getErr) throw getErr;
+
+  let parsedPrivate = {};
+  if (personRow?.private_info && typeof personRow.private_info === 'string') {
+    try {
+      const x = JSON.parse(personRow.private_info);
+      if (x && typeof x === 'object') parsedPrivate = x;
+    } catch {}
+  } else if (personRow?.private_info && typeof personRow.private_info === 'object') {
+    parsedPrivate = personRow.private_info;
+  }
+
+  const nextPrivate = {
+    ...(parsedPrivate || {}),
+    ai_followup_suggestion: suggestion,
+  };
+
+  const { data: fallbackData, error: fallbackErr } = await supabase
+    .from('people_profiles')
+    .update({
+      private_info: JSON.stringify(nextPrivate),
+      updated_at: new Date(),
+    })
+    .eq('id', personId)
+    .select('id')
+    .single();
+  if (fallbackErr) throw fallbackErr;
+  return fallbackData.id;
 };
 
 const deletePersonProfile = async (personId) => {
@@ -746,8 +781,19 @@ const getPeopleProfiles = async (userId) => {
           .order('event_date', { ascending: false })
           .limit(1);
       
+      let aiFollowUpSuggestion = person.ai_followup_suggestion || null;
+      if (!aiFollowUpSuggestion && person.private_info) {
+        try {
+          const info = typeof person.private_info === 'string' ? JSON.parse(person.private_info) : person.private_info;
+          if (info && typeof info === 'object' && info.ai_followup_suggestion) {
+            aiFollowUpSuggestion = info.ai_followup_suggestion;
+          }
+        } catch {}
+      }
+
       return {
           ...person,
+          ai_followup_suggestion: aiFollowUpSuggestion,
           last_interaction: logs && logs.length > 0 ? logs[0].event_context : null,
           last_interaction_date: logs && logs.length > 0 ? logs[0].event_date : null
       };
