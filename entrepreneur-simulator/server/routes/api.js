@@ -443,28 +443,25 @@ async function routes(fastify, options) {
       const logs = await dbService.getInteractionLogs(id);
       
       const prompt = `你是用户的“人脉关系顾问”。
-目标：基于人物档案和过往互动记录，为用户提供【一句】具体、可执行、自然的跟进建议。
+目标：基于人物档案和过往互动记录，为用户提供【极短的】跟进标签词。
 
 人物信息：
 姓名：${profile.name}
-身份：${profile.identity}
-性格类型(DISC)：${profile.disc_type || '未知'}
 关系强度：${profile.relationship_strength}
-最近互动：${profile.last_interaction || '无'}
 最近互动时间：${profile.last_interaction_date || '无'}
 
 互动历史摘要：
-${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}。我：${l.my_behavior}。对方：${l.their_reaction}`).join('\n')}
+${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
 
-请输出一段JSON，包含 label 和 color 字段。
+请输出一段纯 JSON，包含 label 和 color 字段。
 要求：
-1. label: 建议的内容（15个字以内，例如："上周刚聊完，周末可问进度" 或 "很久没联系了，发个微信问候"）
-2. color: 根据紧迫程度或情绪基调选择一个 Tailwind CSS 类（例如："bg-red-100 text-red-700" 表示紧急/重要，"bg-blue-100 text-blue-700" 表示日常维系，"bg-green-100 text-green-700" 表示刚联系过很稳固）。
+1. label: 必须极其简短（5-8个字以内），例如："🔥 建议本周约饭", "🕒 建议下月问候", "✅ 关系稳固", "⚠️ 需紧急破冰"。必须带一个 emoji 开头。
+2. color: 根据紧迫程度选择 Tailwind CSS 类。例如红色 "bg-red-100 text-red-700" (紧急/久未联系)，蓝色 "bg-blue-100 text-blue-700" (常规维护)，橙色 "bg-orange-100 text-orange-700" (近期需跟进)，绿色 "bg-green-100 text-green-700" (状态良好)。
 
-必须只输出 JSON 格式，不要包含任何 markdown 标记：
+只输出 JSON 对象，不要任何多余的字符：
 {
-  "label": "🔥 建议文案...",
-  "color": "bg-xxx-100 text-xxx-700"
+  "label": "🔥 建议本周约饭",
+  "color": "bg-red-100 text-red-700"
 }`;
 
       const client = secretaryService.getOpenAIClientOrNull ? secretaryService.getOpenAIClientOrNull() : null;
@@ -478,25 +475,24 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}。我：${l.m
         
         try {
           const content = completion?.choices?.[0]?.message?.content || '{}';
-          request.log.info({ content }, 'AI suggestion response');
+          request.log.info({ msg: 'AI suggestion response', content, personId: id });
           
-          // 尝试更宽容的 JSON 解析
           let cleaned = content.replace(/```json\n|```/g, '').trim();
           const start = cleaned.indexOf('{');
           const end = cleaned.lastIndexOf('}');
-          if (start !== -1 && end !== -1 && end > start) {
+          if (start !== -1 && end !== -1 && end >= start) {
             cleaned = cleaned.slice(start, end + 1);
           }
           
           const parsed = JSON.parse(cleaned);
           if (parsed.label) {
             suggestionObj = {
-              label: parsed.label,
+              label: parsed.label.slice(0, 20), // 强制截断防溢出
               color: parsed.color || 'bg-gray-100 text-gray-700'
             };
           }
         } catch(e) {
-          request.log.error('Failed to parse AI suggestion JSON');
+          request.log.error({ msg: 'Failed to parse AI suggestion JSON', error: e.message });
         }
       } else {
         request.log.warn('OpenAI client not initialized for ai-suggestion');
