@@ -461,7 +461,7 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}。我：${l.m
 1. label: 建议的内容（15个字以内，例如："上周刚聊完，周末可问进度" 或 "很久没联系了，发个微信问候"）
 2. color: 根据紧迫程度或情绪基调选择一个 Tailwind CSS 类（例如："bg-red-100 text-red-700" 表示紧急/重要，"bg-blue-100 text-blue-700" 表示日常维系，"bg-green-100 text-green-700" 表示刚联系过很稳固）。
 
-JSON格式：
+必须只输出 JSON 格式，不要包含任何 markdown 标记：
 {
   "label": "🔥 建议文案...",
   "color": "bg-xxx-100 text-xxx-700"
@@ -478,13 +478,28 @@ JSON格式：
         
         try {
           const content = completion?.choices?.[0]?.message?.content || '{}';
-          const match = content.match(/\{[\s\S]*\}/);
-          if (match) {
-             suggestionObj = JSON.parse(match[0]);
+          request.log.info({ content }, 'AI suggestion response');
+          
+          // 尝试更宽容的 JSON 解析
+          let cleaned = content.replace(/```json\n|```/g, '').trim();
+          const start = cleaned.indexOf('{');
+          const end = cleaned.lastIndexOf('}');
+          if (start !== -1 && end !== -1 && end > start) {
+            cleaned = cleaned.slice(start, end + 1);
+          }
+          
+          const parsed = JSON.parse(cleaned);
+          if (parsed.label) {
+            suggestionObj = {
+              label: parsed.label,
+              color: parsed.color || 'bg-gray-100 text-gray-700'
+            };
           }
         } catch(e) {
           request.log.error('Failed to parse AI suggestion JSON');
         }
+      } else {
+        request.log.warn('OpenAI client not initialized for ai-suggestion');
       }
 
       const updatedId = await dbService.updatePersonAIFollowUp(id, suggestionObj);
