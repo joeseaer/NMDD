@@ -436,7 +436,8 @@ async function routes(fastify, options) {
   fastify.post('/people/:id/ai-suggestion', async (request, reply) => {
     try {
       const { id } = request.params;
-      const profiles = await dbService.getPeopleProfiles('user-1');
+      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const profiles = await dbService.getPeopleProfiles(userId);
       const profile = profiles.find(p => p.id === id);
       if (!profile) return reply.code(404).send({ error: 'Person not found' });
 

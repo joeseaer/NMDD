@@ -247,10 +247,11 @@ export const api = {
         return response.json();
     },
 
-    generateAIFollowUpSuggestion: async (personId: string) => {
+    generateAIFollowUpSuggestion: async (personId: string, userId: string = CURRENT_USER_ID) => {
         const response = await fetch(`${API_BASE_URL}/people/${personId}/ai-suggestion`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId })
         });
         if (!response.ok) {
             const text = await response.text().catch(() => '');

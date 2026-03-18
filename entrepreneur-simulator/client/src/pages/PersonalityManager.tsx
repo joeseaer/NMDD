@@ -538,6 +538,18 @@ export default function PersonalityManager() {
   // New: Smart Follow-up Logic (Now powered by AI & Backend)
   const [generatingAIFollowUp, setGeneratingAIFollowUp] = useState<string | null>(null);
 
+  const buildLocalFollowUp = (person: any) => {
+      const strength = Number(person?.relationship_strength || 0);
+      const lastRaw = person?.last_interaction_date ? new Date(String(person.last_interaction_date)) : null;
+      const lastTs = lastRaw && !Number.isNaN(lastRaw.getTime()) ? lastRaw.getTime() : null;
+      const days = lastTs ? Math.floor((Date.now() - lastTs) / (24 * 60 * 60 * 1000)) : null;
+      if (days === null) return { label: '🕒 建议尽快破冰', color: 'bg-orange-100 text-orange-700' };
+      if (days >= 45 || (strength >= 70 && days >= 21)) return { label: '🔥 建议本周联系', color: 'bg-red-100 text-red-700' };
+      if (days >= 14) return { label: '📩 建议近期问候', color: 'bg-blue-100 text-blue-700' };
+      if (days <= 3 && strength >= 60) return { label: '✅ 关系稳固', color: 'bg-green-100 text-green-700' };
+      return { label: '🕒 下周可跟进', color: 'bg-blue-100 text-blue-700' };
+  };
+
   const handleRefreshAIFollowUp = async (e: React.MouseEvent, personId: string) => {
       e.stopPropagation();
       if (generatingAIFollowUp === personId) return;
@@ -552,7 +564,14 @@ export default function PersonalityManager() {
           }
       } catch (err) {
           console.error('Failed to generate AI follow-up', err);
-          alert('刷新建议失败，请稍后重试');
+          const target = people.find(p => p.id === personId) || (selectedPerson?.id === personId ? selectedPerson : null);
+          if (target) {
+              const localSuggestion = buildLocalFollowUp(target);
+              setPeople(prev => prev.map(p => p.id === personId ? { ...p, ai_followup_suggestion: localSuggestion } : p));
+              if (selectedPerson?.id === personId) {
+                  setSelectedPerson((prev: any) => ({ ...prev, ai_followup_suggestion: localSuggestion }));
+              }
+          }
       } finally {
           setGeneratingAIFollowUp(null);
       }
