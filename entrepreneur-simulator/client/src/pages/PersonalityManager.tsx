@@ -182,11 +182,10 @@ export default function PersonalityManager() {
   }), []);
 
   const [analysisDraft, setAnalysisDraft] = useState<any>(defaultProfileAnalysis);
-  const [savedAt, setSavedAt] = useState<Record<string, number>>({});
-  const [savingField, setSavingField] = useState<string | null>(null);
+  const [, setSavedAt] = useState<Record<string, number>>({});
+  const [, setSavingField] = useState<string | null>(null);
   const saveTimersRef = useRef<Record<string, any>>({});
   const latestAnalysisRef = useRef<any>(defaultProfileAnalysis);
-  const [sectionOpen, setSectionOpen] = useState({ layer1: true, layer2: true, layer3: true });
   const [verificationChecklists, setVerificationChecklists] = useState<any>({});
   const [verificationLoading, setVerificationLoading] = useState<Record<string, boolean>>({});
   const verificationTimersRef = useRef<Record<string, any>>({});
