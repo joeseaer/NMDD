@@ -81,6 +81,18 @@ function formatIcebergPrivateInfo(privateInfoRaw) {
   return out.length > 6000 ? out.slice(0, 6000) : out;
 }
 
+function parsePrivateInfoObject(privateInfoRaw) {
+  if (!privateInfoRaw || typeof privateInfoRaw !== 'string') return {};
+  const raw = privateInfoRaw.trim();
+  if (!raw) return {};
+  try {
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
 async function processAssistantMessage({ userId, query, history, sops }) {
   if (isMock) {
     return {
@@ -466,6 +478,154 @@ async function generateInteractionReview({ profile, log }) {
     }
 }
 
+async function generateScenarioSimulation({ profile, logs, query, category }) {
+  if (isMock) {
+    return {
+      title: '项目截止日提前',
+      predicted_reaction: '可能短暂切断社交、焦虑上升，并对无关信息敏感。',
+      strategy: '先发结构化信息，再给执行支持，避免情绪化追问。',
+      category: category || '职场协作',
+    };
+  }
+
+  const logsText = (logs || []).slice(0, 8).map(l =>
+    `[${l.event_date}] ${l.event_context} - 我: ${l.my_behavior} -> 他: ${l.their_reaction}`
+  ).join('\n');
+  const icebergText = formatIcebergPrivateInfo(profile.private_info);
+
+  const prompt = `
+你是“场景预演实验室”的策略引擎。请针对给定场景，预测对方反应并给出可执行对策。
+
+人物信息：
+姓名：${profile.name}
+身份：${profile.identity || '未知'}
+领域：${profile.field || '未知'}
+性格关键词：${profile.disc_type || '未知'} / ${profile.mbti_type || '未知'}
+雷区：${(profile.triggers || []).join('、') || '无'}
+爽点：${(profile.pleasers || []).join('、') || '无'}
+
+人物档案参考：
+${icebergText}
+
+最近互动：
+${logsText || '无'}
+
+用户给定场景：
+${query || '请生成一个高频风险场景'}
+
+场景分类：${category || '职场协作'}
+
+要求：
+1) 只输出严格 JSON，不要 markdown。
+2) title 8-20 字，简洁可读。
+3) predicted_reaction 描述对方可能行为/情绪（40-120 字）。
+4) strategy 给出可执行对策（40-160 字），包含至少一步具体动作。
+5) category 输出简短中文标签（2-8字），与场景语义匹配，如“资源请求”“冲突修复”“边界协商”。
+
+输出：
+{
+  "title": "...",
+  "predicted_reaction": "...",
+  "strategy": "...",
+  "category": "资源请求"
+}
+`;
+
+  try {
+    const openai = getOpenAIClient();
+    const completion = await openai.chat.completions.create({
+      messages: [{ role: 'system', content: prompt }],
+      model: getModel(),
+    });
+    const parsed = extractJsonObject(completion.choices?.[0]?.message?.content);
+    if (!parsed) throw new Error('Model output is not valid JSON');
+    const categoryVal = String(parsed.category || category || '未分类').trim().slice(0, 24) || '未分类';
+    return {
+      title: String(parsed.title || '未命名场景').slice(0, 40),
+      predicted_reaction: String(parsed.predicted_reaction || '').slice(0, 500),
+      strategy: String(parsed.strategy || '').slice(0, 800),
+      category: categoryVal,
+    };
+  } catch (err) {
+    console.error('Scenario Simulation Error:', err);
+    return {
+      title: '场景预演生成失败',
+      predicted_reaction: '暂时无法预测，请稍后重试。',
+      strategy: '建议先记录该场景，再补充互动细节后重试。',
+      category: String(category || '未分类').trim().slice(0, 24) || '未分类',
+    };
+  }
+}
+
+async function generateMapPatchProposal({ profile, log }) {
+  if (isMock) {
+    return {
+      red_lights: ['避免在公开场合追问毕业去向（疑似焦虑触发）'],
+      green_lights: ['深夜以具体技术问题开场，更容易得到积极回应'],
+      archive_notes: ['该次互动中对方先沉默后输出大量细节，疑似压力转移模式'],
+      observation_tasks: ['观察其回避话题是否集中在职业节点相关问题'],
+      confidence: 0.72,
+    };
+  }
+  const privateObj = parsePrivateInfoObject(profile.private_info);
+  const archiveText = formatIcebergPrivateInfo(profile.private_info);
+  const prompt = `
+你是“关系作战地图更新引擎”。根据单次互动记录，产出增量更新提案。
+
+人物：${profile.name} / ${profile.identity || '未知'}
+已有红灯：${(profile.triggers || []).join('、') || '无'}
+已有绿灯：${(profile.pleasers || []).join('、') || '无'}
+现有档案：${archiveText}
+互动记录：
+时间：${log.event_date}
+场景：${log.event_context}
+我方：${log.my_behavior}
+对方：${log.their_reaction}
+
+规则：
+1) 只输出 JSON。
+2) 每个数组 0-3 条，必须具体、可执行，不要空话。
+3) confidence 为 0-1 的小数。
+4) 若证据不足可返回空数组。
+
+输出：
+{
+  "red_lights": ["..."],
+  "green_lights": ["..."],
+  "archive_notes": ["..."],
+  "observation_tasks": ["..."],
+  "confidence": 0.65
+}
+`;
+  try {
+    const openai = getOpenAIClient();
+    const completion = await openai.chat.completions.create({
+      messages: [{ role: 'system', content: prompt }],
+      model: getModel(),
+    });
+    const parsed = extractJsonObject(completion.choices?.[0]?.message?.content);
+    if (!parsed) throw new Error('Model output is not valid JSON');
+    const list = (v) => Array.isArray(v) ? v.filter(Boolean).map((x) => String(x).slice(0, 120)).slice(0, 3) : [];
+    const confidenceNum = Number(parsed.confidence);
+    return {
+      red_lights: list(parsed.red_lights),
+      green_lights: list(parsed.green_lights),
+      archive_notes: list(parsed.archive_notes),
+      observation_tasks: list(parsed.observation_tasks),
+      confidence: Number.isFinite(confidenceNum) ? Math.max(0, Math.min(1, confidenceNum)) : 0.5,
+    };
+  } catch (err) {
+    console.error('Map Patch Proposal Error:', err);
+    return {
+      red_lights: [],
+      green_lights: [],
+      archive_notes: [],
+      observation_tasks: [],
+      confidence: 0,
+    };
+  }
+}
+
 async function analyzeSOPContent(content) {
     const prompt = `
         你是一个专业的知识管理助手。请分析以下 SOP 内容，提取关键信息。
@@ -493,7 +653,7 @@ async function analyzeSOPContent(content) {
     }
 }
 
-module.exports = { processAssistantMessage, analyzePerson, generateScript, generateInteractionReview, consultPerson, generateSummary, generatePracticalSceneLibrary, generateVerificationChecklist, processReviewInteraction, generateSOPFromReview, analyzeSOPContent };
+module.exports = { processAssistantMessage, analyzePerson, generateScript, generateInteractionReview, consultPerson, generateSummary, generatePracticalSceneLibrary, generateVerificationChecklist, generateScenarioSimulation, generateMapPatchProposal, processReviewInteraction, generateSOPFromReview, analyzeSOPContent };
 
 async function processReviewInteraction({ userId, sessionId, userInput, history }) {
     if (isMock) {

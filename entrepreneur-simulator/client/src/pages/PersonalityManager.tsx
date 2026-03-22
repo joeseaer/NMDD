@@ -83,11 +83,32 @@ export default function PersonalityManager() {
   const [generatedScript, setGeneratedScript] = useState<string[] | null>(null);
   const [scriptLoading, setScriptLoading] = useState(false);
   const [showRelatedModal, setShowRelatedModal] = useState(false);
+  const [showAllRelated, setShowAllRelated] = useState(false);
   const [activeCategory, setActiveCategory] = useState('全部'); // Updated: Category filter
-  const [consultModalOpen, setConsultModalOpen] = useState(false);
+  const [advisorOpen, setAdvisorOpen] = useState(false);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [practicalScenesLoading, setPracticalScenesLoading] = useState(false);
+  const [trafficRedDraft, setTrafficRedDraft] = useState<any[]>([]);
+  const [trafficGreenDraft, setTrafficGreenDraft] = useState<any[]>([]);
+  const [trafficSaving, setTrafficSaving] = useState(false);
+  const trafficSaveTimerRef = useRef<any>(null);
+  const [scenarioCards, setScenarioCards] = useState<any[]>([]);
+  const [scenarioLoading, setScenarioLoading] = useState(false);
+  const [scenarioGenerating, setScenarioGenerating] = useState(false);
+  const [scenarioInput, setScenarioInput] = useState('');
+  const [scenarioCategory, setScenarioCategory] = useState('职场协作');
+  const [scenarioCategoryCustom, setScenarioCategoryCustom] = useState('');
+  const [scenarioActingId, setScenarioActingId] = useState<string | null>(null);
+  const [scenarioEditingId, setScenarioEditingId] = useState<string | null>(null);
+  const [scenarioEditDraft, setScenarioEditDraft] = useState<any>(null);
+  const [scenarioEditSaving, setScenarioEditSaving] = useState(false);
+  const [scenarioDeletingId, setScenarioDeletingId] = useState<string | null>(null);
+  const [trafficEditTarget, setTrafficEditTarget] = useState<{ kind: 'red' | 'green'; index: number } | null>(null);
+  const [trafficEditText, setTrafficEditText] = useState('');
+  const [mapProposal, setMapProposal] = useState<any>(null);
+  const behaviorHabitsRef = useRef<HTMLTextAreaElement | null>(null);
+  const lifeTrajectoryRef = useRef<HTMLTextAreaElement | null>(null);
 
   const BASIC_EXTRA_ICON_KEYS = useMemo(() => ([
     'MapPin',
@@ -201,6 +222,88 @@ export default function PersonalityManager() {
     };
   };
 
+  const parsePrivateInfoObject = (privateInfo: any) => {
+    if (!privateInfo || typeof privateInfo !== 'string') return {};
+    const raw = privateInfo.trim();
+    if (!raw) return {};
+    try {
+      const obj = JSON.parse(raw);
+      return obj && typeof obj === 'object' ? obj : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const normalizeTrafficList = (arr: any[], fallbackSource: string) => {
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((it) => {
+        if (typeof it === 'string') return { text: it.trim(), source: fallbackSource };
+        if (!it || typeof it !== 'object') return null;
+        const text = String(it.text || it.content || '').trim();
+        if (!text) return null;
+        const source = String(it.source || fallbackSource || 'manual');
+        return { text, source };
+      })
+      .filter(Boolean);
+  };
+
+  const readTrafficFromPerson = (person: any) => {
+    const parsed = parsePrivateInfoObject(person?.private_info);
+    const traffic = parsed?.traffic_lights && typeof parsed.traffic_lights === 'object' ? parsed.traffic_lights : {};
+    const red = normalizeTrafficList(
+      traffic.red || (Array.isArray(person?.triggers) ? person.triggers : []),
+      'manual'
+    );
+    const green = normalizeTrafficList(
+      traffic.green || (Array.isArray(person?.pleasers) ? person.pleasers : []),
+      'manual'
+    );
+    return { red, green, parsed };
+  };
+
+  const saveTrafficLights = (nextRed: any[], nextGreen: any[]) => {
+    if (!selectedPerson) return;
+    if (trafficSaveTimerRef.current) clearTimeout(trafficSaveTimerRef.current);
+    trafficSaveTimerRef.current = setTimeout(async () => {
+      setTrafficSaving(true);
+      try {
+        const red = normalizeTrafficList(nextRed, 'manual');
+        const green = normalizeTrafficList(nextGreen, 'manual');
+        const parsed = parsePrivateInfoObject(selectedPerson.private_info);
+        const nextPrivate = {
+          ...(parsed || {}),
+          traffic_lights: { red, green, updated_at: new Date().toISOString() },
+        };
+        await api.updatePerson(selectedPerson.id, {
+          ...selectedPerson,
+          private_info: JSON.stringify(nextPrivate),
+        });
+        const updated = { ...selectedPerson, private_info: JSON.stringify(nextPrivate) };
+        setSelectedPerson(updated);
+        setPeople((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+        setEditForm((prev: any) => (prev && prev.id === updated.id ? { ...prev, private_info: updated.private_info } : prev));
+      } catch (err) {
+        console.error('Failed to save traffic lights', err);
+      } finally {
+        setTrafficSaving(false);
+      }
+    }, 800);
+  };
+
+  const fetchScenarioCards = async (personId: string) => {
+    try {
+      setScenarioLoading(true);
+      const res = await api.getScenarioCards(personId);
+      setScenarioCards(Array.isArray(res?.items) ? res.items : []);
+    } catch (err) {
+      console.error('Failed to fetch scenario cards', err);
+      setScenarioCards([]);
+    } finally {
+      setScenarioLoading(false);
+    }
+  };
+
   const hasAnyText = (obj: any) => {
     if (!obj || typeof obj !== 'object') return false;
     return Object.values(obj).some((v: any) => typeof v === 'string' ? v.trim() : false);
@@ -252,15 +355,21 @@ export default function PersonalityManager() {
   useEffect(() => {
     if (!selectedPerson) return;
     const parsed = parsePrivateInfo(selectedPerson.private_info);
+    const traffic = readTrafficFromPerson(selectedPerson);
     setAnalysisDraft(parsed.analysis);
     latestAnalysisRef.current = parsed.analysis;
     setVerificationChecklists(parsed.verification);
+    setTrafficRedDraft(traffic.red);
+    setTrafficGreenDraft(traffic.green);
+    setMapProposal(null);
     checklistInitRef.current = null;
     setSavedAt({});
     setSavingField(null);
     setReactionLibraryDraft(Array.isArray(selectedPerson.reaction_library) ? selectedPerson.reaction_library : []);
     setReactionSaving(false);
     setReactionSavedAt(null);
+    setShowAllRelated(false);
+    fetchScenarioCards(selectedPerson.id);
   }, [selectedPerson?.id]);
 
   useEffect(() => {
@@ -397,6 +506,15 @@ export default function PersonalityManager() {
     el.style.height = '0px';
     el.style.height = `${el.scrollHeight}px`;
   };
+
+  useEffect(() => {
+    if (behaviorHabitsRef.current) autoResize(behaviorHabitsRef.current);
+    if (lifeTrajectoryRef.current) autoResize(lifeTrajectoryRef.current);
+  }, [
+    selectedPerson?.id,
+    analysisDraft?.layer_3_surface?.behavior_habits,
+    analysisDraft?.layer_3_surface?.life_trajectory,
+  ]);
 
   const fetchSummary = async (personId: string) => {
       setSummaryLoading(true);
@@ -605,7 +723,7 @@ export default function PersonalityManager() {
     setIsCreating(false);
   };
 
-  const handleLogAdded = async () => {
+  const handleLogAdded = async (created?: any) => {
       if (selectedPerson) {
           await fetchLogs(selectedPerson.id);
           // Also refetch person details to update relationship score
@@ -619,9 +737,251 @@ export default function PersonalityManager() {
           } catch (err) {
               console.error("Failed to refresh people list", err);
           }
+          if (created?.proposal) {
+            setMapProposal(created.proposal);
+          }
       }
       setIsAddingLog(false);
   }
+
+  const updateTrafficItem = (kind: 'red' | 'green', index: number, patch: any) => {
+    if (kind === 'red') {
+      setTrafficRedDraft((prev) => {
+        const next = Array.isArray(prev) ? [...prev] : [];
+        const current = next[index] && typeof next[index] === 'object' ? next[index] : { text: '', source: 'manual' };
+        next[index] = { ...current, ...patch };
+        saveTrafficLights(next, trafficGreenDraft);
+        return next;
+      });
+      return;
+    }
+    setTrafficGreenDraft((prev) => {
+      const next = Array.isArray(prev) ? [...prev] : [];
+      const current = next[index] && typeof next[index] === 'object' ? next[index] : { text: '', source: 'manual' };
+      next[index] = { ...current, ...patch };
+      saveTrafficLights(trafficRedDraft, next);
+      return next;
+    });
+  };
+
+  const addTrafficItem = (kind: 'red' | 'green', source: string = 'manual', text: string = '') => {
+    if (kind === 'red') {
+      setTrafficRedDraft((prev) => {
+        const next = [...(Array.isArray(prev) ? prev : []), { text, source }];
+        saveTrafficLights(next, trafficGreenDraft);
+        return next;
+      });
+      return;
+    }
+    setTrafficGreenDraft((prev) => {
+      const next = [...(Array.isArray(prev) ? prev : []), { text, source }];
+      saveTrafficLights(trafficRedDraft, next);
+      return next;
+    });
+  };
+
+  const removeTrafficItem = (kind: 'red' | 'green', index: number) => {
+    if (kind === 'red') {
+      setTrafficRedDraft((prev) => {
+        const next = (Array.isArray(prev) ? prev : []).filter((_: any, i: number) => i !== index);
+        saveTrafficLights(next, trafficGreenDraft);
+        return next;
+      });
+      return;
+    }
+    setTrafficGreenDraft((prev) => {
+      const next = (Array.isArray(prev) ? prev : []).filter((_: any, i: number) => i !== index);
+      saveTrafficLights(trafficRedDraft, next);
+      return next;
+    });
+  };
+
+  const startTrafficEdit = (kind: 'red' | 'green', index: number, currentText: string) => {
+    setTrafficEditTarget({ kind, index });
+    setTrafficEditText(currentText || '');
+  };
+
+  const saveTrafficEdit = () => {
+    if (!trafficEditTarget) return;
+    const nextText = String(trafficEditText || '').trim();
+    if (trafficEditTarget.kind === 'red') {
+      updateTrafficItem('red', trafficEditTarget.index, { text: nextText });
+    } else {
+      updateTrafficItem('green', trafficEditTarget.index, { text: nextText });
+    }
+    setTrafficEditTarget(null);
+    setTrafficEditText('');
+  };
+
+  const handleGenerateScenarioCard = async () => {
+    if (!selectedPerson) return;
+    const query = scenarioInput.trim();
+    if (!query) {
+      alert('请先输入要预演的场景');
+      return;
+    }
+    const finalCategory = (scenarioCategory === '自定义分类' ? scenarioCategoryCustom : scenarioCategory).trim();
+    if (!finalCategory) {
+      alert('请先选择或填写分类');
+      return;
+    }
+    setScenarioGenerating(true);
+    try {
+      const res = await api.generateScenarioSimulation(selectedPerson.id, { query, category: finalCategory });
+      const item = res?.item;
+      if (item) {
+        setScenarioCards((prev) => [item, ...(Array.isArray(prev) ? prev : [])]);
+        setScenarioInput('');
+      }
+    } catch (err) {
+      console.error('Failed to generate scenario card', err);
+      alert('生成剧本失败，请稍后重试');
+    } finally {
+      setScenarioGenerating(false);
+    }
+  };
+
+  const handleScenarioVerdict = async (sopId: string, verdict: 'accept' | 'reject') => {
+    if (!selectedPerson || !sopId) return;
+    const prevCards = scenarioCards || [];
+    const optimistic = prevCards.map((x: any) => ((x.sop_id || x.id) === sopId ? { ...x, verdict } : x));
+    setScenarioCards(optimistic);
+    setScenarioActingId(sopId);
+    try {
+      const target = optimistic.find((x: any) => (x.sop_id || x.id) === sopId);
+      const patch = { verdict };
+      const res = await api.updateScenarioCard(selectedPerson.id, sopId, patch);
+      const nextItem = res?.item ? { ...target, ...res.item } : { ...target, verdict };
+      setScenarioCards((prev) => (prev || []).map((x: any) => (((x.sop_id || x.id) === sopId || (nextItem?.sop_id && (x.sop_id || x.id) === nextItem.sop_id)) ? nextItem : x)));
+      await fetchScenarioCards(selectedPerson.id);
+    } catch (err) {
+      console.error('Failed to update scenario verdict', err);
+      setScenarioCards(prevCards);
+      alert('更新剧本状态失败');
+    } finally {
+      setScenarioActingId((cur) => (cur === sopId ? null : cur));
+    }
+  };
+
+  const startScenarioEdit = (item: any, forceReject: boolean = false) => {
+    if (!item) return;
+    const id = item.sop_id || item.id;
+    if (!id) return;
+    const combinedText = [
+      `预期反应：${item?.predicted_reaction || ''}`,
+      `建议对策：${item?.strategy || ''}`,
+    ].join('\n\n');
+    setScenarioEditingId(id);
+    setScenarioEditDraft({
+      sop_id: id,
+      title: item.title || '',
+      scenario: item.scenario || '',
+      text: combinedText || String(item?.strategy || ''),
+      category: item.category || '未分类',
+      verdict: forceReject ? 'reject' : (item.verdict || 'pending'),
+    });
+  };
+
+  const parseScenarioText = (text: string, fallbackReaction: string, fallbackStrategy: string) => {
+    const raw = String(text || '').trim();
+    if (!raw) {
+      return { predicted_reaction: fallbackReaction || '', strategy: fallbackStrategy || '' };
+    }
+    const normalized = raw.replace(/\r\n/g, '\n');
+    const reactionMatch = normalized.match(/预期反应[:：]\s*([\s\S]*?)(?:\n+\s*建议对策[:：]|$)/);
+    const strategyMatch = normalized.match(/建议对策[:：]\s*([\s\S]*?)$/);
+    const predicted_reaction = (reactionMatch?.[1] || '').trim() || fallbackReaction || '';
+    const strategy = (strategyMatch?.[1] || '').trim() || fallbackStrategy || normalized;
+    return { predicted_reaction, strategy };
+  };
+
+  const saveScenarioEdit = async () => {
+    if (!selectedPerson || !scenarioEditingId || !scenarioEditDraft) return;
+    setScenarioEditSaving(true);
+    try {
+      const target = (scenarioCards || []).find((x: any) => (x.sop_id || x.id) === scenarioEditingId);
+      const parsed = parseScenarioText(
+        scenarioEditDraft.text,
+        String(target?.predicted_reaction || ''),
+        String(target?.strategy || '')
+      );
+      const patch = {
+        predicted_reaction: parsed.predicted_reaction,
+        strategy: parsed.strategy,
+        category: scenarioEditDraft.category || '未分类',
+        verdict: scenarioEditDraft.verdict || 'pending',
+      };
+      const res = await api.updateScenarioCard(selectedPerson.id, scenarioEditingId, patch);
+      const nextItem = res?.item ? { ...scenarioEditDraft, ...res.item } : { ...scenarioEditDraft };
+      setScenarioCards((prev) => (prev || []).map((x: any) => ((x.sop_id || x.id) === scenarioEditingId ? nextItem : x)));
+      setScenarioEditingId(null);
+      setScenarioEditDraft(null);
+      await fetchScenarioCards(selectedPerson.id);
+    } catch (err) {
+      console.error('Failed to save scenario edit', err);
+      alert('保存剧本修改失败');
+    } finally {
+      setScenarioEditSaving(false);
+    }
+  };
+
+  const handleDeleteScenarioCard = async (sopId: string) => {
+    if (!selectedPerson || !sopId) return;
+    const ok = window.confirm('确认删除这个剧本条目吗？删除后不可恢复。');
+    if (!ok) return;
+    const prevCards = scenarioCards || [];
+    setScenarioDeletingId(sopId);
+    setScenarioCards((prev) => (prev || []).filter((x: any) => (x.sop_id || x.id) !== sopId));
+    try {
+      await api.deleteScenarioCard(selectedPerson.id, sopId);
+      if (scenarioEditingId === sopId) {
+        setScenarioEditingId(null);
+        setScenarioEditDraft(null);
+      }
+      await fetchScenarioCards(selectedPerson.id);
+    } catch (err) {
+      console.error('Failed to delete scenario card', err);
+      setScenarioCards(prevCards);
+      alert('删除剧本失败，请稍后重试');
+    } finally {
+      setScenarioDeletingId((cur) => (cur === sopId ? null : cur));
+    }
+  };
+
+  const handleApplyProposal = async () => {
+    if (!selectedPerson || !mapProposal) return;
+    try {
+      const res = await api.applyMapProposal(selectedPerson.id, mapProposal);
+      const mergedRed = normalizeTrafficList((res?.triggers || []).map((t: string) => ({ text: t, source: 'manual' })), 'manual');
+      const mergedGreen = normalizeTrafficList((res?.pleasers || []).map((t: string) => ({ text: t, source: 'manual' })), 'manual');
+      setTrafficRedDraft(mergedRed);
+      setTrafficGreenDraft(mergedGreen);
+      setMapProposal(null);
+      const parsed = parsePrivateInfoObject(selectedPerson.private_info);
+      const nextPrivate = {
+        ...(parsed || {}),
+        behavioral_archive: {
+          ...(parsed?.behavioral_archive || {}),
+          ...(res?.behavioral_archive || {}),
+        },
+      };
+      setSelectedPerson((prev: any) => prev && prev.id === selectedPerson.id ? {
+        ...prev,
+        triggers: res?.triggers || prev.triggers || [],
+        pleasers: res?.pleasers || prev.pleasers || [],
+        private_info: JSON.stringify(nextPrivate),
+      } : prev);
+      setPeople((prev) => prev.map((p: any) => p.id === selectedPerson.id ? {
+        ...p,
+        triggers: res?.triggers || p.triggers || [],
+        pleasers: res?.pleasers || p.pleasers || [],
+        private_info: JSON.stringify(nextPrivate),
+      } : p));
+    } catch (err) {
+      console.error('Failed to apply map proposal', err);
+      alert('应用提案失败');
+    }
+  };
 
   const handleUpdateProfile = async () => {
       try {
@@ -1410,38 +1770,76 @@ export default function PersonalityManager() {
 
                       return related.length > 0 ? (
                         <div className="space-y-3">
-                            {related.map((rel: any, i: number) => (
-                                <div key={i} className="flex items-center bg-white p-2 rounded border border-gray-200">
-                                    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold mr-3 shrink-0">
-                                        {rel.avatar ? <img src={rel.avatar} className="w-full h-full rounded-full object-cover"/> : rel.name[0]}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                        <div className="text-sm font-bold text-gray-900 truncate">{rel.name}</div>
-                                        {isEditing ? (
-                                          <input
-                                            value={String(rel.relation || '')}
-                                            onChange={(e) => updateRelation(i, e.target.value)}
-                                            className="mt-0.5 w-full bg-white border border-gray-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
-                                            placeholder="请输入你与TA的关系（例如：同事/导师/同学/合作伙伴）"
-                                          />
-                                        ) : (
-                                          <div className="text-xs text-gray-500 truncate">{rel.relation}</div>
-                                        )}
-                                    </div>
-                                    {isEditing && (
-                                        <button 
-                                            onClick={() => {
-                                                const base = Array.isArray(editForm?.related_people) ? editForm.related_people : [];
-                                                const newRelated = base.filter((_: any, idx: number) => idx !== i);
-                                                setEditForm({ ...(editForm || {}), related_people: newRelated });
-                                            }}
-                                            className="text-gray-400 hover:text-red-500"
-                                        >
-                                            <X className="w-3 h-3" />
-                                        </button>
-                                    )}
+                          {(() => {
+                            const withScore = related.map((rel: any, idx: number) => {
+                              const rawScore = Number(rel?.relationship_strength ?? rel?.score ?? rel?.strength ?? 50);
+                              const score = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, rawScore)) : 50;
+                              const bucket = score >= 70 ? '核心圈' : (score >= 40 ? '协作圈' : '扩展圈');
+                              return { ...rel, _idx: idx, _score: score, _bucket: bucket };
+                            }).sort((a: any, b: any) => b._score - a._score);
+                            const visible = showAllRelated ? withScore : withScore.slice(0, 6);
+                            const buckets = ['核心圈', '协作圈', '扩展圈'];
+                            return (
+                              <>
+                                <div className="flex items-center justify-between text-xs text-gray-500">
+                                  <span>共 {withScore.length} 人，按关系强度分层展示</span>
+                                  {withScore.length > 6 && (
+                                    <button onClick={() => setShowAllRelated((v) => !v)} className="text-primary hover:underline">
+                                      {showAllRelated ? '收起' : `展开全部（+${withScore.length - 6}）`}
+                                    </button>
+                                  )}
                                 </div>
-                            ))}
+                                {buckets.map((bucket) => {
+                                  const items = visible.filter((x: any) => x._bucket === bucket);
+                                  if (items.length === 0) return null;
+                                  return (
+                                    <div key={bucket}>
+                                      <div className="text-[11px] font-bold text-gray-600 mb-2">{bucket}</div>
+                                      <div className="grid grid-cols-1 gap-2">
+                                        {items.map((rel: any) => (
+                                          <div key={`${bucket}_${rel._idx}`} className="bg-white p-2.5 rounded-lg border border-gray-200">
+                                            <div className="flex items-center">
+                                              <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary text-xs font-bold mr-3 shrink-0">
+                                                {rel.avatar ? <img src={rel.avatar} className="w-full h-full rounded-full object-cover"/> : String(rel.name || '?')[0]}
+                                              </div>
+                                              <div className="min-w-0 flex-1">
+                                                <div className="text-sm font-bold text-gray-900 truncate">{rel.name || '未命名'}</div>
+                                                {isEditing ? (
+                                                  <input
+                                                    value={String(rel.relation || '')}
+                                                    onChange={(e) => updateRelation(rel._idx, e.target.value)}
+                                                    className="mt-0.5 w-full bg-white border border-gray-200 rounded-md px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-primary/20"
+                                                    placeholder="例如：同事/导师/合作伙伴"
+                                                  />
+                                                ) : (
+                                                  <div className="text-xs text-gray-500 truncate">{rel.relation || '关系待补充'}</div>
+                                                )}
+                                              </div>
+                                              <div className="ml-2 text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                                                强度 {rel._score}
+                                              </div>
+                                              {isEditing && (
+                                                <button
+                                                  onClick={() => {
+                                                    const base = Array.isArray(editForm?.related_people) ? editForm.related_people : [];
+                                                    const newRelated = base.filter((_: any, idx: number) => idx !== rel._idx);
+                                                    setEditForm({ ...(editForm || {}), related_people: newRelated });
+                                                  }}
+                                                  className="ml-2 text-gray-400 hover:text-red-500"
+                                                >
+                                                  <X className="w-3 h-3" />
+                                                </button>
+                                              )}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </>
+                            );
+                          })()}
                         </div>
                       ) : (
                         <div className="text-sm text-gray-400 italic">暂无关联人物</div>
@@ -1456,11 +1854,11 @@ export default function PersonalityManager() {
                 
                 {/* New: AI Consultation Button */}
                 <button 
-                    onClick={() => setConsultModalOpen(true)}
+                    onClick={() => setAdvisorOpen((v) => !v)}
                     className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-bold shadow-md hover:shadow-lg transform hover:-translate-y-0.5 transition-all flex items-center justify-center mt-3"
                 >
                     <Bot className="w-5 h-5 mr-2" />
-                    遇到难题？AI 军师快速决策
+                    {advisorOpen ? '隐藏 AI 军师侧栏' : '遇到难题？打开 AI 军师'}
                 </button>
               </div>
             </div>
@@ -1468,374 +1866,311 @@ export default function PersonalityManager() {
             {/* Interaction Timeline */}
             <div className="flex flex-col gap-6">
                 
-              {/* Private Info */}
-                {showPrivate ? (
-                <div className="bg-blue-50 p-6 rounded-xl border border-blue-100">
-                    <div className="flex justify-between items-center mb-4">
-                        <h3 className="font-bold text-blue-900 flex items-center">
-                            <Lock className="w-4 h-4 mr-2" /> 人物深度分析档案（三层冰山）
-                        </h3>
-                        <button onClick={() => setShowPrivate(false)} className="text-blue-500 hover:text-blue-700">
-                            <EyeOff className="w-4 h-4" />
-                        </button>
+              {showPrivate ? (
+                <div className="bg-blue-50 p-6 rounded-xl border border-blue-100 space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-bold text-blue-900 flex items-center">
+                      <Lock className="w-4 h-4 mr-2" /> 动态关系作战地图
+                    </h3>
+                    <button onClick={() => setShowPrivate(false)} className="text-blue-500 hover:text-blue-700">
+                      <EyeOff className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  {mapProposal && (
+                    <div className="bg-white border border-blue-200 rounded-lg p-4">
+                      <div className="text-sm font-bold text-blue-800 mb-2">AI 提案：是否更新作战地图？</div>
+                      <div className="text-xs text-gray-700 space-y-1">
+                        <div>红灯建议：{(mapProposal.red_lights || []).length} 条</div>
+                        <div>绿灯建议：{(mapProposal.green_lights || []).length} 条</div>
+                        <div>档案补充：{(mapProposal.archive_notes || []).length} 条</div>
+                      </div>
+                      <button onClick={handleApplyProposal} className="mt-3 text-xs px-3 py-1.5 bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                        一键应用提案
+                      </button>
                     </div>
+                  )}
 
-                    <div className="space-y-4">
-                        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                            <button
-                                onClick={() => setSectionOpen((prev) => ({ ...prev, layer1: !prev.layer1 }))}
-                                className="w-full flex items-start justify-between px-5 py-4 text-left"
-                            >
-                                <div>
-                                    <div className="text-base font-bold text-gray-900">第一层：底层操作系统</div>
-                                    <div className="text-xs text-gray-600 mt-1">这部分通常不可见，但决定了一切行为。</div>
-                                </div>
-                                <div className="text-gray-400 mt-1">{sectionOpen.layer1 ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}</div>
-                            </button>
-                            {sectionOpen.layer1 && (
-                              <div className="px-5 pb-5">
-                                <div className="border-l-4 border-blue-700 bg-blue-50/40 rounded-lg p-4 space-y-5">
-
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">人格特质关键词</div>
-                                      {savedAt['layer_1_core.personality_traits'] && <Check className="w-4 h-4 text-green-600" />}
-                                      {savingField === 'layer_1_core.personality_traits' && <div className="text-[10px] text-gray-400">保存中…</div>}
-                                    </div>
-                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
-                                      请记录其显性的性格分类及行为偏好。<br />
-                                      DISC/大五/九型人格类型？能量来源（内向/外向）？信息处理方式（直觉/实感）？决策依据（逻辑/情感）？生活态度（计划/随性）？
-                                    </div>
-                                    <textarea
-                                      rows={3}
-                                      value={analysisDraft.layer_1_core.personality_traits}
-                                      onChange={(e) => {
-                                        setAnalysisField('layer_1_core.personality_traits', e.target.value);
-                                        autoResize(e.currentTarget);
-                                      }}
-                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
-                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none overflow-hidden ${analysisDraft.layer_1_core.personality_traits ? 'border-gray-300' : 'border-gray-200'}`}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">核心价值观与信念</div>
-                                      {savedAt['layer_1_core.core_values'] && <Check className="w-4 h-4 text-green-600" />}
-                                      {savingField === 'layer_1_core.core_values' && <div className="text-[10px] text-gray-400">保存中…</div>}
-                                    </div>
-                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
-                                      请挖掘驱动其行为的底层代码和道德底线。<br />
-                                      他最看重什么（金钱/名誉/爱/自由/正义）？绝对不可触碰的底线在哪里？他对世界的基本假设是什么（人性本善/本恶？世界是安全的/危险的？）？
-                                    </div>
-                                    <textarea
-                                      rows={4}
-                                      value={analysisDraft.layer_1_core.core_values}
-                                      onChange={(e) => {
-                                        setAnalysisField('layer_1_core.core_values', e.target.value);
-                                        autoResize(e.currentTarget);
-                                      }}
-                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
-                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none overflow-hidden ${analysisDraft.layer_1_core.core_values ? 'border-gray-300' : 'border-gray-200'}`}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">认知与思维模式</div>
-                                      {savedAt['layer_1_core.cognitive_mode'] && <Check className="w-4 h-4 text-green-600" />}
-                                      {savingField === 'layer_1_core.cognitive_mode' && <div className="text-[10px] text-gray-400">保存中…</div>}
-                                    </div>
-                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
-                                      请分析其处理信息和解决问题的思维习惯。<br />
-                                      逻辑思维能力强弱？抽象思维能力强弱？是固定型思维还是成长型思维？归因风格如何（成功归因于自己/环境？失败归因于自己/环境？）？
-                                    </div>
-                                    <textarea
-                                      rows={3}
-                                      value={analysisDraft.layer_1_core.cognitive_mode}
-                                      onChange={(e) => {
-                                        setAnalysisField('layer_1_core.cognitive_mode', e.target.value);
-                                        autoResize(e.currentTarget);
-                                      }}
-                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
-                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none overflow-hidden ${analysisDraft.layer_1_core.cognitive_mode ? 'border-gray-300' : 'border-gray-200'}`}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">情绪与心理能量</div>
-                                      {savedAt['layer_1_core.emotional_energy'] && <Check className="w-4 h-4 text-green-600" />}
-                                      {savingField === 'layer_1_core.emotional_energy' && <div className="text-[10px] text-gray-400">保存中…</div>}
-                                    </div>
-                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
-                                      请评估其情绪稳定性及面对压力时的心理状态。<br />
-                                      情绪波动频率？抗压能力（AQ）高低？自我觉察能力如何（能否意识到自己的情绪变化）？
-                                    </div>
-                                    <textarea
-                                      rows={3}
-                                      value={analysisDraft.layer_1_core.emotional_energy}
-                                      onChange={(e) => {
-                                        setAnalysisField('layer_1_core.emotional_energy', e.target.value);
-                                        autoResize(e.currentTarget);
-                                      }}
-                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
-                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-blue-200 resize-none overflow-hidden ${analysisDraft.layer_1_core.emotional_energy ? 'border-gray-300' : 'border-gray-200'}`}
-                                    />
-                                  </div>
-
-                                  <div className="pt-4 border-t border-blue-200/70">
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">❓ 待验证清单</div>
-                                      <button
-                                        onClick={() => scheduleEnsureChecklist('layer_1_core', true)}
-                                        className="text-xs text-blue-700 hover:underline"
-                                        disabled={!!verificationLoading['layer_1_core']}
-                                      >
-                                        {verificationLoading['layer_1_core'] ? '生成中…' : '重新生成'}
-                                      </button>
-                                    </div>
-                                    {(verificationChecklists?.layer_1_core?.items || []).length > 0 ? (
-                                      <ul className="mt-2 list-disc list-inside text-xs text-gray-800 space-y-2">
-                                        {verificationChecklists.layer_1_core.items.map((t: string, i: number) => (
-                                          <li key={i} className="leading-relaxed">{t}</li>
-                                        ))}
-                                      </ul>
-                                    ) : (
-                                      <div className="mt-2 text-xs text-gray-400 italic">填写内容后会自动生成待验证问题。</div>
-                                    )}
-                                  </div>
-
-                                </div>
-                              </div>
-                            )}
-                        </div>
-
-                        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                            <button
-                                onClick={() => setSectionOpen((prev) => ({ ...prev, layer2: !prev.layer2 }))}
-                                className="w-full flex items-start justify-between px-5 py-4 text-left"
-                            >
-                                <div>
-                                    <div className="text-base font-bold text-gray-900">第二层：中间驱动层</div>
-                                    <div className="text-xs text-gray-600 mt-1">动力、连接与资源如何驱动 TA 的行动。</div>
-                                </div>
-                                <div className="text-gray-400 mt-1">{sectionOpen.layer2 ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}</div>
-                            </button>
-                            {sectionOpen.layer2 && (
-                              <div className="px-5 pb-5">
-                                <div className="border-l-4 border-orange-500 bg-orange-50/40 rounded-lg p-4 space-y-5">
-
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">动机系统（显性与隐性）</div>
-                                      {savedAt['layer_2_drive.motivation_system'] && <Check className="w-4 h-4 text-green-600" />}
-                                      {savingField === 'layer_2_drive.motivation_system' && <div className="text-[10px] text-gray-400">保存中…</div>}
-                                    </div>
-                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
-                                      请区分其口头目标与潜意识渴望。<br />
-                                      显性动机（他嘴上说的目标是什么）？隐性动机（潜意识里真正渴望的是什么：权力欲/亲和欲/成就欲）？两者是否一致？
-                                    </div>
-                                    <textarea
-                                      rows={3}
-                                      value={analysisDraft.layer_2_drive.motivation_system}
-                                      onChange={(e) => {
-                                        setAnalysisField('layer_2_drive.motivation_system', e.target.value);
-                                        autoResize(e.currentTarget);
-                                      }}
-                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
-                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-orange-200 resize-none overflow-hidden ${analysisDraft.layer_2_drive.motivation_system ? 'border-gray-300' : 'border-gray-200'}`}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">能力与技能树</div>
-                                      {savedAt['layer_2_drive.skills_capabilities'] && <Check className="w-4 h-4 text-green-600" />}
-                                      {savingField === 'layer_2_drive.skills_capabilities' && <div className="text-[10px] text-gray-400">保存中…</div>}
-                                    </div>
-                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
-                                      请罗列其胜任工作的硬实力与软实力。<br />
-                                      硬技能（专业本领/证书）？软技能（沟通/领导力/协作）？可迁移能力有哪些？
-                                    </div>
-                                    <textarea
-                                      rows={3}
-                                      value={analysisDraft.layer_2_drive.skills_capabilities}
-                                      onChange={(e) => {
-                                        setAnalysisField('layer_2_drive.skills_capabilities', e.target.value);
-                                        autoResize(e.currentTarget);
-                                      }}
-                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
-                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-orange-200 resize-none overflow-hidden ${analysisDraft.layer_2_drive.skills_capabilities ? 'border-gray-300' : 'border-gray-200'}`}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">资源网络与人际角色</div>
-                                      {savedAt['layer_2_drive.resource_network'] && <Check className="w-4 h-4 text-green-600" />}
-                                      {savingField === 'layer_2_drive.resource_network' && <div className="text-[10px] text-gray-400">保存中…</div>}
-                                    </div>
-                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
-                                      请分析其社会支持系统及在关系中的定位。<br />
-                                      强关系（家人/密友）的支持度如何？弱关系（同事/泛社交）的广度如何？他在关系中通常扮演什么角色（提供者/索取者/协调者）？
-                                    </div>
-                                    <textarea
-                                      rows={3}
-                                      value={analysisDraft.layer_2_drive.resource_network}
-                                      onChange={(e) => {
-                                        setAnalysisField('layer_2_drive.resource_network', e.target.value);
-                                        autoResize(e.currentTarget);
-                                      }}
-                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
-                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-orange-200 resize-none overflow-hidden ${analysisDraft.layer_2_drive.resource_network ? 'border-gray-300' : 'border-gray-200'}`}
-                                    />
-                                  </div>
-
-                                  <div className="pt-4 border-t border-orange-200/70">
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">❓ 待验证清单</div>
-                                      <button
-                                        onClick={() => scheduleEnsureChecklist('layer_2_drive', true)}
-                                        className="text-xs text-orange-700 hover:underline"
-                                        disabled={!!verificationLoading['layer_2_drive']}
-                                      >
-                                        {verificationLoading['layer_2_drive'] ? '生成中…' : '重新生成'}
-                                      </button>
-                                    </div>
-                                    {(verificationChecklists?.layer_2_drive?.items || []).length > 0 ? (
-                                      <ul className="mt-2 list-disc list-inside text-xs text-gray-800 space-y-2">
-                                        {verificationChecklists.layer_2_drive.items.map((t: string, i: number) => (
-                                          <li key={i} className="leading-relaxed">{t}</li>
-                                        ))}
-                                      </ul>
-                                    ) : (
-                                      <div className="mt-2 text-xs text-gray-400 italic">填写内容后会自动生成待验证问题。</div>
-                                    )}
-                                  </div>
-
-                                </div>
-                              </div>
-                            )}
-                        </div>
-
-                        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
-                            <button
-                                onClick={() => setSectionOpen((prev) => ({ ...prev, layer3: !prev.layer3 }))}
-                                className="w-full flex items-start justify-between px-5 py-4 text-left"
-                            >
-                                <div>
-                                    <div className="text-base font-bold text-gray-900">第三层：表层表现层</div>
-                                    <div className="text-xs text-gray-600 mt-1">肉眼可见的行为与轨迹，折射出内在结构。</div>
-                                </div>
-                                <div className="text-gray-400 mt-1">{sectionOpen.layer3 ? <ChevronUp className="w-4 h-4"/> : <ChevronDown className="w-4 h-4"/>}</div>
-                            </button>
-                            {sectionOpen.layer3 && (
-                              <div className="px-5 pb-5">
-                                <div className="border-l-4 border-green-600 bg-green-50/40 rounded-lg p-4 space-y-5">
-
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">行为模式与生活规律</div>
-                                      {savedAt['layer_3_surface.behavior_habits'] && <Check className="w-4 h-4 text-green-600" />}
-                                      {savingField === 'layer_3_surface.behavior_habits' && <div className="text-[10px] text-gray-400">保存中…</div>}
-                                    </div>
-                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
-                                      请记录肉眼可见的日常习惯及其折射出的特质。<br />
-                                      生活规律（作息/运动/饮食 → 反映自律与能量管理）？消费习惯（反映价值观与安全感来源）？言语风格与非语言信号（肢体动作/微表情）？
-                                    </div>
-                                    <textarea
-                                      rows={4}
-                                      value={analysisDraft.layer_3_surface.behavior_habits}
-                                      onChange={(e) => {
-                                        setAnalysisField('layer_3_surface.behavior_habits', e.target.value);
-                                        autoResize(e.currentTarget);
-                                      }}
-                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
-                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-green-200 resize-none overflow-hidden ${analysisDraft.layer_3_surface.behavior_habits ? 'border-gray-300' : 'border-gray-200'}`}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">人生轨迹与关键事件</div>
-                                      {savedAt['layer_3_surface.life_trajectory'] && <Check className="w-4 h-4 text-green-600" />}
-                                      {savingField === 'layer_3_surface.life_trajectory' && <div className="text-[10px] text-gray-400">保存中…</div>}
-                                    </div>
-                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
-                                      请按时间轴梳理塑造其现状的关键节点。<br />
-                                      原生家庭影响？求学经历？成长经历中的关键转折点？是否有重大创伤或高光时刻？这些事件如何影响了现在的他？
-                                    </div>
-                                    <textarea
-                                      rows={5}
-                                      value={analysisDraft.layer_3_surface.life_trajectory}
-                                      onChange={(e) => {
-                                        setAnalysisField('layer_3_surface.life_trajectory', e.target.value);
-                                        autoResize(e.currentTarget);
-                                      }}
-                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
-                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-green-200 resize-none overflow-hidden ${analysisDraft.layer_3_surface.life_trajectory ? 'border-gray-300' : 'border-gray-200'}`}
-                                    />
-                                  </div>
-
-                                  <div>
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">当前处境与行动路径</div>
-                                      {savedAt['layer_3_surface.current_status_path'] && <Check className="w-4 h-4 text-green-600" />}
-                                      {savingField === 'layer_3_surface.current_status_path' && <div className="text-[10px] text-gray-400">保存中…</div>}
-                                    </div>
-                                    <div className="text-xs text-gray-600 mt-1 leading-relaxed">
-                                      请分析其当下的现实状态与未来的匹配度。<br />
-                                      当前处境（职业/婚姻/财务现状，痛点与爽点分别是什么）？行动路径（人生理想/未来规划是否清晰？目前的行动是否与目标一致？）？
-                                    </div>
-                                    <textarea
-                                      rows={4}
-                                      value={analysisDraft.layer_3_surface.current_status_path}
-                                      onChange={(e) => {
-                                        setAnalysisField('layer_3_surface.current_status_path', e.target.value);
-                                        autoResize(e.currentTarget);
-                                      }}
-                                      onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
-                                      className={`mt-2 w-full text-sm bg-white border rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-green-200 resize-none overflow-hidden ${analysisDraft.layer_3_surface.current_status_path ? 'border-gray-300' : 'border-gray-200'}`}
-                                    />
-                                  </div>
-
-                                  <div className="pt-4 border-t border-green-200/70">
-                                    <div className="flex items-center justify-between">
-                                      <div className="text-sm font-bold text-gray-900">❓ 待验证清单</div>
-                                      <button
-                                        onClick={() => scheduleEnsureChecklist('layer_3_surface', true)}
-                                        className="text-xs text-green-700 hover:underline"
-                                        disabled={!!verificationLoading['layer_3_surface']}
-                                      >
-                                        {verificationLoading['layer_3_surface'] ? '生成中…' : '重新生成'}
-                                      </button>
-                                    </div>
-                                    {(verificationChecklists?.layer_3_surface?.items || []).length > 0 ? (
-                                      <ul className="mt-2 list-disc list-inside text-xs text-gray-800 space-y-2">
-                                        {verificationChecklists.layer_3_surface.items.map((t: string, i: number) => (
-                                          <li key={i} className="leading-relaxed">{t}</li>
-                                        ))}
-                                      </ul>
-                                    ) : (
-                                      <div className="mt-2 text-xs text-gray-400 italic">填写内容后会自动生成待验证问题。</div>
-                                    )}
-                                  </div>
-
-                                </div>
-                              </div>
-                            )}
-                        </div>
+                  <div className="bg-white rounded-xl border border-gray-100 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="font-bold text-gray-900">⚡ 交互红绿灯</div>
+                      <div className={`text-[11px] px-2 py-0.5 rounded-full border ${trafficSaving ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
+                        {trafficSaving ? '保存中…' : '已自动保存'}
+                      </div>
                     </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="bg-red-50 border border-red-100 rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-sm font-bold text-red-700">🔴 红灯区（高阻力）</div>
+                          <button onClick={() => addTrafficItem('red')} className="text-xs text-red-700 hover:underline">+ 新增</button>
+                        </div>
+                        <div className="space-y-2">
+                          {(trafficRedDraft || []).map((it: any, i: number) => (
+                            <div key={`red_${i}`} className="bg-white border border-red-200 rounded-lg px-2 py-1.5">
+                              {trafficEditTarget?.kind === 'red' && trafficEditTarget?.index === i ? (
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    value={trafficEditText}
+                                    onChange={(e) => setTrafficEditText(e.target.value)}
+                                    className="flex-1 bg-white border border-red-200 rounded px-2 py-1 text-xs"
+                                    placeholder="触发冲突/防御的话题或行为"
+                                  />
+                                  <button onClick={saveTrafficEdit} className="text-xs px-2 py-1 rounded bg-red-600 text-white">保存</button>
+                                  <button onClick={() => { setTrafficEditTarget(null); setTrafficEditText(''); }} className="text-xs px-2 py-1 rounded border border-gray-200">取消</button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <div className="text-xs text-red-900 flex-1 leading-relaxed">{it?.text || '未填写'}</div>
+                                  <button onClick={() => startTrafficEdit('red', i, it?.text || '')} className="text-gray-400 hover:text-gray-600"><Edit2 className="w-3 h-3" /></button>
+                                  <button onClick={() => removeTrafficItem('red', i)} className="text-gray-400 hover:text-red-500"><X className="w-3 h-3" /></button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="bg-green-50 border border-green-100 rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="text-sm font-bold text-green-700">🟢 绿灯区（高推力）</div>
+                          <button onClick={() => addTrafficItem('green')} className="text-xs text-green-700 hover:underline">+ 新增</button>
+                        </div>
+                        <div className="space-y-2">
+                          {(trafficGreenDraft || []).map((it: any, i: number) => (
+                            <div key={`green_${i}`} className="bg-white border border-green-200 rounded-lg px-2 py-1.5">
+                              {trafficEditTarget?.kind === 'green' && trafficEditTarget?.index === i ? (
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    value={trafficEditText}
+                                    onChange={(e) => setTrafficEditText(e.target.value)}
+                                    className="flex-1 bg-white border border-green-200 rounded px-2 py-1 text-xs"
+                                    placeholder="快速拉近关系的行为或话题"
+                                  />
+                                  <button onClick={saveTrafficEdit} className="text-xs px-2 py-1 rounded bg-green-600 text-white">保存</button>
+                                  <button onClick={() => { setTrafficEditTarget(null); setTrafficEditText(''); }} className="text-xs px-2 py-1 rounded border border-gray-200">取消</button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <div className="text-xs text-green-900 flex-1 leading-relaxed">{it?.text || '未填写'}</div>
+                                  <button onClick={() => startTrafficEdit('green', i, it?.text || '')} className="text-gray-400 hover:text-gray-600"><Edit2 className="w-3 h-3" /></button>
+                                  <button onClick={() => removeTrafficItem('green', i)} className="text-gray-400 hover:text-red-500"><X className="w-3 h-3" /></button>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl border border-gray-100 p-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="font-bold text-gray-900">🎭 场景预演实验室</div>
+                      <button onClick={() => selectedPerson && fetchScenarioCards(selectedPerson.id)} className="text-xs text-gray-500 hover:underline">
+                        {scenarioLoading ? '加载中…' : '刷新'}
+                      </button>
+                    </div>
+                    <div className="text-xs text-gray-500 mb-2">
+                      建议按“问题类型”而不是固定关系维度来分类：如资源协作、冲突修复、边界协商、日常破冰、长期承诺等。
+                    </div>
+                    <div className="flex flex-col md:flex-row gap-2 mb-3">
+                      <input
+                        value={scenarioInput}
+                        onChange={(e) => setScenarioInput(e.target.value)}
+                        className="flex-1 bg-white border border-gray-200 rounded-md px-3 py-2 text-sm"
+                        placeholder="输入要预演的场景，如：如果我想让他帮忙内推，该怎么开口？"
+                      />
+                      <select value={scenarioCategory} onChange={(e) => setScenarioCategory(e.target.value as any)} className="bg-white border border-gray-200 rounded-md px-2 py-2 text-sm">
+                        <option value="职场协作">职场协作</option>
+                        <option value="亲密关系">亲密关系</option>
+                        <option value="资源请求">资源请求</option>
+                        <option value="冲突修复">冲突修复</option>
+                        <option value="边界协商">边界协商</option>
+                        <option value="日常破冰">日常破冰</option>
+                        <option value="自定义分类">自定义分类</option>
+                      </select>
+                      {scenarioCategory === '自定义分类' && (
+                        <input
+                          value={scenarioCategoryCustom}
+                          onChange={(e) => setScenarioCategoryCustom(e.target.value)}
+                          className="bg-white border border-gray-200 rounded-md px-3 py-2 text-sm min-w-[140px]"
+                          placeholder="输入分类名"
+                        />
+                      )}
+                      <button onClick={handleGenerateScenarioCard} disabled={scenarioGenerating} className="px-3 py-2 text-sm bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-60">
+                        {scenarioGenerating ? '生成中…' : '✨ 生成新剧本'}
+                      </button>
+                    </div>
+                    <div className="space-y-3">
+                      <div className="text-xs font-bold text-gray-700">待处理</div>
+                      {(scenarioCards || []).filter((x: any) => {
+                        const v = String(x?.verdict || 'pending');
+                        return v !== 'accept' && v !== 'reject';
+                      }).length > 0 ? (scenarioCards || []).filter((x: any) => {
+                        const v = String(x?.verdict || 'pending');
+                        return v !== 'accept' && v !== 'reject';
+                      }).map((item: any) => (
+                        <div key={item.sop_id || item.id} className="border border-gray-100 rounded-lg p-3 bg-gray-50/50 space-y-2">
+                          <div className="text-sm font-bold text-gray-900">{item.title}</div>
+                          {scenarioEditingId === (item.sop_id || item.id) && scenarioEditDraft ? (
+                            <div className="space-y-2">
+                              <textarea
+                                rows={5}
+                                value={scenarioEditDraft.text || ''}
+                                onChange={(e) => setScenarioEditDraft((prev: any) => ({ ...(prev || {}), text: e.target.value }))}
+                                className="w-full bg-white border border-blue-200 rounded px-2 py-1.5 text-sm"
+                                placeholder="在这里直接修改剧本条目正文（文字形式）"
+                              />
+                              <div className="flex items-center gap-2">
+                                <input
+                                  value={scenarioEditDraft.category || ''}
+                                  onChange={(e) => setScenarioEditDraft((prev: any) => ({ ...(prev || {}), category: e.target.value }))}
+                                  className="bg-white border border-blue-200 rounded px-2 py-1 text-xs min-w-[120px]"
+                                  placeholder="分类"
+                                />
+                                <button onClick={saveScenarioEdit} disabled={scenarioEditSaving} className="ml-auto text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-60">
+                                  {scenarioEditSaving ? '保存中…' : '保存修改'}
+                                </button>
+                                <button onClick={() => handleDeleteScenarioCard(item.sop_id || item.id)} disabled={scenarioDeletingId === (item.sop_id || item.id)} className="text-xs px-3 py-1.5 bg-white border border-red-200 text-red-600 rounded hover:bg-red-50 disabled:opacity-60">
+                                  {scenarioDeletingId === (item.sop_id || item.id) ? '删除中…' : '删除'}
+                                </button>
+                                <button onClick={() => { setScenarioEditingId(null); setScenarioEditDraft(null); }} className="text-xs px-3 py-1.5 bg-white border border-gray-200 rounded hover:bg-gray-50">
+                                  取消
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="text-xs text-gray-700"><span className="font-semibold">预期反应：</span>{item.predicted_reaction || '无'}</div>
+                              <div className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed"><span className="font-semibold">建议对策：</span>{item.strategy || '无'}</div>
+                              <div className="mt-1 flex items-center gap-2">
+                                <button disabled={scenarioActingId === (item.sop_id || item.id)} onClick={() => handleScenarioVerdict(item.sop_id || item.id, 'accept')} className="text-xs px-2 py-1 rounded disabled:opacity-60 bg-white border border-green-200 text-green-700">👍 {scenarioActingId === (item.sop_id || item.id) ? '处理中…' : '准/采纳'}</button>
+                                <button disabled={scenarioActingId === (item.sop_id || item.id)} onClick={() => startScenarioEdit(item, true)} className="text-xs px-2 py-1 rounded disabled:opacity-60 bg-white border border-red-200 text-red-700">👎 不准/去修改</button>
+                                <span className="text-[10px] text-gray-400 ml-auto">{item.category || '未分类'}</span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      )) : (
+                        <div className="text-xs text-gray-400 italic">当前没有待处理条目。</div>
+                      )}
+                      <div className="text-xs font-bold text-gray-700 pt-1">已入库（可随时修改）</div>
+                      {(scenarioCards || []).filter((x: any) => {
+                        const v = String(x?.verdict || 'pending');
+                        return v === 'accept' || v === 'reject';
+                      }).length > 0 ? (scenarioCards || []).filter((x: any) => {
+                        const v = String(x?.verdict || 'pending');
+                        return v === 'accept' || v === 'reject';
+                      }).map((item: any) => (
+                        <div key={`saved_${item.sop_id || item.id}`} className="border border-gray-100 rounded-lg p-3 bg-white space-y-2">
+                          <div className="flex items-center">
+                            <div className="text-sm font-bold text-gray-900">{item.title}</div>
+                            <span className={`ml-2 text-[10px] px-2 py-0.5 rounded-full ${item.verdict === 'accept' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+                              {item.verdict === 'accept' ? '已采纳' : '已修改'}
+                            </span>
+                            <button onClick={() => startScenarioEdit(item, false)} className="ml-auto text-xs px-2 py-1 rounded border border-gray-200 hover:bg-gray-50">编辑</button>
+                          </div>
+                          {scenarioEditingId === (item.sop_id || item.id) && scenarioEditDraft ? (
+                            <div className="space-y-2">
+                              <textarea
+                                rows={5}
+                                value={scenarioEditDraft.text || ''}
+                                onChange={(e) => setScenarioEditDraft((prev: any) => ({ ...(prev || {}), text: e.target.value }))}
+                                className="w-full bg-white border border-blue-200 rounded px-2 py-1.5 text-sm"
+                                placeholder="在这里直接修改剧本条目正文（文字形式）"
+                              />
+                              <div className="flex items-center gap-2">
+                                <input
+                                  value={scenarioEditDraft.category || ''}
+                                  onChange={(e) => setScenarioEditDraft((prev: any) => ({ ...(prev || {}), category: e.target.value }))}
+                                  className="bg-white border border-blue-200 rounded px-2 py-1 text-xs min-w-[120px]"
+                                  placeholder="分类"
+                                />
+                                <button onClick={saveScenarioEdit} disabled={scenarioEditSaving} className="ml-auto text-xs px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-60">
+                                  {scenarioEditSaving ? '保存中…' : '保存修改'}
+                                </button>
+                                <button onClick={() => handleDeleteScenarioCard(item.sop_id || item.id)} disabled={scenarioDeletingId === (item.sop_id || item.id)} className="text-xs px-3 py-1.5 bg-white border border-red-200 text-red-600 rounded hover:bg-red-50 disabled:opacity-60">
+                                  {scenarioDeletingId === (item.sop_id || item.id) ? '删除中…' : '删除'}
+                                </button>
+                                <button onClick={() => { setScenarioEditingId(null); setScenarioEditDraft(null); }} className="text-xs px-3 py-1.5 bg-white border border-gray-200 rounded hover:bg-gray-50">
+                                  取消
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              <div className="text-xs text-gray-700"><span className="font-semibold">预期反应：</span>{item.predicted_reaction || '无'}</div>
+                              <div className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed"><span className="font-semibold">建议对策：</span>{item.strategy || '无'}</div>
+                              <div className="text-[10px] text-gray-400">{item.category || '未分类'}</div>
+                            </>
+                          )}
+                        </div>
+                      )) : (
+                        <div className="text-xs text-gray-400 italic">暂无已入库条目。</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl border border-gray-100 p-4">
+                    <div className="font-bold text-gray-900 mb-3">🗂️ 行为细节档案馆</div>
+                    <div className="space-y-3">
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">生活规律与行为模式</div>
+                        <div className="text-[11px] text-gray-500 mt-1">
+                          观察建议：作息节律、饮食偏好、消费决策、沟通语气、情绪波动时的非语言动作（如沉默、打断、刷手机）。
+                        </div>
+                        <textarea
+                          ref={behaviorHabitsRef}
+                          rows={3}
+                          value={analysisDraft.layer_3_surface.behavior_habits}
+                          onChange={(e) => { setAnalysisField('layer_3_surface.behavior_habits', e.target.value); autoResize(e.currentTarget); }}
+                          onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                          className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2 resize-none overflow-hidden"
+                          placeholder="可按“触发场景 → 对方行为 → 你方感受/结果”记录，例：催进度时先沉默后密集输出。"
+                        />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">关键事件轴</div>
+                        <div className="text-[11px] text-gray-500 mt-1">
+                          记录模板：时间点、事件、情绪反应、后续行为变化。重点放“转折点”与“长期影响”。
+                        </div>
+                        <textarea
+                          ref={lifeTrajectoryRef}
+                          rows={3}
+                          value={analysisDraft.layer_3_surface.life_trajectory}
+                          onChange={(e) => { setAnalysisField('layer_3_surface.life_trajectory', e.target.value); autoResize(e.currentTarget); }}
+                          onInput={(e) => autoResize(e.currentTarget as HTMLTextAreaElement)}
+                          className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2 resize-none overflow-hidden"
+                          placeholder="例：2024.10 项目被否后，沟通从主动转为防御；2025.02 获奖后，公开表达明显增加。"
+                        />
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between">
+                          <div className="text-xs font-bold text-gray-700">待验证观察点</div>
+                          <button onClick={() => scheduleEnsureChecklist('layer_3_surface', true)} className="text-xs text-green-700 hover:underline" disabled={!!verificationLoading['layer_3_surface']}>
+                            {verificationLoading['layer_3_surface'] ? '生成中…' : 'AI 生成'}
+                          </button>
+                        </div>
+                        {(verificationChecklists?.layer_3_surface?.items || []).length > 0 ? (
+                          <ul className="mt-2 list-disc list-inside text-xs text-gray-800 space-y-1">
+                            {verificationChecklists.layer_3_surface.items.map((t: string, i: number) => (
+                              <li key={i}>{t}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <div className="mt-1 text-xs text-gray-400 italic">填写档案后可生成观察任务。建议示例：观察对方在资源不足时是否优先求助还是独自硬扛。</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                ) : (
-                    <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100/50 flex items-center justify-between cursor-pointer hover:bg-blue-50" onClick={() => setShowPrivate(true)}>
-                        <div className="flex items-center text-blue-900/50 font-medium">
-                            <Lock className="w-4 h-4 mr-2" /> 人物深度分析档案 (已隐藏)
-                        </div>
-                        <Eye className="w-4 h-4 text-blue-400" />
-                    </div>
-                )}
+              ) : (
+                <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100/50 flex items-center justify-between cursor-pointer hover:bg-blue-50" onClick={() => setShowPrivate(true)}>
+                  <div className="flex items-center text-blue-900/50 font-medium">
+                    <Lock className="w-4 h-4 mr-2" /> 动态关系作战地图 (已隐藏)
+                  </div>
+                  <Eye className="w-4 h-4 text-blue-400" />
+                </div>
+              )}
 
               <div>
                 <div className="flex justify-between items-center mb-6">
@@ -1978,117 +2313,220 @@ export default function PersonalityManager() {
           />
       )}
 
-      {/* New: Consultation Modal */}
-      {consultModalOpen && selectedPerson && (
-          <AIConsultationModal 
-              person={selectedPerson}
-              onClose={() => setConsultModalOpen(false)}
-          />
+      {selectedPerson && (
+        <AIAdvisorSidebar
+          person={selectedPerson}
+          open={advisorOpen}
+          onClose={() => setAdvisorOpen(false)}
+          onApplyInsight={(nextArchive: any) => {
+            if (!selectedPerson) return;
+            const parsed = parsePrivateInfoObject(selectedPerson.private_info);
+            const nextPrivate = {
+              ...(parsed || {}),
+              behavioral_archive: {
+                ...(parsed?.behavioral_archive || {}),
+                ...(nextArchive || {}),
+              },
+            };
+            const updated = { ...selectedPerson, private_info: JSON.stringify(nextPrivate) };
+            setSelectedPerson(updated);
+            setPeople((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+            setEditForm((prev: any) => (prev && prev.id === updated.id ? { ...prev, private_info: updated.private_info } : prev));
+          }}
+        />
       )}
     </div>
   );
 }
 
-function AIConsultationModal({ person, onClose }: { person: any, onClose: () => void }) {
-    const [query, setQuery] = useState('');
+function AIAdvisorSidebar({ person, open, onClose, onApplyInsight }: { person: any, open: boolean, onClose: () => void, onApplyInsight: (nextArchive: any) => void }) {
+    const [threads, setThreads] = useState<any[]>([]);
+    const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+    const [messages, setMessages] = useState<any[]>([]);
+    const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
-    const [response, setResponse] = useState('');
+    const [sending, setSending] = useState(false);
+    const [applyingId, setApplyingId] = useState<string | null>(null);
+    const messageWrapRef = useRef<HTMLDivElement | null>(null);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!query.trim()) return;
-        
-        setLoading(true);
-        try {
-            const result = await api.consultPerson(person.id, query);
-            setResponse(result.reply);
-        } catch (err) {
-            console.error(err);
-            setResponse("抱歉，AI 军师暂时无法回应。");
-        } finally {
-            setLoading(false);
-        }
+    const loadThreads = async () => {
+      if (!person?.id) return;
+      setLoading(true);
+      try {
+        const res = await api.getAdvisorThreads(person.id);
+        const list = Array.isArray(res?.threads) ? res.threads : [];
+        setThreads(list);
+        const picked = res?.active_thread_id || list?.[0]?.id || null;
+        setActiveThreadId(picked);
+      } catch (err) {
+        console.error('Failed to load advisor threads', err);
+        setThreads([]);
+        setActiveThreadId(null);
+      } finally {
+        setLoading(false);
+      }
     };
 
+    const loadThreadMessages = async (threadId: string) => {
+      if (!person?.id || !threadId) return;
+      try {
+        const res = await api.getAdvisorThread(person.id, threadId);
+        setMessages(Array.isArray(res?.thread?.messages) ? res.thread.messages : []);
+      } catch (err) {
+        console.error('Failed to load advisor thread', err);
+        setMessages([]);
+      }
+    };
+
+    useEffect(() => {
+      if (!open || !person?.id) return;
+      loadThreads();
+    }, [open, person?.id]);
+
+    useEffect(() => {
+      if (!open || !activeThreadId) return;
+      loadThreadMessages(activeThreadId);
+    }, [open, activeThreadId]);
+
+    useEffect(() => {
+      if (!messageWrapRef.current) return;
+      messageWrapRef.current.scrollTop = messageWrapRef.current.scrollHeight;
+    }, [messages.length, open]);
+
+    const createThread = async () => {
+      if (!person?.id) return;
+      try {
+        const res = await api.createAdvisorThread(person.id, '新建会话');
+        const t = res?.thread;
+        if (t?.id) {
+          setThreads((prev) => [t, ...(Array.isArray(prev) ? prev : [])]);
+          setActiveThreadId(t.id);
+          setMessages([]);
+        }
+      } catch (err) {
+        console.error('Failed to create advisor thread', err);
+      }
+    };
+
+    const send = async () => {
+      const content = input.trim();
+      if (!content || !person?.id || !activeThreadId) return;
+      setSending(true);
+      setInput('');
+      const optimisticUser = { id: `temp_${Date.now()}`, role: 'user', content, created_at: new Date().toISOString(), applied: false };
+      setMessages((prev) => [...(Array.isArray(prev) ? prev : []), optimisticUser]);
+      try {
+        const res = await api.advisorChat(person.id, { threadId: activeThreadId, content });
+        setMessages((prev) => {
+          const filtered = (prev || []).filter((m: any) => m.id !== optimisticUser.id);
+          return [...filtered, res?.user_message, res?.assistant_message].filter(Boolean);
+        });
+        if (res?.thread) {
+          setThreads((prev) => {
+            const rest = (prev || []).filter((t: any) => t.id !== res.thread.id);
+            return [res.thread, ...rest];
+          });
+        }
+      } catch (err) {
+        console.error('Failed to send advisor message', err);
+        setMessages((prev) => (prev || []).filter((m: any) => m.id !== optimisticUser.id));
+        setInput(content);
+      } finally {
+        setSending(false);
+      }
+    };
+
+    const applyInsight = async (messageId: string) => {
+      if (!person?.id || !activeThreadId || !messageId) return;
+      setApplyingId(messageId);
+      try {
+        const res = await api.applyAdvisorInsight(person.id, { threadId: activeThreadId, messageId });
+        setMessages((prev) => (prev || []).map((m: any) => m.id === messageId ? { ...m, applied: true } : m));
+        if (res?.behavioral_archive) onApplyInsight(res.behavioral_archive);
+      } catch (err) {
+        console.error('Failed to apply advisor insight', err);
+      } finally {
+        setApplyingId(null);
+      }
+    };
+
+    if (!open) return null;
+
     return (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-                <div className="flex justify-between items-center p-6 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-blue-50 rounded-t-xl">
-                    <h2 className="text-xl font-bold text-gray-900 flex items-center">
-                        <Bot className="w-6 h-6 mr-2 text-purple-600" />
-                        AI 军师 · 决策辅助
-                    </h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-                        <X className="w-6 h-6" />
-                    </button>
-                </div>
-
-                <div className="p-6 overflow-y-auto flex-1">
-                    <div className="bg-blue-50 border border-blue-100 rounded-lg p-4 mb-6 text-sm text-blue-800 flex items-start">
-                        <Brain className="w-5 h-5 mr-2 shrink-0" />
-                        <div>
-                            <p className="font-bold mb-1">正在咨询关于 {person.name} 的问题</p>
-                            <p className="opacity-80">AI 将结合 {person.name} 的性格档案（{person.disc_type}/{person.mbti_type}）及过往互动记录为您出谋划策。</p>
-                        </div>
-                    </div>
-
-                    {!response ? (
-                        <form onSubmit={handleSubmit}>
-                            <div className="mb-4">
-                                <label className="block text-sm font-bold text-gray-700 mb-2">请描述您遇到的情况或问题：</label>
-                                <textarea 
-                                    value={query}
-                                    onChange={e => setQuery(e.target.value)}
-                                    className="w-full h-32 border border-gray-300 rounded-xl p-4 focus:ring-2 focus:ring-purple-200 focus:border-purple-400 resize-none text-sm"
-                                    placeholder="例如：我准备邀请他参加周末的聚会，但他最近好像心情不好，我该怎么开口？或者，他刚刚拒绝了我的提议，我该如何挽回？"
-                                    autoFocus
-                                />
-                            </div>
-                            <button 
-                                type="submit" 
-                                disabled={loading || !query.trim()}
-                                className="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl font-bold shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center transition-all"
-                            >
-                                {loading ? (
-                                    <>
-                                        <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-2"></div>
-                                        正在分析利弊...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Zap className="w-4 h-4 mr-2" /> 开始分析
-                                    </>
-                                )}
-                            </button>
-                        </form>
-                    ) : (
-                        <div className="space-y-6">
-                            <div className="bg-purple-50/50 rounded-xl p-6 border border-purple-100">
-                                <h3 className="text-sm font-bold text-gray-500 mb-2 uppercase tracking-wide">AI 建议</h3>
-                                <div className="text-gray-800 leading-relaxed whitespace-pre-wrap font-medium">
-                                    {response}
-                                </div>
-                            </div>
-                            
-                            <div className="flex justify-end space-x-3">
-                                <button 
-                                    onClick={() => { setResponse(''); setQuery(''); }}
-                                    className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg text-sm transition-colors"
-                                >
-                                    咨询其他问题
-                                </button>
-                                <button 
-                                    onClick={onClose}
-                                    className="px-6 py-2 bg-gray-900 text-white rounded-lg text-sm hover:bg-gray-800 transition-colors"
-                                >
-                                    完成
-                                </button>
-                            </div>
-                        </div>
-                    )}
-                </div>
+      <div className="fixed right-4 top-4 bottom-4 z-40 w-[380px] bg-white border border-gray-200 rounded-2xl shadow-2xl flex flex-col">
+        <div className="px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-blue-50 rounded-t-2xl">
+          <div className="flex items-center justify-between">
+            <div className="font-bold text-gray-900 flex items-center">
+              <Bot className="w-4 h-4 mr-2 text-purple-600" />
+              AI 军师 · 决策侧栏
             </div>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-700"><X className="w-4 h-4" /></button>
+          </div>
+          <div className="text-xs text-gray-600 mt-1">咨询对象：{person?.name}（{person?.disc_type || '-'} / {person?.mbti_type || '-'}）</div>
         </div>
+
+        <div className="px-3 py-2 border-b border-gray-100 flex items-center gap-2 overflow-x-auto">
+          <button onClick={createThread} className="shrink-0 text-xs px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-50 flex items-center">
+            <Plus className="w-3 h-3 mr-1" /> 新会话
+          </button>
+          {(threads || []).map((t: any) => (
+            <button
+              key={t.id}
+              onClick={() => setActiveThreadId(t.id)}
+              className={`shrink-0 text-xs px-2 py-1 rounded border ${activeThreadId === t.id ? 'border-purple-300 bg-purple-50 text-purple-700' : 'border-gray-200 bg-white text-gray-600'}`}
+            >
+              {t.title || '未命名'}
+            </button>
+          ))}
+        </div>
+
+        <div ref={messageWrapRef} className="flex-1 overflow-y-auto p-3 space-y-3">
+          {loading ? (
+            <div className="text-xs text-gray-400">加载中...</div>
+          ) : !activeThreadId ? (
+            <div className="text-xs text-gray-400">先创建一个会话再开始咨询。</div>
+          ) : (
+            <>
+              {(messages || []).map((m: any) => (
+                <div key={m.id} className={`rounded-lg px-3 py-2 text-sm ${m.role === 'assistant' ? 'bg-purple-50 border border-purple-100' : 'bg-gray-50 border border-gray-100'}`}>
+                  <div className="text-[11px] text-gray-400 mb-1">{m.role === 'assistant' ? '军师' : '我'}</div>
+                  <div className="text-gray-800 whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                  {m.role === 'assistant' && (
+                    <div className="mt-2 flex items-center">
+                      <button
+                        disabled={!!m.applied || applyingId === m.id}
+                        onClick={() => applyInsight(m.id)}
+                        className={`text-[11px] px-2 py-1 rounded border ${m.applied ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-blue-200 bg-white text-blue-700'} disabled:opacity-70`}
+                      >
+                        {m.applied ? '已沉淀到档案馆' : (applyingId === m.id ? '沉淀中…' : '沉淀到行为档案')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+              {(messages || []).length === 0 && <div className="text-xs text-gray-400">输入你的情境，开始多轮咨询。</div>}
+            </>
+          )}
+        </div>
+
+        <div className="p-3 border-t border-gray-100">
+          <div className="flex gap-2">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              className="flex-1 h-20 text-sm border border-gray-200 rounded-lg p-2 resize-none focus:ring-2 focus:ring-purple-200"
+              placeholder="描述你当前的问题，军师会基于上下文连续给建议"
+            />
+            <button
+              onClick={send}
+              disabled={sending || !input.trim() || !activeThreadId}
+              className="w-16 rounded-lg bg-purple-600 text-white text-sm disabled:opacity-50"
+            >
+              {sending ? '发送中' : '发送'}
+            </button>
+          </div>
+        </div>
+      </div>
     );
 }
 
@@ -2433,7 +2871,7 @@ function PersonCreationModal({ onClose, onSuccess }: { onClose: () => void; onSu
     );
 }
 
-function InteractionLogModal({ personId, onClose, onSuccess }: { personId: string; onClose: () => void; onSuccess: () => void }) {
+function InteractionLogModal({ personId, onClose, onSuccess }: { personId: string; onClose: () => void; onSuccess: (result?: any) => void }) {
     const [formData, setFormData] = useState({
         event_date: new Date().toISOString().split('T')[0],
         event_context: '',
@@ -2448,8 +2886,8 @@ function InteractionLogModal({ personId, onClose, onSuccess }: { personId: strin
         e.preventDefault();
         setLoading(true);
         try {
-            await api.createInteractionLog({ ...formData, person_id: personId });
-            onSuccess();
+            const created = await api.createInteractionLog({ ...formData, person_id: personId });
+            onSuccess(created);
             // Reset form
             setFormData({
                 event_date: new Date().toISOString().split('T')[0],

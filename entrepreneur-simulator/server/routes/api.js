@@ -24,11 +24,43 @@ const sha256 = (obj) => {
   return crypto.createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 };
 
+const parsePrivateInfoObject = (privateInfo) => {
+  if (!privateInfo || typeof privateInfo !== 'string') return {};
+  const raw = privateInfo.trim();
+  if (!raw) return {};
+  try {
+    const obj = JSON.parse(raw);
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch {
+    return {};
+  }
+};
+
+const normalizeStringList = (arr) => {
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .map((x) => (x === undefined || x === null ? '' : String(x).trim()))
+    .filter(Boolean);
+};
+
 const parsePrivateInfoToAnalysis = (privateInfo) => {
   const empty = {
     layer_1_core: { personality_traits: '', core_values: '', cognitive_mode: '', emotional_energy: '' },
     layer_2_drive: { motivation_system: '', skills_capabilities: '', resource_network: '' },
     layer_3_surface: { behavior_habits: '', life_trajectory: '', current_status_path: '' },
+    behavioral_archive: {
+      life_patterns: '',
+      consumption_traits: '',
+      language_signals: '',
+      key_events: '',
+      observation_points: [],
+    },
+    emotional_decoder: {
+      charging_guide: '',
+      mine_avoidance: '',
+      conflict_first_aid: '',
+      updated_at: '',
+    },
     verification_checklists: {},
   };
 
@@ -43,6 +75,12 @@ const parsePrivateInfoToAnalysis = (privateInfo) => {
         layer_1_core: { ...empty.layer_1_core, ...(obj.layer_1_core || {}) },
         layer_2_drive: { ...empty.layer_2_drive, ...(obj.layer_2_drive || {}) },
         layer_3_surface: { ...empty.layer_3_surface, ...(obj.layer_3_surface || {}) },
+        behavioral_archive: {
+          ...empty.behavioral_archive,
+          ...(obj.behavioral_archive || {}),
+          observation_points: normalizeStringList(obj?.behavioral_archive?.observation_points || obj?.observation_points || []),
+        },
+        emotional_decoder: { ...empty.emotional_decoder, ...(obj.emotional_decoder || {}) },
         verification_checklists: obj.verification_checklists && typeof obj.verification_checklists === 'object' ? obj.verification_checklists : {},
       };
     }
@@ -53,6 +91,97 @@ const parsePrivateInfoToAnalysis = (privateInfo) => {
     layer_3_surface: { ...empty.layer_3_surface, current_status_path: raw },
   };
 };
+
+const SCENARIO_CARD_PREFIX = 'SCENARIO_CARD_JSON:';
+
+const buildScenarioCardContent = (card) => {
+  const payload = {
+    title: String(card?.title || ''),
+    category: String(card?.category || 'work'),
+    scenario: String(card?.scenario || ''),
+    predicted_reaction: String(card?.predicted_reaction || ''),
+    strategy: String(card?.strategy || ''),
+    verdict: card?.verdict === 'accept' ? 'accept' : (card?.verdict === 'reject' ? 'reject' : 'pending'),
+    updated_at: new Date().toISOString(),
+  };
+  return [
+    '# 场景预演卡片',
+    '',
+    `${SCENARIO_CARD_PREFIX}${JSON.stringify(payload)}`,
+    '',
+    `## 标题`,
+    payload.title || '未命名场景',
+    '',
+    `## 场景`,
+    payload.scenario || '无',
+    '',
+    `## AI 预测反应`,
+    payload.predicted_reaction || '无',
+    '',
+    `## AI 建议对策`,
+    payload.strategy || '无',
+  ].join('\n');
+};
+
+const parseScenarioCardFromSOP = (sop) => {
+  const text = typeof sop?.content === 'string' ? sop.content : '';
+  const line = text.split('\n').find((l) => l.startsWith(SCENARIO_CARD_PREFIX));
+  if (!line) return null;
+  const raw = line.slice(SCENARIO_CARD_PREFIX.length).trim();
+  try {
+    const card = JSON.parse(raw);
+    if (!card || typeof card !== 'object') return null;
+    const normalizedCategory = String(card.category || '').trim();
+    return {
+      sop_id: sop.id,
+      sop_title: sop.title,
+      title: String(card.title || sop.title || '未命名场景'),
+      scenario: String(card.scenario || ''),
+      predicted_reaction: String(card.predicted_reaction || ''),
+      strategy: String(card.strategy || ''),
+      category: normalizedCategory || '未分类',
+      verdict: String(card.verdict || 'pending'),
+      updated_at: card.updated_at || sop.updated_at || sop.created_at || null,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const createId = () => {
+  if (crypto.randomUUID) return crypto.randomUUID();
+  return `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+};
+
+const getAdvisorWorkspace = (privateObj) => {
+  const advisor = privateObj?.advisor_workspace;
+  if (!advisor || typeof advisor !== 'object') return { threads: [], active_thread_id: null };
+  const threads = Array.isArray(advisor.threads) ? advisor.threads : [];
+  return {
+    threads: threads.map((t) => ({
+      id: String(t?.id || createId()),
+      title: String(t?.title || '未命名会话'),
+      updated_at: t?.updated_at || new Date().toISOString(),
+      created_at: t?.created_at || new Date().toISOString(),
+      messages: Array.isArray(t?.messages) ? t.messages.map((m) => ({
+        id: String(m?.id || createId()),
+        role: m?.role === 'assistant' ? 'assistant' : 'user',
+        content: String(m?.content || ''),
+        created_at: m?.created_at || new Date().toISOString(),
+        applied: !!m?.applied,
+      })) : [],
+    })),
+    active_thread_id: advisor.active_thread_id || null,
+  };
+};
+
+const withAdvisorWorkspace = (privateObj, workspace) => ({
+  ...(privateObj || {}),
+  advisor_workspace: {
+    threads: Array.isArray(workspace?.threads) ? workspace.threads : [],
+    active_thread_id: workspace?.active_thread_id || null,
+  },
+});
 
 function summarizeMindMapContent(content) {
   const text = typeof content === 'string' ? content : '';
@@ -423,6 +552,8 @@ async function routes(fastify, options) {
         layer_1_core: incoming?.layer_1_core ?? base?.layer_1_core ?? {},
         layer_2_drive: incoming?.layer_2_drive ?? base?.layer_2_drive ?? {},
         layer_3_surface: incoming?.layer_3_surface ?? base?.layer_3_surface ?? {},
+        behavioral_archive: incoming?.behavioral_archive ?? base?.behavioral_archive ?? {},
+        emotional_decoder: incoming?.emotional_decoder ?? base?.emotional_decoder ?? {},
       };
 
       const updatedId = await dbService.updatePersonPrivateInfo(id, JSON.stringify(next));
@@ -594,6 +725,163 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
       }
   });
 
+  fastify.get('/people/:id/advisor/threads', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.query?.userId || 'user-1';
+      const profiles = await dbService.getPeopleProfiles(userId);
+      const profile = profiles.find((p) => p.id === id);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+      const base = parsePrivateInfoObject(profile.private_info);
+      const workspace = getAdvisorWorkspace(base);
+      const threads = (workspace.threads || [])
+        .map((t) => ({ id: t.id, title: t.title, updated_at: t.updated_at, created_at: t.created_at, message_count: (t.messages || []).length }))
+        .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+      return { threads, active_thread_id: workspace.active_thread_id || null };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to fetch advisor threads' });
+    }
+  });
+
+  fastify.post('/people/:id/advisor/thread', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const title = String(request.body?.title || '新建会话').trim().slice(0, 60) || '新建会话';
+      const profiles = await dbService.getPeopleProfiles(userId);
+      const profile = profiles.find((p) => p.id === id);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+      const base = parsePrivateInfoObject(profile.private_info);
+      const workspace = getAdvisorWorkspace(base);
+      const now = new Date().toISOString();
+      const thread = { id: createId(), title, created_at: now, updated_at: now, messages: [] };
+      const nextWorkspace = {
+        ...workspace,
+        active_thread_id: thread.id,
+        threads: [thread, ...(workspace.threads || [])],
+      };
+      const nextPrivate = withAdvisorWorkspace(base, nextWorkspace);
+      await dbService.updatePersonPrivateInfo(id, JSON.stringify(nextPrivate));
+      return { thread: { id: thread.id, title: thread.title, created_at: thread.created_at, updated_at: thread.updated_at, message_count: 0 } };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to create advisor thread' });
+    }
+  });
+
+  fastify.get('/people/:id/advisor/thread/:threadId', async (request, reply) => {
+    try {
+      const { id, threadId } = request.params;
+      const userId = request.query?.userId || 'user-1';
+      const profiles = await dbService.getPeopleProfiles(userId);
+      const profile = profiles.find((p) => p.id === id);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+      const base = parsePrivateInfoObject(profile.private_info);
+      const workspace = getAdvisorWorkspace(base);
+      const thread = (workspace.threads || []).find((t) => String(t.id) === String(threadId));
+      if (!thread) return reply.code(404).send({ error: 'Thread not found' });
+      return { thread };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to fetch advisor thread' });
+    }
+  });
+
+  fastify.post('/people/:id/advisor/chat', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const threadId = String(request.body?.threadId || '');
+      const content = String(request.body?.content || '').trim();
+      if (!threadId || !content) return reply.code(400).send({ error: 'threadId and content are required' });
+      const profiles = await dbService.getPeopleProfiles(userId);
+      const profile = profiles.find((p) => p.id === id);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+      const base = parsePrivateInfoObject(profile.private_info);
+      const workspace = getAdvisorWorkspace(base);
+      const threadIndex = (workspace.threads || []).findIndex((t) => String(t.id) === threadId);
+      if (threadIndex < 0) return reply.code(404).send({ error: 'Thread not found' });
+      const thread = workspace.threads[threadIndex];
+      const userMsg = { id: createId(), role: 'user', content, created_at: new Date().toISOString(), applied: false };
+      const historyText = [...(thread.messages || []), userMsg]
+        .slice(-12)
+        .map((m) => `${m.role === 'assistant' ? '军师' : '我'}：${m.content}`)
+        .join('\n');
+      const logs = await dbService.getInteractionLogs(id);
+      const query = `请基于以下连续会话进行多轮决策建议。\n${historyText}\n\n请延续上下文回答，并给出可执行建议。`;
+      const result = await chatService.consultPerson({ profile, logs, query });
+      const assistantMsg = {
+        id: createId(),
+        role: 'assistant',
+        content: String(result?.reply || '').trim(),
+        created_at: new Date().toISOString(),
+        applied: false,
+      };
+      const nextThread = {
+        ...thread,
+        title: (thread.title === '新建会话' ? content.slice(0, 20) : thread.title) || thread.title,
+        updated_at: new Date().toISOString(),
+        messages: [...(thread.messages || []), userMsg, assistantMsg],
+      };
+      const nextThreads = [...workspace.threads];
+      nextThreads.splice(threadIndex, 1);
+      nextThreads.unshift(nextThread);
+      const nextWorkspace = { ...workspace, active_thread_id: threadId, threads: nextThreads };
+      const nextPrivate = withAdvisorWorkspace(base, nextWorkspace);
+      await dbService.updatePersonPrivateInfo(id, JSON.stringify(nextPrivate));
+      return { user_message: userMsg, assistant_message: assistantMsg, thread: { id: nextThread.id, title: nextThread.title, updated_at: nextThread.updated_at, message_count: nextThread.messages.length } };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to process advisor chat' });
+    }
+  });
+
+  fastify.post('/people/:id/advisor/apply', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const threadId = String(request.body?.threadId || '');
+      const messageId = String(request.body?.messageId || '');
+      if (!threadId || !messageId) return reply.code(400).send({ error: 'threadId and messageId are required' });
+      const profiles = await dbService.getPeopleProfiles(userId);
+      const profile = profiles.find((p) => p.id === id);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+
+      const base = parsePrivateInfoObject(profile.private_info);
+      const workspace = getAdvisorWorkspace(base);
+      const threadIndex = (workspace.threads || []).findIndex((t) => String(t.id) === threadId);
+      if (threadIndex < 0) return reply.code(404).send({ error: 'Thread not found' });
+      const thread = workspace.threads[threadIndex];
+      const msgIndex = (thread.messages || []).findIndex((m) => String(m.id) === messageId && m.role === 'assistant');
+      if (msgIndex < 0) return reply.code(404).send({ error: 'Assistant message not found' });
+      const msg = thread.messages[msgIndex];
+      const archive = parsePrivateInfoToAnalysis(profile.private_info)?.behavioral_archive || {};
+      const oldText = String(archive.life_patterns || '').trim();
+      const snippet = String(msg.content || '').slice(0, 500);
+      const line = `[军师洞察 ${new Date().toISOString().slice(0, 10)}] ${snippet}`;
+      const nextArchiveText = [oldText, line].filter(Boolean).join('\n');
+      const updatedMessage = { ...msg, applied: true, applied_at: new Date().toISOString() };
+      const nextMessages = [...(thread.messages || [])];
+      nextMessages[msgIndex] = updatedMessage;
+      const nextThread = { ...thread, messages: nextMessages, updated_at: new Date().toISOString() };
+      const nextThreads = [...workspace.threads];
+      nextThreads[threadIndex] = nextThread;
+      const nextWorkspace = { ...workspace, threads: nextThreads, active_thread_id: threadId };
+      const nextPrivate = withAdvisorWorkspace(base, nextWorkspace);
+      nextPrivate.behavioral_archive = {
+        ...(base?.behavioral_archive || {}),
+        ...(archive || {}),
+        life_patterns: nextArchiveText,
+      };
+      await dbService.updatePersonPrivateInfo(id, JSON.stringify(nextPrivate));
+      return { ok: true, behavioral_archive: nextPrivate.behavioral_archive };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to apply advisor insight' });
+    }
+  });
+
   // AI Summary & Reminders
   fastify.post('/people/summary', async (request, reply) => {
       try {
@@ -628,6 +916,166 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
     } catch (err) {
       request.log.error(err);
       reply.code(500).send({ error: 'Failed to generate practical scenes' });
+    }
+  });
+
+  fastify.get('/people/:id/scenario-cards', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.query?.userId || 'user-1';
+      const sops = await dbService.getSOPs(userId);
+      const cards = (sops || [])
+        .filter((s) => Array.isArray(s.tags) && s.tags.includes('scenario-lab') && s.tags.includes(`person:${id}`))
+        .map(parseScenarioCardFromSOP)
+        .filter(Boolean)
+        .sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+      return { items: cards };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to fetch scenario cards' });
+    }
+  });
+
+  fastify.post('/people/:id/scenario-simulate', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const query = String(request.body?.query || '').trim();
+      const category = String(request.body?.category || '').trim().slice(0, 24) || '职场协作';
+
+      const profiles = await dbService.getPeopleProfiles(userId);
+      const profile = profiles.find(p => p.id === id);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+
+      const logs = await dbService.getInteractionLogs(id);
+      const generated = await chatService.generateScenarioSimulation({ profile, logs, query, category });
+
+      const scenarioText = query || generated.title || '未命名场景';
+      const card = {
+        title: generated.title || scenarioText,
+        category: generated.category || category,
+        scenario: scenarioText,
+        predicted_reaction: generated.predicted_reaction || '',
+        strategy: generated.strategy || '',
+        verdict: 'pending',
+      };
+      const sopData = {
+        user_id: userId,
+        title: `剧本｜${card.title}`.slice(0, 80),
+        category: 'people',
+        tags: ['scenario-lab', `person:${id}`, `scenario:${card.category}`],
+        version: 'V1.0',
+        content: buildScenarioCardContent(card),
+      };
+      const sopId = await dbService.saveSOP(sopData);
+      return {
+        item: {
+          sop_id: sopId,
+          sop_title: sopData.title,
+          ...card,
+          updated_at: new Date().toISOString(),
+        },
+      };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to generate scenario simulation', detail: err?.message });
+    }
+  });
+
+  fastify.patch('/people/:id/scenario-cards/:sopId', async (request, reply) => {
+    try {
+      const { id, sopId } = request.params;
+      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const patch = request.body?.patch || {};
+      const sops = await dbService.getSOPs(userId);
+      const sop = (sops || []).find((s) => s.id === sopId);
+      if (!sop) return reply.code(404).send({ error: 'Scenario card not found' });
+      const current = parseScenarioCardFromSOP(sop);
+      if (!current) return reply.code(400).send({ error: 'Invalid scenario card content' });
+      const next = {
+        title: patch.title ?? current.title,
+        category: String(patch.category ?? current.category ?? '未分类').trim().slice(0, 24) || '未分类',
+        scenario: patch.scenario ?? current.scenario,
+        predicted_reaction: patch.predicted_reaction ?? current.predicted_reaction,
+        strategy: patch.strategy ?? current.strategy,
+        verdict: patch.verdict === 'accept' ? 'accept' : (patch.verdict === 'reject' ? 'reject' : current.verdict),
+      };
+      const updatedTags = ['scenario-lab', `person:${id}`, `scenario:${next.category}`];
+      const data = {
+        id: sopId,
+        user_id: userId,
+        title: `剧本｜${next.title}`.slice(0, 80),
+        category: 'people',
+        tags: updatedTags,
+        version: sop.version || 'V1.0',
+        content: buildScenarioCardContent(next),
+      };
+      const updatedId = await dbService.saveSOP(data);
+      return { id: updatedId, item: { sop_id: updatedId, ...next, updated_at: new Date().toISOString() } };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to update scenario card', detail: err?.message });
+    }
+  });
+
+  fastify.delete('/people/:id/scenario-cards/:sopId', async (request, reply) => {
+    try {
+      const { id, sopId } = request.params;
+      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const sops = await dbService.getSOPs(userId);
+      const sop = (sops || []).find((s) => s.id === sopId);
+      if (!sop) return reply.code(404).send({ error: 'Scenario card not found' });
+      const tags = Array.isArray(sop.tags) ? sop.tags : [];
+      const isScenarioCard = tags.includes('scenario-lab') && tags.includes(`person:${id}`);
+      if (!isScenarioCard) return reply.code(400).send({ error: 'SOP is not a scenario card of this person' });
+      await dbService.deleteSOP(sopId);
+      return { ok: true, id: sopId };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to delete scenario card', detail: err?.message });
+    }
+  });
+
+  fastify.post('/people/:id/map-proposal/apply', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const proposal = request.body?.proposal || {};
+      const profiles = await dbService.getPeopleProfiles(userId);
+      const profile = profiles.find(p => p.id === id);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+
+      const existingPrivate = parsePrivateInfoToAnalysis(profile.private_info);
+      const basePrivate = parsePrivateInfoObject(profile.private_info);
+      const mergedTriggers = Array.from(new Set([...(profile.triggers || []), ...normalizeStringList(proposal.red_lights || [])]));
+      const mergedPleasers = Array.from(new Set([...(profile.pleasers || []), ...normalizeStringList(proposal.green_lights || [])]));
+      await dbService.updatePersonTriggersPleasers(id, mergedTriggers, mergedPleasers);
+
+      const archiveNotes = normalizeStringList(proposal.archive_notes || []);
+      const oldPatterns = String(existingPrivate?.behavioral_archive?.life_patterns || '').trim();
+      const joinedPatterns = [oldPatterns, ...archiveNotes].filter(Boolean).join('\n');
+      const observationTasks = Array.from(new Set([
+        ...normalizeStringList(existingPrivate?.behavioral_archive?.observation_points || []),
+        ...normalizeStringList(proposal.observation_tasks || []),
+      ]));
+      const nextPrivate = {
+        ...(basePrivate || {}),
+        behavioral_archive: {
+          ...(existingPrivate?.behavioral_archive || {}),
+          life_patterns: joinedPatterns,
+          observation_points: observationTasks,
+        },
+      };
+      await dbService.updatePersonPrivateInfo(id, JSON.stringify(nextPrivate));
+
+      return {
+        triggers: mergedTriggers,
+        pleasers: mergedPleasers,
+        behavioral_archive: nextPrivate.behavioral_archive,
+      };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to apply map proposal', detail: err?.message });
     }
   });
 
@@ -698,7 +1146,24 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
     try {
       const logData = request.body;
       const id = await dbService.saveInteractionLog(logData);
-      return { id, message: "Interaction Log Saved Successfully" };
+      let proposal = null;
+      try {
+        const personId = logData?.person_id;
+        if (personId) {
+          const profiles = await dbService.getPeopleProfiles('user-1');
+          const profile = profiles.find((p) => p.id === personId);
+          if (profile) {
+            const logs = await dbService.getInteractionLogs(personId);
+            const latest = (logs || []).find((l) => String(l.id) === String(id)) || logs?.[0];
+            if (latest) {
+              proposal = await chatService.generateMapPatchProposal({ profile, log: latest });
+            }
+          }
+        }
+      } catch (e) {
+        request.log.warn({ msg: 'generateMapPatchProposal failed', error: e?.message, logId: id });
+      }
+      return { id, message: "Interaction Log Saved Successfully", proposal };
     } catch (err) {
       request.log.error(err);
       reply.code(500).send({ error: 'Failed to save Interaction Log' });

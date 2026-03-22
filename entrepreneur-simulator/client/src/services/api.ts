@@ -294,6 +294,48 @@ export const api = {
         return response.json();
     },
 
+    getAdvisorThreads: async (personId: string, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/advisor/threads?userId=${encodeURIComponent(userId)}`);
+        if (!response.ok) throw new Error('Failed to fetch advisor threads');
+        return response.json();
+    },
+
+    createAdvisorThread: async (personId: string, title?: string, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/advisor/thread`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, title })
+        });
+        if (!response.ok) throw new Error('Failed to create advisor thread');
+        return response.json();
+    },
+
+    getAdvisorThread: async (personId: string, threadId: string, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/advisor/thread/${threadId}?userId=${encodeURIComponent(userId)}`);
+        if (!response.ok) throw new Error('Failed to fetch advisor thread');
+        return response.json();
+    },
+
+    advisorChat: async (personId: string, payload: { threadId: string; content: string }, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/advisor/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, ...payload })
+        });
+        if (!response.ok) throw new Error('Failed to send advisor message');
+        return response.json();
+    },
+
+    applyAdvisorInsight: async (personId: string, payload: { threadId: string; messageId: string }, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/advisor/apply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, ...payload })
+        });
+        if (!response.ok) throw new Error('Failed to apply advisor insight');
+        return response.json();
+    },
+
     getPersonSummary: async (personId: string) => {
         const response = await fetch(`${API_BASE_URL}/people/summary`, {
             method: 'POST',
@@ -311,6 +353,52 @@ export const api = {
             body: JSON.stringify({ personId })
         });
         if (!response.ok) throw new Error('Failed to generate practical scenes');
+        return response.json();
+    },
+
+    getScenarioCards: async (personId: string, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/scenario-cards?userId=${encodeURIComponent(userId)}`);
+        if (!response.ok) throw new Error('Failed to fetch scenario cards');
+        return response.json();
+    },
+
+    generateScenarioSimulation: async (personId: string, payload: { query: string; category: string }, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/scenario-simulate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, ...payload })
+        });
+        if (!response.ok) throw new Error('Failed to generate scenario simulation');
+        return response.json();
+    },
+
+    updateScenarioCard: async (personId: string, sopId: string, patch: any, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/scenario-cards/${sopId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, patch })
+        });
+        if (!response.ok) throw new Error('Failed to update scenario card');
+        return response.json();
+    },
+
+    deleteScenarioCard: async (personId: string, sopId: string, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/scenario-cards/${sopId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId })
+        });
+        if (!response.ok) throw new Error('Failed to delete scenario card');
+        return response.json();
+    },
+
+    applyMapProposal: async (personId: string, proposal: any, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/map-proposal/apply`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId, proposal })
+        });
+        if (!response.ok) throw new Error('Failed to apply map proposal');
         return response.json();
     },
 
