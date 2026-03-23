@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const dbService = require('./dbService');
+const { getLlmApiKey, getLlmModel, getOpenAIClientOptions } = require('./llmConfig');
 
 let openaiClient = null;
 
@@ -11,11 +12,7 @@ function toDateKeyLocal(d) {
 }
 
 function getModel() {
-  const m = process.env.OPENAI_MODEL;
-  if (m && String(m).trim()) return String(m).trim();
-  const base = String(process.env.OPENAI_BASE_URL || '');
-  if (base.includes('dashscope.aliyuncs.com')) return 'qwen-plus';
-  return 'doubao-seed-2-0-pro-260215';
+  return getLlmModel();
 }
 
 function extractJsonObject(text) {
@@ -37,9 +34,9 @@ function extractJsonObject(text) {
 
 function getOpenAIClientOrNull() {
   if (openaiClient) return openaiClient;
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = getLlmApiKey();
   if (!apiKey) return null;
-  openaiClient = new OpenAI({ apiKey, baseURL: process.env.OPENAI_BASE_URL });
+  openaiClient = new OpenAI(getOpenAIClientOptions());
   return openaiClient;
 }
 
@@ -93,7 +90,7 @@ async function getSecretaryDaily({ userId, refresh }) {
 
   const client = getOpenAIClientOrNull();
   if (!client) {
-    const res = { available: false, suggestions: [], general_reminders: [], message: 'OPENAI_API_KEY 未配置', cached: false, date: nowText };
+    const res = { available: false, suggestions: [], general_reminders: [], message: 'LLM_API_KEY 未配置', cached: false, date: nowText };
     dailyCache.set(cacheKey, res);
     return res;
   }
