@@ -25,7 +25,9 @@ const sha256 = (obj) => {
 };
 
 const parsePrivateInfoObject = (privateInfo) => {
-  if (!privateInfo || typeof privateInfo !== 'string') return {};
+  if (!privateInfo) return {};
+  if (privateInfo && typeof privateInfo === 'object') return privateInfo;
+  if (typeof privateInfo !== 'string') return {};
   const raw = privateInfo.trim();
   if (!raw) return {};
   try {
@@ -885,14 +887,48 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
   // AI Summary & Reminders
   fastify.post('/people/summary', async (request, reply) => {
       try {
-          const { personId } = request.body;
-          const profiles = await dbService.getPeopleProfiles('user-1');
+          const { personId, forceRefresh } = request.body;
+          const userId = request.body?.userId || request.query?.userId || 'user-1';
+          const profiles = await dbService.getPeopleProfiles(userId);
           const profile = profiles.find(p => p.id === personId);
           if (!profile) return reply.code(404).send({ error: 'Person not found' });
-          
+
+          const privateObj = parsePrivateInfoObject(profile.private_info);
+          const today = new Date().toISOString().slice(0, 10);
+          const cachedBriefing = privateObj?.daily_briefing;
+
+          if (
+            !forceRefresh &&
+            cachedBriefing &&
+            typeof cachedBriefing === 'object' &&
+            cachedBriefing.date === today &&
+            cachedBriefing.payload &&
+            typeof cachedBriefing.payload === 'object'
+          ) {
+            return {
+              ...cachedBriefing.payload,
+              generated_at: cachedBriefing.generated_at || null,
+              date: cachedBriefing.date,
+              cached: true,
+            };
+          }
+
           const logs = await dbService.getInteractionLogs(personId);
           const result = await chatService.generateSummary({ profile, logs });
-          return result;
+          const nextPrivate = {
+            ...(privateObj || {}),
+            daily_briefing: {
+              date: today,
+              generated_at: new Date().toISOString(),
+              payload: result,
+            },
+          };
+          await dbService.updatePersonPrivateInfo(personId, JSON.stringify(nextPrivate));
+          return {
+            ...result,
+            date: today,
+            cached: false,
+          };
       } catch (err) {
           request.log.error(err);
           reply.code(500).send({ error: 'Summary generation failed' });

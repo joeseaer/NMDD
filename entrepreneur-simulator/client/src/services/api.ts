@@ -336,11 +336,11 @@ export const api = {
         return response.json();
     },
 
-    getPersonSummary: async (personId: string) => {
+    getPersonSummary: async (personId: string, forceRefresh: boolean = false, userId: string = CURRENT_USER_ID) => {
         const response = await fetch(`${API_BASE_URL}/people/summary`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ personId })
+            body: JSON.stringify({ personId, forceRefresh, userId })
         });
         if (!response.ok) throw new Error('Failed to get summary');
         return response.json();

@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Plus, User, Calendar, MessageSquare, Brain, X, Save, Edit2, Phone, MapPin, Zap, ThumbsUp, Activity, AlertCircle, Lock, Cake, Upload, Users, Clock, Eye, EyeOff, Briefcase, GraduationCap, Coffee, Compass, Crown, ChevronDown, ChevronUp, Bot, ArrowLeft, Check, Trash2 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { api } from '../services/api';
 
 // --- Constants ---
@@ -190,6 +192,8 @@ export default function PersonalityManager() {
   const [verificationLoading, setVerificationLoading] = useState<Record<string, boolean>>({});
   const verificationTimersRef = useRef<Record<string, any>>({});
   const checklistInitRef = useRef<string | null>(null);
+  const activeSummaryPersonIdRef = useRef<string>('');
+  const summaryRequestSeqRef = useRef(0);
 
   useEffect(() => {
     latestAnalysisRef.current = analysisDraft;
@@ -515,14 +519,20 @@ export default function PersonalityManager() {
     analysisDraft?.layer_3_surface?.life_trajectory,
   ]);
 
-  const fetchSummary = async (personId: string) => {
+  const fetchSummary = async (personId: string, forceRefresh: boolean = false) => {
+      const requestSeq = ++summaryRequestSeqRef.current;
+      activeSummaryPersonIdRef.current = personId;
       setSummaryLoading(true);
       try {
-          const data = await api.getPersonSummary(personId);
+          const data = await api.getPersonSummary(personId, forceRefresh);
+          if (summaryRequestSeqRef.current !== requestSeq || activeSummaryPersonIdRef.current !== personId) return;
           setSummaryData(data);
       } catch (err) {
+          if (summaryRequestSeqRef.current !== requestSeq || activeSummaryPersonIdRef.current !== personId) return;
           console.error("Failed to fetch summary", err);
+          setSummaryData(null);
       } finally {
+          if (summaryRequestSeqRef.current !== requestSeq || activeSummaryPersonIdRef.current !== personId) return;
           setSummaryLoading(false);
       }
   };
@@ -583,9 +593,16 @@ export default function PersonalityManager() {
       setSelectedPerson(person);
       setEditForm(person); // Initialize form with person data
       setIsEditing(false);
+      setSummaryData(null);
+      activeSummaryPersonIdRef.current = person.id;
       fetchLogs(person.id);
       fetchSummary(person.id);
   }
+
+  const handleRefreshSummary = async () => {
+    if (!selectedPerson?.id || summaryLoading) return;
+    await fetchSummary(selectedPerson.id, true);
+  };
 
   // New: Handle Avatar Upload (Mock for now or use Base64 if small)
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1350,11 +1367,22 @@ export default function PersonalityManager() {
                             <Bot className="w-5 h-5 mr-2 text-blue-600" /> 
                             AI 军师 · 每日内参
                         </h3>
-                        {summaryLoading ? (
-                            <span className="text-xs text-blue-400 animate-pulse bg-white/50 px-2 py-1 rounded">更新中...</span>
-                        ) : (
-                            <span className="text-xs text-blue-400 bg-white/50 px-2 py-1 rounded">今日已更新</span>
-                        )}
+                        <div className="flex items-center gap-2">
+                            {summaryLoading ? (
+                                <span className="text-xs text-blue-400 animate-pulse bg-white/50 px-2 py-1 rounded">更新中...</span>
+                            ) : (
+                                <span className="text-xs text-blue-400 bg-white/50 px-2 py-1 rounded">
+                                    {summaryData?.cached ? '今日缓存' : '今日已更新'}
+                                </span>
+                            )}
+                            <button
+                                onClick={handleRefreshSummary}
+                                disabled={summaryLoading || !selectedPerson?.id}
+                                className="text-xs px-2 py-1 rounded border border-blue-200 text-blue-600 hover:bg-blue-100/70 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                手动刷新
+                            </button>
+                        </div>
                     </div>
                     
                     {summaryData ? (
@@ -2347,6 +2375,8 @@ function AIAdvisorSidebar({ person, open, onClose, onApplyInsight }: { person: a
     const [sending, setSending] = useState(false);
     const [applyingId, setApplyingId] = useState<string | null>(null);
     const messageWrapRef = useRef<HTMLDivElement | null>(null);
+    const [panelWidth, setPanelWidth] = useState(420);
+    const [resizing, setResizing] = useState(false);
 
     const loadThreads = async () => {
       if (!person?.id) return;
@@ -2391,6 +2421,39 @@ function AIAdvisorSidebar({ person, open, onClose, onApplyInsight }: { person: a
       if (!messageWrapRef.current) return;
       messageWrapRef.current.scrollTop = messageWrapRef.current.scrollHeight;
     }, [messages.length, open]);
+
+    useEffect(() => {
+      try {
+        const raw = window.localStorage.getItem('advisor_sidebar_width');
+        const parsed = Number(raw);
+        if (Number.isFinite(parsed) && parsed >= 320 && parsed <= 760) setPanelWidth(parsed);
+      } catch {}
+    }, []);
+
+    useEffect(() => {
+      const handleMove = (e: MouseEvent) => {
+        if (!resizing) return;
+        const next = window.innerWidth - e.clientX - 16;
+        const clamped = Math.max(320, Math.min(760, next));
+        setPanelWidth(clamped);
+      };
+      const handleUp = () => {
+        if (!resizing) return;
+        setResizing(false);
+      };
+      window.addEventListener('mousemove', handleMove);
+      window.addEventListener('mouseup', handleUp);
+      return () => {
+        window.removeEventListener('mousemove', handleMove);
+        window.removeEventListener('mouseup', handleUp);
+      };
+    }, [resizing]);
+
+    useEffect(() => {
+      try {
+        window.localStorage.setItem('advisor_sidebar_width', String(panelWidth));
+      } catch {}
+    }, [panelWidth]);
 
     const createThread = async () => {
       if (!person?.id) return;
@@ -2452,7 +2515,17 @@ function AIAdvisorSidebar({ person, open, onClose, onApplyInsight }: { person: a
     if (!open) return null;
 
     return (
-      <div className="fixed right-4 top-4 bottom-4 z-40 w-[380px] bg-white border border-gray-200 rounded-2xl shadow-2xl flex flex-col">
+      <div
+        className="fixed right-4 top-4 bottom-4 z-40 bg-white border border-gray-200 rounded-2xl shadow-2xl flex flex-col"
+        style={{ width: `${panelWidth}px` }}
+      >
+        <div
+          onMouseDown={(e) => {
+            e.preventDefault();
+            setResizing(true);
+          }}
+          className={`absolute left-0 top-0 bottom-0 w-2 -translate-x-1/2 cursor-ew-resize ${resizing ? 'bg-purple-200/70' : 'bg-transparent hover:bg-purple-100/80'} rounded-l-full`}
+        />
         <div className="px-4 py-3 border-b border-gray-100 bg-gradient-to-r from-purple-50 to-blue-50 rounded-t-2xl">
           <div className="flex items-center justify-between">
             <div className="font-bold text-gray-900 flex items-center">
@@ -2489,7 +2562,30 @@ function AIAdvisorSidebar({ person, open, onClose, onApplyInsight }: { person: a
               {(messages || []).map((m: any) => (
                 <div key={m.id} className={`rounded-lg px-3 py-2 text-sm ${m.role === 'assistant' ? 'bg-purple-50 border border-purple-100' : 'bg-gray-50 border border-gray-100'}`}>
                   <div className="text-[11px] text-gray-400 mb-1">{m.role === 'assistant' ? '军师' : '我'}</div>
-                  <div className="text-gray-800 whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                  {m.role === 'assistant' ? (
+                    <div className="text-gray-800 leading-relaxed break-words">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                          ul: ({ children }) => <ul className="list-disc pl-5 mb-2">{children}</ul>,
+                          ol: ({ children }) => <ol className="list-decimal pl-5 mb-2">{children}</ol>,
+                          li: ({ children }) => <li className="mb-1">{children}</li>,
+                          pre: ({ children }) => <pre className="p-2 rounded bg-gray-100 text-[13px] overflow-x-auto mb-2">{children}</pre>,
+                          code: ({ children }) => <code className="px-1 py-0.5 rounded bg-gray-100 text-[13px]">{children}</code>,
+                          a: ({ href, children }) => (
+                            <a href={href} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+                              {children}
+                            </a>
+                          ),
+                        }}
+                      >
+                        {String(m.content || '')}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <div className="text-gray-800 whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                  )}
                   {m.role === 'assistant' && (
                     <div className="mt-2 flex items-center">
                       <button
