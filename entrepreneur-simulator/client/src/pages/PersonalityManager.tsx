@@ -90,6 +90,10 @@ export default function PersonalityManager() {
   const [advisorOpen, setAdvisorOpen] = useState(false);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [strategySuggestion, setStrategySuggestion] = useState<any>(null);
+  const [strategySuggesting, setStrategySuggesting] = useState(false);
+  const [strategyEvaluation, setStrategyEvaluation] = useState<any>(null);
+  const [strategyEvaluating, setStrategyEvaluating] = useState(false);
   const [practicalScenesLoading, setPracticalScenesLoading] = useState(false);
   const [trafficRedDraft, setTrafficRedDraft] = useState<any[]>([]);
   const [trafficGreenDraft, setTrafficGreenDraft] = useState<any[]>([]);
@@ -181,6 +185,34 @@ export default function PersonalityManager() {
       life_trajectory: '',
       current_status_path: '',
     },
+    strategy_layer: {
+      relation_positioning: '',
+      relation_priority: '',
+      relation_stage: '',
+      short_term_goal_30d: '',
+      mid_term_goal_90d: '',
+      expected_rhythm: '',
+      channel_preference: '',
+      contact_frequency: '',
+      preferred_topics: '',
+      taboo_topics: '',
+      weekly_time_budget_hours: '',
+      money_budget_monthly: '',
+      boundaries_red_lines: '',
+      strategy_status: '',
+      strategy_confidence: '',
+      weekly_action_plan: '',
+      expected_feedback_signals: '',
+      weekly_review_result: '',
+      deviation_reason: '',
+      next_week_adjustment: '',
+      invested_time_hours_month: '',
+      invested_money_month: '',
+      gained_value_score: '',
+      strategy_roi_score: '',
+      system_recommendation: '',
+      updated_at: '',
+    },
   }), []);
 
   const [analysisDraft, setAnalysisDraft] = useState<any>(defaultProfileAnalysis);
@@ -211,6 +243,7 @@ export default function PersonalityManager() {
             layer_1_core: { ...defaultProfileAnalysis.layer_1_core, ...(obj.layer_1_core || {}) },
             layer_2_drive: { ...defaultProfileAnalysis.layer_2_drive, ...(obj.layer_2_drive || {}) },
             layer_3_surface: { ...defaultProfileAnalysis.layer_3_surface, ...(obj.layer_3_surface || {}) },
+            strategy_layer: { ...defaultProfileAnalysis.strategy_layer, ...(obj.strategy_layer || {}) },
           },
           verification: obj.verification_checklists && typeof obj.verification_checklists === 'object' ? obj.verification_checklists : {},
         };
@@ -372,6 +405,8 @@ export default function PersonalityManager() {
     setReactionSaving(false);
     setReactionSavedAt(null);
     setShowAllRelated(false);
+    setStrategySuggestion(null);
+    setStrategyEvaluation(null);
     fetchScenarioCards(selectedPerson.id);
   }, [selectedPerson?.id]);
 
@@ -602,6 +637,34 @@ export default function PersonalityManager() {
   const handleRefreshSummary = async () => {
     if (!selectedPerson?.id || summaryLoading) return;
     await fetchSummary(selectedPerson.id, true);
+  };
+
+  const handleRecommendStrategy = async () => {
+    if (!selectedPerson?.id || strategySuggesting) return;
+    setStrategySuggesting(true);
+    try {
+      const data = await api.generateStrategySuggestion(selectedPerson.id);
+      setStrategySuggestion(data || null);
+    } catch (err) {
+      console.error('Failed to generate strategy suggestion', err);
+      alert(err instanceof Error ? err.message : '生成策略建议失败');
+    } finally {
+      setStrategySuggesting(false);
+    }
+  };
+
+  const handleEvaluateStrategy = async () => {
+    if (!selectedPerson?.id || strategyEvaluating) return;
+    setStrategyEvaluating(true);
+    try {
+      const data = await api.evaluateStrategy(selectedPerson.id);
+      setStrategyEvaluation(data || null);
+    } catch (err) {
+      console.error('Failed to evaluate strategy', err);
+      alert(err instanceof Error ? err.message : '策略评估失败');
+    } finally {
+      setStrategyEvaluating(false);
+    }
   };
 
   // New: Handle Avatar Upload (Mock for now or use Base64 if small)
@@ -2188,6 +2251,184 @@ export default function PersonalityManager() {
                         )}
                       </div>
                     </div>
+                  </div>
+
+                  <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="font-bold text-gray-900">🎯 主观策略层（V1+V2+V3）</div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={handleRecommendStrategy}
+                          disabled={strategySuggesting || !selectedPerson}
+                          className="text-xs px-3 py-1.5 rounded border border-indigo-200 text-indigo-700 hover:bg-indigo-50 disabled:opacity-60"
+                        >
+                          {strategySuggesting ? 'AI 生成中…' : 'AI 推荐策略'}
+                        </button>
+                        <button
+                          onClick={handleEvaluateStrategy}
+                          disabled={strategyEvaluating || !selectedPerson}
+                          className="text-xs px-3 py-1.5 rounded border border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                        >
+                          {strategyEvaluating ? '评估中…' : '策略效果评估'}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-gray-500">
+                      AI 仅提供建议草案与评估结论，最终策略以你手动输入为准，不提供一键采纳。
+                    </div>
+                    <div className="text-xs font-bold text-indigo-700">V1：目标与关系策略</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">我对TA的关系定位</div>
+                        <input list="relation-positioning-options" value={analysisDraft.strategy_layer?.relation_positioning || ''} onChange={(e) => setAnalysisField('strategy_layer.relation_positioning', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="可选：战略合作 / 资源连接 / 普通维护 / 观察中 / 降低投入，或自定义输入" />
+                        <datalist id="relation-positioning-options"><option value="战略合作" /><option value="资源连接" /><option value="普通维护" /><option value="观察中" /><option value="降低投入" /></datalist>
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">关系优先级</div>
+                        <input list="relation-priority-options" value={analysisDraft.strategy_layer?.relation_priority || ''} onChange={(e) => setAnalysisField('strategy_layer.relation_priority', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="可选：P0 / P1 / P2，或自定义输入" />
+                        <datalist id="relation-priority-options"><option value="P0" /><option value="P1" /><option value="P2" /></datalist>
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">关系阶段</div>
+                        <input list="relation-stage-options" value={analysisDraft.strategy_layer?.relation_stage || ''} onChange={(e) => setAnalysisField('strategy_layer.relation_stage', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="可选：初识 / 建立信任 / 协作中 / 稳定期 / 退出期，或自定义输入" />
+                        <datalist id="relation-stage-options"><option value="初识" /><option value="建立信任" /><option value="协作中" /><option value="稳定期" /><option value="退出期" /></datalist>
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">期望节奏</div>
+                        <input list="expected-rhythm-options" value={analysisDraft.strategy_layer?.expected_rhythm || ''} onChange={(e) => setAnalysisField('strategy_layer.expected_rhythm', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="可选：快速熟络 / 稳步推进 / 低频维持，或自定义输入" />
+                        <datalist id="expected-rhythm-options"><option value="快速熟络" /><option value="稳步推进" /><option value="低频维持" /></datalist>
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">当前策略状态</div>
+                        <input list="strategy-status-options" value={analysisDraft.strategy_layer?.strategy_status || ''} onChange={(e) => setAnalysisField('strategy_layer.strategy_status', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="可选：推进中 / 暂停 / 退出，或自定义输入" />
+                        <datalist id="strategy-status-options"><option value="推进中" /><option value="暂停" /><option value="退出" /></datalist>
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">策略置信度（0-100）</div>
+                        <input value={analysisDraft.strategy_layer?.strategy_confidence || ''} onChange={(e) => setAnalysisField('strategy_layer.strategy_confidence', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="如：70" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">30天目标</div>
+                        <textarea rows={2} value={analysisDraft.strategy_layer?.short_term_goal_30d || ''} onChange={(e) => setAnalysisField('strategy_layer.short_term_goal_30d', e.target.value)} className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2" placeholder="30天目标" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">90天目标</div>
+                        <textarea rows={2} value={analysisDraft.strategy_layer?.mid_term_goal_90d || ''} onChange={(e) => setAnalysisField('strategy_layer.mid_term_goal_90d', e.target.value)} className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2" placeholder="90天目标" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">每周时间预算（小时）</div>
+                        <input value={analysisDraft.strategy_layer?.weekly_time_budget_hours || ''} onChange={(e) => setAnalysisField('strategy_layer.weekly_time_budget_hours', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="如：2-3小时" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">月度金钱预算</div>
+                        <input value={analysisDraft.strategy_layer?.money_budget_monthly || ''} onChange={(e) => setAnalysisField('strategy_layer.money_budget_monthly', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="如：500元以内" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">渠道偏好</div>
+                        <input value={analysisDraft.strategy_layer?.channel_preference || ''} onChange={(e) => setAnalysisField('strategy_layer.channel_preference', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="如：微信+线下为主" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">触达频次</div>
+                        <input value={analysisDraft.strategy_layer?.contact_frequency || ''} onChange={(e) => setAnalysisField('strategy_layer.contact_frequency', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="如：每周一次" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">推荐话题</div>
+                        <textarea rows={2} value={analysisDraft.strategy_layer?.preferred_topics || ''} onChange={(e) => setAnalysisField('strategy_layer.preferred_topics', e.target.value)} className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2" placeholder="如：行业趋势、协作机会" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">禁忌话题</div>
+                        <textarea rows={2} value={analysisDraft.strategy_layer?.taboo_topics || ''} onChange={(e) => setAnalysisField('strategy_layer.taboo_topics', e.target.value)} className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2" placeholder="如：收入细节、家庭隐私" />
+                      </div>
+                      <div className="md:col-span-2">
+                        <div className="text-xs font-bold text-gray-700">边界与红线</div>
+                        <textarea rows={2} value={analysisDraft.strategy_layer?.boundaries_red_lines || ''} onChange={(e) => setAnalysisField('strategy_layer.boundaries_red_lines', e.target.value)} className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2" placeholder="如：不借钱、不越界承诺" />
+                      </div>
+                    </div>
+                    <div className="text-xs font-bold text-emerald-700">V2：执行计划与复盘闭环</div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="md:col-span-2">
+                        <div className="text-xs font-bold text-gray-700">本周动作计划（建议1/2/3）</div>
+                        <textarea rows={3} value={analysisDraft.strategy_layer?.weekly_action_plan || ''} onChange={(e) => setAnalysisField('strategy_layer.weekly_action_plan', e.target.value)} className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2" placeholder="动作1... 动作2... 动作3..." />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">预期反馈信号</div>
+                        <textarea rows={2} value={analysisDraft.strategy_layer?.expected_feedback_signals || ''} onChange={(e) => setAnalysisField('strategy_layer.expected_feedback_signals', e.target.value)} className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2" placeholder="如：回复速度提升、愿意主动约见" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">周复盘结果</div>
+                        <textarea rows={2} value={analysisDraft.strategy_layer?.weekly_review_result || ''} onChange={(e) => setAnalysisField('strategy_layer.weekly_review_result', e.target.value)} className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2" placeholder="本周执行结果" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">偏差原因</div>
+                        <textarea rows={2} value={analysisDraft.strategy_layer?.deviation_reason || ''} onChange={(e) => setAnalysisField('strategy_layer.deviation_reason', e.target.value)} className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2" placeholder="如：节奏过快、话题不匹配" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">下周调整动作</div>
+                        <textarea rows={2} value={analysisDraft.strategy_layer?.next_week_adjustment || ''} onChange={(e) => setAnalysisField('strategy_layer.next_week_adjustment', e.target.value)} className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2" placeholder="下周优化策略" />
+                      </div>
+                    </div>
+                    <div className="text-xs font-bold text-orange-700">V3：投入产出与系统建议</div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">本月投入时间（小时）</div>
+                        <input value={analysisDraft.strategy_layer?.invested_time_hours_month || ''} onChange={(e) => setAnalysisField('strategy_layer.invested_time_hours_month', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="如：10" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">本月投入金钱</div>
+                        <input value={analysisDraft.strategy_layer?.invested_money_month || ''} onChange={(e) => setAnalysisField('strategy_layer.invested_money_month', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="如：800" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">价值收益评分（0-100）</div>
+                        <input value={analysisDraft.strategy_layer?.gained_value_score || ''} onChange={(e) => setAnalysisField('strategy_layer.gained_value_score', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="如：65" />
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-gray-700">策略ROI评分</div>
+                        <input value={analysisDraft.strategy_layer?.strategy_roi_score || ''} onChange={(e) => setAnalysisField('strategy_layer.strategy_roi_score', e.target.value)} className="mt-1 w-full text-sm bg-white border border-gray-200 rounded-lg p-2" placeholder="系统评估后会更新" />
+                      </div>
+                      <div className="md:col-span-2">
+                        <div className="text-xs font-bold text-gray-700">系统建议</div>
+                        <textarea rows={2} value={analysisDraft.strategy_layer?.system_recommendation || ''} onChange={(e) => setAnalysisField('strategy_layer.system_recommendation', e.target.value)} className="mt-1 w-full text-sm leading-relaxed bg-white border border-gray-200 rounded-lg p-2" placeholder="如：建议降频并收敛投入" />
+                      </div>
+                    </div>
+                    {strategySuggestion && (
+                      <div className="p-3 rounded-lg border border-indigo-100 bg-indigo-50/40 space-y-2">
+                        <div className="text-xs font-bold text-indigo-800">AI 策略建议草案（请手动录入）</div>
+                        <div className="text-xs text-indigo-700">基于策略版本：{strategySuggestion.strategy_version || '未设置'}</div>
+                        <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
+                          关系定位：{strategySuggestion?.recommendation?.relation_positioning || '-'}{'\n'}
+                          关系优先级：{strategySuggestion?.recommendation?.relation_priority || '-'}{'\n'}
+                          关系阶段：{strategySuggestion?.recommendation?.relation_stage || '-'}{'\n'}
+                          30天目标：{strategySuggestion?.recommendation?.short_term_goal_30d || '-'}{'\n'}
+                          90天目标：{strategySuggestion?.recommendation?.mid_term_goal_90d || '-'}{'\n'}
+                          节奏：{strategySuggestion?.recommendation?.expected_rhythm || '-'}{'\n'}
+                          渠道偏好：{strategySuggestion?.recommendation?.channel_preference || '-'}{'\n'}
+                          触达频次：{strategySuggestion?.recommendation?.contact_frequency || '-'}{'\n'}
+                          推荐话题：{strategySuggestion?.recommendation?.preferred_topics || '-'}{'\n'}
+                          禁忌话题：{strategySuggestion?.recommendation?.taboo_topics || '-'}{'\n'}
+                          每周时间预算：{strategySuggestion?.recommendation?.weekly_time_budget_hours || '-'}{'\n'}
+                          月度金钱预算：{strategySuggestion?.recommendation?.money_budget_monthly || '-'}{'\n'}
+                          边界与红线：{strategySuggestion?.recommendation?.boundaries_red_lines || '-'}{'\n'}
+                          策略状态：{strategySuggestion?.recommendation?.strategy_status || '-'}{'\n'}
+                          策略置信度：{strategySuggestion?.recommendation?.strategy_confidence || '-'}{'\n'}
+                          本周动作计划：{strategySuggestion?.recommendation?.weekly_action_plan || '-'}{'\n'}
+                          预期反馈信号：{strategySuggestion?.recommendation?.expected_feedback_signals || '-'}
+                        </div>
+                        <div className="text-xs text-gray-700">策略匹配说明：{strategySuggestion.match_reason || '-'}</div>
+                        <div className="text-xs text-gray-700">投入成本提示：{strategySuggestion.cost_hint || '-'}</div>
+                        <div className="text-xs text-gray-700">本周动作建议：{strategySuggestion.next_action || '-'}</div>
+                      </div>
+                    )}
+                    {strategyEvaluation && (
+                      <div className="p-3 rounded-lg border border-emerald-100 bg-emerald-50/40 space-y-1">
+                        <div className="text-xs font-bold text-emerald-800">策略效果评估结果</div>
+                        <div className="text-xs text-emerald-700">基于策略版本：{strategyEvaluation.strategy_version || '未设置'}</div>
+                        <div className="text-sm text-gray-800">ROI评分：{strategyEvaluation.roi_score ?? '-'}</div>
+                        <div className="text-xs text-gray-700">结果得分：{strategyEvaluation.outcome_score ?? '-'} ｜ 成本得分：{strategyEvaluation.cost_score ?? '-'}</div>
+                        <div className="text-xs text-gray-700">系统建议：{strategyEvaluation.recommendation || '-'}</div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (

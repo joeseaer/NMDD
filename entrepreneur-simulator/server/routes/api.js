@@ -50,6 +50,34 @@ const parsePrivateInfoToAnalysis = (privateInfo) => {
     layer_1_core: { personality_traits: '', core_values: '', cognitive_mode: '', emotional_energy: '' },
     layer_2_drive: { motivation_system: '', skills_capabilities: '', resource_network: '' },
     layer_3_surface: { behavior_habits: '', life_trajectory: '', current_status_path: '' },
+    strategy_layer: {
+      relation_positioning: '',
+      relation_priority: '',
+      relation_stage: '',
+      short_term_goal_30d: '',
+      mid_term_goal_90d: '',
+      expected_rhythm: '',
+      channel_preference: '',
+      contact_frequency: '',
+      preferred_topics: '',
+      taboo_topics: '',
+      weekly_time_budget_hours: '',
+      money_budget_monthly: '',
+      boundaries_red_lines: '',
+      strategy_status: '',
+      strategy_confidence: '',
+      weekly_action_plan: '',
+      expected_feedback_signals: '',
+      weekly_review_result: '',
+      deviation_reason: '',
+      next_week_adjustment: '',
+      invested_time_hours_month: '',
+      invested_money_month: '',
+      gained_value_score: '',
+      strategy_roi_score: '',
+      system_recommendation: '',
+      updated_at: '',
+    },
     behavioral_archive: {
       life_patterns: '',
       consumption_traits: '',
@@ -77,6 +105,7 @@ const parsePrivateInfoToAnalysis = (privateInfo) => {
         layer_1_core: { ...empty.layer_1_core, ...(obj.layer_1_core || {}) },
         layer_2_drive: { ...empty.layer_2_drive, ...(obj.layer_2_drive || {}) },
         layer_3_surface: { ...empty.layer_3_surface, ...(obj.layer_3_surface || {}) },
+        strategy_layer: { ...empty.strategy_layer, ...(obj.strategy_layer || {}) },
         behavioral_archive: {
           ...empty.behavioral_archive,
           ...(obj.behavioral_archive || {}),
@@ -91,6 +120,39 @@ const parsePrivateInfoToAnalysis = (privateInfo) => {
   return {
     ...empty,
     layer_3_surface: { ...empty.layer_3_surface, current_status_path: raw },
+  };
+};
+
+const summarizeStrategyLayer = (privateInfo) => {
+  const info = parsePrivateInfoObject(privateInfo);
+  const s = info?.strategy_layer && typeof info.strategy_layer === 'object' ? info.strategy_layer : {};
+  return {
+    relation_positioning: String(s.relation_positioning || '').trim(),
+    relation_priority: String(s.relation_priority || '').trim(),
+    relation_stage: String(s.relation_stage || '').trim(),
+    short_term_goal_30d: String(s.short_term_goal_30d || '').trim(),
+    mid_term_goal_90d: String(s.mid_term_goal_90d || '').trim(),
+    expected_rhythm: String(s.expected_rhythm || '').trim(),
+    channel_preference: String(s.channel_preference || '').trim(),
+    contact_frequency: String(s.contact_frequency || '').trim(),
+    preferred_topics: String(s.preferred_topics || '').trim(),
+    taboo_topics: String(s.taboo_topics || '').trim(),
+    weekly_time_budget_hours: String(s.weekly_time_budget_hours || '').trim(),
+    money_budget_monthly: String(s.money_budget_monthly || '').trim(),
+    boundaries_red_lines: String(s.boundaries_red_lines || '').trim(),
+    strategy_status: String(s.strategy_status || '').trim(),
+    strategy_confidence: String(s.strategy_confidence || '').trim(),
+    weekly_action_plan: String(s.weekly_action_plan || '').trim(),
+    expected_feedback_signals: String(s.expected_feedback_signals || '').trim(),
+    weekly_review_result: String(s.weekly_review_result || '').trim(),
+    deviation_reason: String(s.deviation_reason || '').trim(),
+    next_week_adjustment: String(s.next_week_adjustment || '').trim(),
+    invested_time_hours_month: String(s.invested_time_hours_month || '').trim(),
+    invested_money_month: String(s.invested_money_month || '').trim(),
+    gained_value_score: String(s.gained_value_score || '').trim(),
+    strategy_roi_score: String(s.strategy_roi_score || '').trim(),
+    system_recommendation: String(s.system_recommendation || '').trim(),
+    updated_at: String(s.updated_at || '').trim(),
   };
 };
 
@@ -554,6 +616,9 @@ async function routes(fastify, options) {
         layer_1_core: incoming?.layer_1_core ?? base?.layer_1_core ?? {},
         layer_2_drive: incoming?.layer_2_drive ?? base?.layer_2_drive ?? {},
         layer_3_surface: incoming?.layer_3_surface ?? base?.layer_3_surface ?? {},
+        strategy_layer: incoming?.strategy_layer
+          ? { ...(incoming?.strategy_layer || {}), updated_at: new Date().toISOString() }
+          : (base?.strategy_layer ?? {}),
         behavioral_archive: incoming?.behavioral_archive ?? base?.behavioral_archive ?? {},
         emotional_decoder: incoming?.emotional_decoder ?? base?.emotional_decoder ?? {},
       };
@@ -575,6 +640,7 @@ async function routes(fastify, options) {
       if (!profile) return reply.code(404).send({ error: 'Person not found' });
 
       const logs = await dbService.getInteractionLogs(id);
+      const strategy = summarizeStrategyLayer(profile.private_info);
       
       const prompt = `你是用户的“人脉关系顾问”。
 目标：基于人物档案和过往互动记录，为用户提供【极短且个性化】的跟进标签词。
@@ -587,6 +653,20 @@ DISC：${profile.disc_type || '未知'}
 关系强度：${profile.relationship_strength}
 最近互动时间：${profile.last_interaction_date || '无'}
 最近互动摘要：${profile.last_interaction || '无'}
+我的主观策略：
+- 关系定位：${strategy.relation_positioning || '未设置'}
+- 关系优先级：${strategy.relation_priority || '未设置'}
+- 关系阶段：${strategy.relation_stage || '未设置'}
+- 30天目标：${strategy.short_term_goal_30d || '未设置'}
+- 90天目标：${strategy.mid_term_goal_90d || '未设置'}
+- 期望节奏：${strategy.expected_rhythm || '未设置'}
+- 渠道偏好：${strategy.channel_preference || '未设置'}
+- 触达频次：${strategy.contact_frequency || '未设置'}
+- 策略置信度：${strategy.strategy_confidence || '未设置'}
+- 每周时间预算：${strategy.weekly_time_budget_hours || '未设置'}
+- 策略状态：${strategy.strategy_status || '未设置'}
+- ROI评分：${strategy.strategy_roi_score || '未设置'}
+- 策略版本：${strategy.updated_at || '未设置'}
 上一条建议：${(() => {
   const raw = profile.ai_followup_suggestion;
   if (!raw) return '无';
@@ -605,6 +685,7 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
 3. 不要输出泛化句式（如“近期可问候”“建议本周联系”这类无对象特征句）。
 4. label 要结合身份/互动内容体现差异，例如导师可偏“汇报/请教”，同学可偏“近况/合作”，合作伙伴可偏“进度/资源”。
 5. 若“上一条建议”不是“无”，尽量避免重复相同措辞，除非判断为紧急场景。
+6. 若策略状态是“暂停/退出”，默认生成低频维持类标签，不要生成高投入推进动作。
 
 只输出 JSON 对象，不要任何多余的字符：
 {
@@ -655,6 +736,188 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
     } catch (err) {
       request.log.error(err);
       reply.code(500).send({ error: 'Failed to generate AI follow-up suggestion' });
+    }
+  });
+
+  fastify.post('/people/:id/strategy-suggestion', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const profiles = await dbService.getPeopleProfiles(userId);
+      const profile = profiles.find((p) => p.id === id);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+
+      const logs = await dbService.getInteractionLogs(id);
+      const strategy = summarizeStrategyLayer(profile.private_info);
+      const logsText = (logs || [])
+        .slice(0, 6)
+        .map((l) => `- ${l.event_date}: ${l.event_context} | 我:${l.my_behavior} | TA:${l.their_reaction} | 关系变化:${l.relationship_change}%`)
+        .join('\n');
+
+      const prompt = `你是用户的人际关系策略顾问。请基于人物客观档案与用户主观情况，给出“主观策略层建议草案”。
+要求：
+1) 输出仅 JSON，不要 markdown。
+2) 这是“建议草案”，不可直接代替用户输入，不要出现“一键采纳”表达。
+3) 建议要包含策略匹配说明与投入成本提示（low|medium|high）。
+4) 若当前策略状态为“暂停/退出”，优先给低投入维护或观察建议。
+
+人物客观信息：
+- 姓名: ${profile.name}
+- 身份: ${profile.identity || '未知'}
+- DISC/MBTI: ${profile.disc_type || '未知'} / ${profile.mbti_type || '未知'}
+- 关系强度: ${profile.relationship_strength}
+- 最近互动: ${profile.last_interaction || '无'}
+- 最近互动时间: ${profile.last_interaction_date || '无'}
+
+历史互动（最近6条）：
+${logsText || '无'}
+
+用户主观策略现状：
+${JSON.stringify(strategy)}
+
+请输出：
+{
+  "strategy_version": "基于策略版本（若未设置写未设置）",
+  "recommendation": {
+    "relation_positioning": "...",
+    "relation_priority": "P0|P1|P2",
+    "relation_stage": "初识|建立信任|协作中|稳定期|退出期",
+    "short_term_goal_30d": "...",
+    "mid_term_goal_90d": "...",
+    "expected_rhythm": "快速熟络|稳步推进|低频维持",
+    "channel_preference": "...",
+    "contact_frequency": "...",
+    "preferred_topics": "...",
+    "taboo_topics": "...",
+    "weekly_time_budget_hours": "...",
+    "money_budget_monthly": "...",
+    "boundaries_red_lines": "...",
+    "strategy_status": "推进中|暂停|退出",
+    "strategy_confidence": "0-100",
+    "weekly_action_plan": "...",
+    "expected_feedback_signals": "...",
+    "weekly_review_result": "...",
+    "deviation_reason": "...",
+    "next_week_adjustment": "..."
+  },
+  "match_reason": "因为...所以...",
+  "cost_hint": "low|medium|high",
+  "next_action": "本周可执行的一句话动作"
+}`;
+
+      const client = secretaryService.getOpenAIClientOrNull ? secretaryService.getOpenAIClientOrNull() : null;
+      if (!client) return reply.code(503).send({ error: 'AI service unavailable', detail: 'OpenAI client not initialized' });
+      const completion = await client.chat.completions.create({
+        model: secretaryService.getModel ? secretaryService.getModel() : 'gpt-3.5-turbo',
+        messages: [{ role: 'system', content: prompt }],
+        temperature: 0.6,
+      });
+      const content = completion?.choices?.[0]?.message?.content || '{}';
+      let cleaned = content.replace(/```(?:json)?\s*|```/g, '').trim();
+      const start = cleaned.indexOf('{');
+      const end = cleaned.lastIndexOf('}');
+      if (start !== -1 && end !== -1 && end >= start) cleaned = cleaned.slice(start, end + 1);
+      const parsed = JSON.parse(cleaned);
+      if (!parsed || typeof parsed !== 'object' || !parsed.recommendation || typeof parsed.recommendation !== 'object') {
+        return reply.code(502).send({ error: 'Invalid AI output', detail: 'Missing recommendation field' });
+      }
+      const recommendation = {
+        relation_positioning: String(parsed.recommendation.relation_positioning || '').trim(),
+        relation_priority: String(parsed.recommendation.relation_priority || '').trim(),
+        relation_stage: String(parsed.recommendation.relation_stage || '').trim(),
+        short_term_goal_30d: String(parsed.recommendation.short_term_goal_30d || '').trim(),
+        mid_term_goal_90d: String(parsed.recommendation.mid_term_goal_90d || '').trim(),
+        expected_rhythm: String(parsed.recommendation.expected_rhythm || '').trim(),
+        channel_preference: String(parsed.recommendation.channel_preference || '').trim(),
+        contact_frequency: String(parsed.recommendation.contact_frequency || '').trim(),
+        preferred_topics: String(parsed.recommendation.preferred_topics || '').trim(),
+        taboo_topics: String(parsed.recommendation.taboo_topics || '').trim(),
+        weekly_time_budget_hours: String(parsed.recommendation.weekly_time_budget_hours || '').trim(),
+        money_budget_monthly: String(parsed.recommendation.money_budget_monthly || '').trim(),
+        boundaries_red_lines: String(parsed.recommendation.boundaries_red_lines || '').trim(),
+        strategy_status: String(parsed.recommendation.strategy_status || '').trim(),
+        strategy_confidence: String(parsed.recommendation.strategy_confidence || '').trim(),
+        weekly_action_plan: String(parsed.recommendation.weekly_action_plan || '').trim(),
+        expected_feedback_signals: String(parsed.recommendation.expected_feedback_signals || '').trim(),
+        weekly_review_result: String(parsed.recommendation.weekly_review_result || '').trim(),
+        deviation_reason: String(parsed.recommendation.deviation_reason || '').trim(),
+        next_week_adjustment: String(parsed.recommendation.next_week_adjustment || '').trim(),
+      };
+      return {
+        strategy_version: String(parsed.strategy_version || strategy.updated_at || '未设置'),
+        recommendation,
+        match_reason: String(parsed.match_reason || ''),
+        cost_hint: String(parsed.cost_hint || 'medium').toLowerCase(),
+        next_action: String(parsed.next_action || ''),
+      };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to generate strategy suggestion', detail: err?.message });
+    }
+  });
+
+  fastify.post('/people/:id/strategy-evaluate', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const profiles = await dbService.getPeopleProfiles(userId);
+      const profile = profiles.find((p) => p.id === id);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+      const strategy = summarizeStrategyLayer(profile.private_info);
+      const logs = await dbService.getInteractionLogs(id);
+
+      const num = (text) => {
+        const m = String(text || '').match(/-?\d+(\.\d+)?/);
+        if (!m) return 0;
+        const n = Number(m[0]);
+        return Number.isFinite(n) ? n : 0;
+      };
+      const clamp = (x, min, max) => Math.max(min, Math.min(max, x));
+
+      const recentLogs = (logs || []).slice(0, 12);
+      const pos = recentLogs.filter((x) => Number(x.relationship_change || 0) > 0).length;
+      const neg = recentLogs.filter((x) => Number(x.relationship_change || 0) < 0).length;
+      const trendScore = recentLogs.length > 0 ? clamp(((pos - neg) / recentLogs.length) * 50 + 50, 0, 100) : 50;
+
+      const relationScore = clamp(Number(profile.relationship_strength || 0), 0, 100);
+      const gainedValue = clamp(num(strategy.gained_value_score), 0, 100);
+      const confidence = clamp(num(strategy.strategy_confidence), 0, 100);
+      const investedTime = Math.max(0, num(strategy.invested_time_hours_month || strategy.weekly_time_budget_hours));
+      const investedMoney = Math.max(0, num(strategy.invested_money_month || strategy.money_budget_monthly));
+      const costScore = clamp(investedTime * 2 + investedMoney / 50, 0, 100);
+      const outcomeScore = clamp(0.35 * relationScore + 0.35 * trendScore + 0.2 * gainedValue + 0.1 * confidence, 0, 100);
+      const roiScore = clamp(Math.round(outcomeScore * 0.7 + (100 - costScore) * 0.3), 0, 100);
+
+      let action = '保持当前节奏并持续观察反馈';
+      if (String(strategy.strategy_status || '').trim() === '暂停' || String(strategy.strategy_status || '').trim() === '退出') {
+        action = '策略状态为暂停/退出，建议低频维护并等待关键触发事件';
+      } else if (roiScore >= 75) {
+        action = '投入产出比高，建议适度升频推进并增加一次高质量触达';
+      } else if (roiScore >= 50) {
+        action = '投入产出比中等，建议维持稳步推进并优化触达话题';
+      } else {
+        action = '投入产出比偏低，建议降频并收敛时间/金钱投入，先验证关系价值';
+      }
+
+      const nextPrivate = parsePrivateInfoObject(profile.private_info);
+      nextPrivate.strategy_layer = {
+        ...(nextPrivate.strategy_layer || {}),
+        strategy_roi_score: String(roiScore),
+        system_recommendation: action,
+        updated_at: new Date().toISOString(),
+      };
+      await dbService.updatePersonPrivateInfo(id, JSON.stringify(nextPrivate));
+
+      return {
+        strategy_version: nextPrivate.strategy_layer.updated_at,
+        roi_score: roiScore,
+        outcome_score: Math.round(outcomeScore),
+        cost_score: Math.round(costScore),
+        recommendation: action,
+      };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to evaluate strategy', detail: err?.message });
     }
   });
 

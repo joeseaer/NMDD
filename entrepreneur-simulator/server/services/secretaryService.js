@@ -6,6 +6,29 @@ let openaiClient = null;
 
 const dailyCache = new Map();
 
+function parseStrategyLayer(privateInfoRaw) {
+  if (!privateInfoRaw || typeof privateInfoRaw !== 'string') return {};
+  try {
+    const obj = JSON.parse(privateInfoRaw);
+    const s = obj?.strategy_layer && typeof obj.strategy_layer === 'object' ? obj.strategy_layer : {};
+    return {
+      relation_positioning: String(s.relation_positioning || '').trim(),
+      relation_priority: String(s.relation_priority || '').trim(),
+      relation_stage: String(s.relation_stage || '').trim(),
+      short_term_goal_30d: String(s.short_term_goal_30d || '').trim(),
+      mid_term_goal_90d: String(s.mid_term_goal_90d || '').trim(),
+      expected_rhythm: String(s.expected_rhythm || '').trim(),
+      contact_frequency: String(s.contact_frequency || '').trim(),
+      weekly_time_budget_hours: String(s.weekly_time_budget_hours || '').trim(),
+      strategy_status: String(s.strategy_status || '').trim(),
+      strategy_roi_score: String(s.strategy_roi_score || '').trim(),
+      updated_at: String(s.updated_at || '').trim(),
+    };
+  } catch {
+    return {};
+  }
+}
+
 function toDateKeyLocal(d) {
   const x = d instanceof Date ? d : new Date();
   return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
@@ -60,7 +83,7 @@ async function getSecretaryDaily({ userId, refresh }) {
     relationship_strength: p.relationship_strength,
     last_interaction_date: p.last_interaction_date,
     last_interaction: p.last_interaction,
-    private_info: typeof p.private_info === 'string' ? p.private_info.slice(0, 500) : null,
+    strategy_layer: parseStrategyLayer(p.private_info),
   }));
 
   // 2. 获取近期待办和日程（前50条未完成任务或近期日程）
@@ -128,6 +151,11 @@ async function getSecretaryDaily({ userId, refresh }) {
 
 规则：
 - suggestions：最多 3 条；专注【人脉维护】，挑选关系强度高需维护、或很久没联系、或性格分析暗示需要推进的人。
+- 必须结合每个人的 strategy_layer：
+  1) strategy_status 为“暂停/退出”时默认降频，不要安排高投入推进动作，除非存在重大触发事件。
+  2) expected_rhythm 为“快速熟络”时，可提高本周触达优先级。
+  3) relation_positioning 为“降低投入/观察中”时，优先低成本动作。
+  4) relation_priority 为 P0 时优先级更高；strategy_roi_score < 50 时不建议继续高投入。
 - general_reminders：最多 3 条；专注【事务与认知提醒】。可以是对某个重要待办的催促、对某个日程的提前准备建议、或者是结合某篇近期随笔给出今天的行为准则（例如"你前天随笔写到要注意情绪控制，今天下午有重要会议，请注意深呼吸"）。如果没有特别要提醒的，可以少于3条。
 
 【数据输入】

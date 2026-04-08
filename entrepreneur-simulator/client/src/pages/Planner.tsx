@@ -409,7 +409,7 @@ export default function Planner() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
         <PlannerCalendarPanel
           focusDay={focusDay}
           setFocusDay={setFocusDay}

@@ -37,14 +37,18 @@ function getOpenAIClient() {
 const isMock = false;
 
 function formatIcebergPrivateInfo(privateInfoRaw) {
-  if (!privateInfoRaw || typeof privateInfoRaw !== 'string') return '无';
-  const raw = privateInfoRaw.trim();
-  if (!raw) return '无';
+  if (!privateInfoRaw) return '无';
+  const raw = typeof privateInfoRaw === 'string' ? privateInfoRaw.trim() : '';
+  if (!raw && typeof privateInfoRaw !== 'object') return '无';
 
   let obj = null;
-  try {
-    obj = JSON.parse(raw);
-  } catch {}
+  if (privateInfoRaw && typeof privateInfoRaw === 'object') {
+    obj = privateInfoRaw;
+  } else {
+    try {
+      obj = JSON.parse(raw);
+    } catch {}
+  }
 
   if (!obj || typeof obj !== 'object') {
     return raw.length > 4000 ? raw.slice(0, 4000) : raw;
@@ -53,6 +57,7 @@ function formatIcebergPrivateInfo(privateInfoRaw) {
   const l1 = obj.layer_1_core || {};
   const l2 = obj.layer_2_drive || {};
   const l3 = obj.layer_3_surface || {};
+  const s = obj.strategy_layer || {};
   const v = (x) => (x && String(x).trim() ? String(x).trim() : '未填写');
 
   const out = [
@@ -70,13 +75,42 @@ function formatIcebergPrivateInfo(privateInfoRaw) {
     `- 行为模式与生活规律：${v(l3.behavior_habits)}`,
     `- 人生轨迹与关键事件：${v(l3.life_trajectory)}`,
     `- 当前处境与行动路径：${v(l3.current_status_path)}`,
+    '第四层：用户主观策略层（用于建议个性化）',
+    `- 关系定位：${v(s.relation_positioning)}`,
+    `- 关系优先级：${v(s.relation_priority)}`,
+    `- 关系阶段：${v(s.relation_stage)}`,
+    `- 30天目标：${v(s.short_term_goal_30d)}`,
+    `- 90天目标：${v(s.mid_term_goal_90d)}`,
+    `- 期望节奏：${v(s.expected_rhythm)}`,
+    `- 渠道偏好：${v(s.channel_preference)}`,
+    `- 触达频次：${v(s.contact_frequency)}`,
+    `- 推荐话题：${v(s.preferred_topics)}`,
+    `- 禁忌话题：${v(s.taboo_topics)}`,
+    `- 每周时间预算：${v(s.weekly_time_budget_hours)}`,
+    `- 月度金钱预算：${v(s.money_budget_monthly)}`,
+    `- 边界与红线：${v(s.boundaries_red_lines)}`,
+    `- 策略状态：${v(s.strategy_status)}`,
+    `- 策略置信度：${v(s.strategy_confidence)}`,
+    `- 本周动作计划：${v(s.weekly_action_plan)}`,
+    `- 预期反馈信号：${v(s.expected_feedback_signals)}`,
+    `- 周复盘结果：${v(s.weekly_review_result)}`,
+    `- 偏差原因：${v(s.deviation_reason)}`,
+    `- 下周调整：${v(s.next_week_adjustment)}`,
+    `- 月投入时间：${v(s.invested_time_hours_month)}`,
+    `- 月投入金钱：${v(s.invested_money_month)}`,
+    `- 价值收益评分：${v(s.gained_value_score)}`,
+    `- 策略ROI评分：${v(s.strategy_roi_score)}`,
+    `- 系统建议：${v(s.system_recommendation)}`,
+    `- 策略版本：${v(s.updated_at)}`,
   ].join('\n');
 
   return out.length > 6000 ? out.slice(0, 6000) : out;
 }
 
 function parsePrivateInfoObject(privateInfoRaw) {
-  if (!privateInfoRaw || typeof privateInfoRaw !== 'string') return {};
+  if (!privateInfoRaw) return {};
+  if (privateInfoRaw && typeof privateInfoRaw === 'object') return privateInfoRaw;
+  if (typeof privateInfoRaw !== 'string') return {};
   const raw = privateInfoRaw.trim();
   if (!raw) return {};
   try {
@@ -830,12 +864,15 @@ async function consultPerson({ profile, logs, query }) {
         用户咨询的问题/情境：
         "${query}"
 
-        请基于该人物的性格特点和过往互动经验，为用户提供分析：
+        请基于“客观档案 + 主观策略层”给出建议，输出结构必须包含：
         1. 分析利弊：这样做的好处和潜在风险。
-        2. 给出建议：具体的行动方向或话术。
+        2. 建议动作：具体行动方向或话术。
         3. 预测反应：对方可能会如何回应。
+        4. 策略匹配说明：以“因为...所以...”写一行。
+        5. 投入成本提示：low/medium/high 三选一。
+        6. 策略版本说明：标注“基于策略版本：xxxx（未设置则写未设置）”。
 
-        请用中文回答，语气客观、专业且有同理心。
+        请用中文回答，语气客观、专业且有同理心，不要输出 JSON。
     `;
 
     try {
@@ -917,7 +954,10 @@ async function generateSummary({ profile, logs }) {
 
         请生成以下内容（JSON格式）：
         1. summary: 人物画像摘要（一句话概括其核心性格和当前关系状态）。
-        2. advice: 近期行动建议（基于性格和最近互动，我接下来该对他采取什么措施？）。
+        2. advice: 近期行动建议，必须包含两行信息：
+           - 策略匹配说明（因为...所以...）
+           - 投入成本提示（low|medium|high）
+           且末尾增加“基于策略版本：xxxx（未设置则写未设置）”
         3. reminders: 时间/事件提醒。
            - 必须准确基于上述提供的“当前日期”和“距离生日天数”进行提醒。
            - 如果生日在7天内，必须在 reminders 中提及。

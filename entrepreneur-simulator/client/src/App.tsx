@@ -167,7 +167,7 @@ function App() {
             </button>
             <div className="flex items-center space-x-2">
               <Brain className="h-6 w-6 text-primary" />
-              <span className="font-bold">创业模拟</span>
+              <span className="font-bold">牛马大队无限公司</span>
             </div>
           </div>
           <Link to="/settings" className="p-2 rounded-md text-gray-400 hover:text-gray-500">

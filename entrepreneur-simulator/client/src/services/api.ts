@@ -266,6 +266,44 @@ export const api = {
         return response.json();
     },
 
+    generateStrategySuggestion: async (personId: string, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/strategy-suggestion`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId })
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            if (!text) throw new Error('生成策略建议失败');
+            try {
+                const json = JSON.parse(text);
+                throw new Error(json?.detail || json?.error || '生成策略建议失败');
+            } catch {
+                throw new Error(text.substring(0, 160));
+            }
+        }
+        return response.json();
+    },
+
+    evaluateStrategy: async (personId: string, userId: string = CURRENT_USER_ID) => {
+        const response = await fetch(`${API_BASE_URL}/people/${personId}/strategy-evaluate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId })
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            if (!text) throw new Error('策略评估失败');
+            try {
+                const json = JSON.parse(text);
+                throw new Error(json?.detail || json?.error || '策略评估失败');
+            } catch {
+                throw new Error(text.substring(0, 160));
+            }
+        }
+        return response.json();
+    },
+
     getSecretaryDaily: async (userId: string = CURRENT_USER_ID, opts?: { refresh?: boolean }) => {
         const url = new URL(`${API_BASE_URL}/secretary/daily/${encodeURIComponent(userId)}`, window.location.origin);
         if (opts?.refresh) url.searchParams.set('refresh', '1');

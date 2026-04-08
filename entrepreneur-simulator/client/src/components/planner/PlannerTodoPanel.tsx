@@ -57,11 +57,11 @@ function TaskSection({
       {items.length === 0 ? (
         <div className="mt-3 text-xs text-gray-400 italic">暂无</div>
       ) : (
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 space-y-2 max-h-[62vh] overflow-y-auto pr-1">
           {ordered.map((it) => (
             <div 
               key={it.id} 
-              className={`flex items-center gap-3 bg-white rounded-lg border px-3 py-2 cursor-move hover:shadow-sm transition-all duration-200 active:scale-95 active:bg-gray-50 ${dragOverId === it.id ? 'border-indigo-400 bg-indigo-50/30 border-t-2 border-t-indigo-500' : 'border-gray-100'}`}
+              className={`bg-white rounded-lg border px-3 py-3 cursor-move hover:shadow-sm transition-all duration-200 active:scale-95 active:bg-gray-50 ${dragOverId === it.id ? 'border-indigo-400 bg-indigo-50/30 border-t-2 border-t-indigo-500' : 'border-gray-100'}`}
               draggable
               onDragStart={(e) => {
                 e.dataTransfer.setData('taskId', it.id);
@@ -84,14 +84,15 @@ function TaskSection({
               }}
               onDragEnd={() => setIsDragging(false)}
             >
-              <button
-                onClick={() => onToggleDone(it)}
-                className={`w-5 h-5 rounded border flex items-center justify-center ${it.status === 'done' ? 'bg-green-600 border-green-600' : 'border-gray-300 hover:border-gray-400'}`}
-                title={it.status === 'done' ? '标记未完成' : '标记完成'}
-              >
-                {it.status === 'done' && <Check className="w-4 h-4 text-white" />}
-              </button>
-              <div className="flex-1 min-w-0">
+              <div className="flex items-start gap-3">
+                <button
+                  onClick={() => onToggleDone(it)}
+                  className={`mt-0.5 w-5 h-5 rounded border flex items-center justify-center shrink-0 ${it.status === 'done' ? 'bg-green-600 border-green-600' : 'border-gray-300 hover:border-gray-400'}`}
+                  title={it.status === 'done' ? '标记未完成' : '标记完成'}
+                >
+                  {it.status === 'done' && <Check className="w-4 h-4 text-white" />}
+                </button>
+                <div className="flex-1 min-w-0">
                 {editingId === it.id ? (
                   <div className="space-y-2">
                     <input
@@ -136,32 +137,35 @@ function TaskSection({
                   </div>
                 ) : (
                   <>
-                    <div className={`text-sm font-medium whitespace-normal break-words ${it.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{it.title}</div>
+                    <div className={`text-[15px] font-medium leading-7 whitespace-pre-wrap break-words ${it.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>{it.title}</div>
                     {it.due_at && (
-                      <div className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                      <div className="text-xs text-gray-500 flex items-center gap-1 mt-1">
                         <Clock className="w-3 h-3" />
                         <span>{formatDue(it.due_at)}</span>
                       </div>
                     )}
                   </>
                 )}
+                </div>
               </div>
               {editingId !== it.id && (
-                <button
-                  onClick={() => {
-                    setEditingId(it.id);
-                    setEditingTitle(it.title || '');
-                    setEditingDue(formatDue(it.due_at) || '');
-                  }}
-                  className="text-gray-400 hover:text-gray-700"
-                  title="编辑"
-                >
-                  <Pencil className="w-4 h-4" />
-                </button>
+                <div className="mt-2 flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      setEditingId(it.id);
+                      setEditingTitle(it.title || '');
+                      setEditingDue(formatDue(it.due_at) || '');
+                    }}
+                    className="text-gray-400 hover:text-gray-700"
+                    title="编辑"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button onClick={() => onDelete(it)} className="text-gray-400 hover:text-red-600" title="删除">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               )}
-              <button onClick={() => onDelete(it)} className="text-gray-400 hover:text-red-600" title="删除">
-                <Trash2 className="w-4 h-4" />
-              </button>
             </div>
           ))}
         </div>
@@ -245,7 +249,7 @@ export default function PlannerTodoPanel({
         <div className="mt-2 text-xs text-gray-400">默认落入当前清单；未选时会落入收集箱。</div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 2xl:grid-cols-3 xl:grid-cols-2 gap-4">
         <TaskSection title={`当天（${focusDayLabel}）`} items={focusDayTasks} tone="blue" onToggleDone={onToggleDone} onUpdate={onUpdate} onDelete={onDelete} setIsDragging={setIsDragging} onReorder={onReorder} />
         <TaskSection title="逾期" items={overdue} tone="red" onToggleDone={onToggleDone} onUpdate={onUpdate} onDelete={onDelete} setIsDragging={setIsDragging} onReorder={onReorder} />
         <TaskSection title="未来" items={upcoming} tone="gray" onToggleDone={onToggleDone} onUpdate={onUpdate} onDelete={onDelete} setIsDragging={setIsDragging} onReorder={onReorder} />
