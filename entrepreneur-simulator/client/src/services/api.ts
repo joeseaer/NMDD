@@ -380,7 +380,17 @@ export const api = {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ personId, forceRefresh, userId })
         });
-        if (!response.ok) throw new Error('Failed to get summary');
+        if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            const statusHint = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+            if (!text) throw new Error(`获取每日内参失败（${statusHint}）`);
+            try {
+                const data = JSON.parse(text);
+                throw new Error(data?.detail || data?.error || `获取每日内参失败（${statusHint}）`);
+            } catch {
+                throw new Error(`获取每日内参失败（${statusHint}）：${text.substring(0, 300)}`);
+            }
+        }
         return response.json();
     },
 

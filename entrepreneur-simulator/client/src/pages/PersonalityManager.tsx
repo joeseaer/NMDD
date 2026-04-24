@@ -91,6 +91,7 @@ export default function PersonalityManager() {
   const [advisorOpen, setAdvisorOpen] = useState(false);
   const [summaryData, setSummaryData] = useState<any>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string>('');
   const [strategySuggestion, setStrategySuggestion] = useState<any>(null);
   const [strategySuggesting, setStrategySuggesting] = useState(false);
   const [strategyEvaluation, setStrategyEvaluation] = useState<any>(null);
@@ -555,20 +556,25 @@ export default function PersonalityManager() {
     analysisDraft?.layer_3_surface?.life_trajectory,
   ]);
 
-  const fetchSummary = async (personId: string, forceRefresh: boolean = false) => {
+  const fetchSummary = async (personId: string, forceRefresh: boolean = false): Promise<string | null> => {
       const requestSeq = ++summaryRequestSeqRef.current;
       activeSummaryPersonIdRef.current = personId;
       setSummaryLoading(true);
+      setSummaryError('');
       try {
           const data = await api.getPersonSummary(personId, forceRefresh);
-          if (summaryRequestSeqRef.current !== requestSeq || activeSummaryPersonIdRef.current !== personId) return;
+          if (summaryRequestSeqRef.current !== requestSeq || activeSummaryPersonIdRef.current !== personId) return null;
           setSummaryData(data);
+          return null;
       } catch (err) {
-          if (summaryRequestSeqRef.current !== requestSeq || activeSummaryPersonIdRef.current !== personId) return;
+          if (summaryRequestSeqRef.current !== requestSeq || activeSummaryPersonIdRef.current !== personId) return null;
           console.error("Failed to fetch summary", err);
+          const detail = err instanceof Error ? err.message : '获取每日内参失败（未知错误）';
+          setSummaryError(detail);
           setSummaryData(null);
+          return detail;
       } finally {
-          if (summaryRequestSeqRef.current !== requestSeq || activeSummaryPersonIdRef.current !== personId) return;
+          if (summaryRequestSeqRef.current !== requestSeq || activeSummaryPersonIdRef.current !== personId) return null;
           setSummaryLoading(false);
       }
   };
@@ -637,7 +643,10 @@ export default function PersonalityManager() {
 
   const handleRefreshSummary = async () => {
     if (!selectedPerson?.id || summaryLoading) return;
-    await fetchSummary(selectedPerson.id, true);
+    const errMsg = await fetchSummary(selectedPerson.id, true);
+    if (errMsg) {
+      alert(`手动刷新失败：\n${errMsg}`);
+    }
   };
 
   const handleRecommendStrategy = async () => {
@@ -1467,6 +1476,11 @@ export default function PersonalityManager() {
                             </button>
                         </div>
                     </div>
+                    {summaryError && (
+                        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 whitespace-pre-wrap">
+                            刷新失败：{summaryError}
+                        </div>
+                    )}
                     
                     {summaryData ? (
                         <div className="space-y-4">
