@@ -75,6 +75,7 @@ export default function PersonalityManager() {
   
   const [logs, setLogs] = useState<any[]>([]);
   const [isAddingLog, setIsAddingLog] = useState(false);
+  const [editingLog, setEditingLog] = useState<any>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<any>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -802,20 +803,24 @@ export default function PersonalityManager() {
     setIsCreating(false);
   };
 
+  const refreshSelectedPersonAfterLogChange = async () => {
+      if (!selectedPerson) return;
+      await fetchLogs(selectedPerson.id);
+      try {
+          const data = await api.getAllPeople();
+          const updated = data.find((p: any) => p.id === selectedPerson.id);
+          if (updated) {
+              setSelectedPerson(updated);
+              setPeople(prev => prev.map(p => p.id === updated.id ? updated : p));
+          }
+      } catch (err) {
+          console.error("Failed to refresh people list", err);
+      }
+  };
+
   const handleLogAdded = async (created?: any) => {
       if (selectedPerson) {
-          await fetchLogs(selectedPerson.id);
-          // Also refetch person details to update relationship score
-          try {
-              const data = await api.getAllPeople();
-              const updated = data.find((p: any) => p.id === selectedPerson.id);
-              if (updated) {
-                  setSelectedPerson(updated);
-                  setPeople(prev => prev.map(p => p.id === updated.id ? updated : p));
-              }
-          } catch (err) {
-              console.error("Failed to refresh people list", err);
-          }
+          await refreshSelectedPersonAfterLogChange();
           if (created?.proposal) setMapProposal(created.proposal);
           if (Array.isArray(created?.proposals) && created.proposals.length > 0) {
             const first = created.proposals.find((x: any) => x?.proposal)?.proposal;
@@ -823,7 +828,20 @@ export default function PersonalityManager() {
           }
       }
       setIsAddingLog(false);
+      setEditingLog(null);
   }
+
+  const handleDeleteLog = async (logId: string | number) => {
+    const ok = window.confirm('确认删除这条互动记录吗？');
+    if (!ok) return;
+    try {
+      await api.deleteInteractionLog(logId);
+      await refreshSelectedPersonAfterLogChange();
+    } catch (err) {
+      console.error('Failed to delete log', err);
+      alert('删除失败');
+    }
+  };
 
   const updateTrafficItem = (kind: 'red' | 'green', index: number, patch: any) => {
     if (kind === 'red') {
@@ -2457,6 +2475,20 @@ export default function PersonalityManager() {
                              <div className="absolute -left-[30px] top-1 w-3 h-3 bg-white border-2 border-primary rounded-full"></div>
                              <div className="text-xs text-gray-400 mb-1">{new Date(log.event_date).toLocaleDateString()} · {log.event_context}</div>
                              <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
+                                <div className="flex justify-end gap-3 mb-2">
+                                  <button
+                                    onClick={() => setEditingLog(log)}
+                                    className="text-xs text-gray-500 hover:text-primary flex items-center"
+                                  >
+                                    <Edit2 className="w-3 h-3 mr-1" /> 编辑
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteLog(log.id)}
+                                    className="text-xs text-gray-500 hover:text-red-600 flex items-center"
+                                  >
+                                    <Trash2 className="w-3 h-3 mr-1" /> 删除
+                                  </button>
+                                </div>
                                  <div className="mb-2">
                                      <span className="text-xs font-bold text-gray-500 bg-gray-200 px-1 rounded mr-2">我</span>
                                      <span className="text-sm text-gray-800">{log.my_behavior}</span>
@@ -2524,7 +2556,16 @@ export default function PersonalityManager() {
       {isAddingLog && selectedPerson && (
           <InteractionLogModal 
               personId={selectedPerson.id}
+              currentLogCount={logs.length}
               onClose={() => setIsAddingLog(false)}
+              onSuccess={handleLogAdded}
+          />
+      )}
+      {editingLog && selectedPerson && (
+          <InteractionLogModal
+              personId={selectedPerson.id}
+              initialData={editingLog}
+              onClose={() => setEditingLog(null)}
               onSuccess={handleLogAdded}
           />
       )}
@@ -3209,7 +3250,7 @@ function PersonCreationModal({ onClose, onSuccess }: { onClose: () => void; onSu
     );
 }
 
-function InteractionLogModal({ personId, onClose, onSuccess }: { personId: string; onClose: () => void; onSuccess: (result?: any) => void }) {
+function InteractionLogModal({ personId, onClose, onSuccess, initialData, currentLogCount = 0 }: { personId: string; onClose: () => void; onSuccess: (result?: any) => void; initialData?: any; currentLogCount?: number }) {
     const [formData, setFormData] = useState({
         event_date: new Date().toISOString().split('T')[0],
         event_context: '',
@@ -3221,25 +3262,43 @@ function InteractionLogModal({ personId, onClose, onSuccess }: { personId: strin
     const [loading, setLoading] = useState(false);
     const [rawInput, setRawInput] = useState('');
     const [aiExtracting, setAiExtracting] = useState(false);
+    const isEditMode = !!initialData?.id;
+
+    useEffect(() => {
+      if (!initialData) return;
+      setFormData({
+        event_date: initialData.event_date ? String(initialData.event_date).slice(0, 10) : new Date().toISOString().split('T')[0],
+        event_context: initialData.event_context || '',
+        my_behavior: initialData.my_behavior || '',
+        their_reaction: initialData.their_reaction || '',
+        relationship_change: Number(initialData.relationship_change || 0),
+        ai_analysis: initialData.ai_analysis || '',
+      });
+    }, [initialData]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setLoading(true);
         try {
-            const created = await api.createInteractionLog({ ...formData, person_id: personId });
-            onSuccess(created);
-            // Reset form
-            setFormData({
-                event_date: new Date().toISOString().split('T')[0],
-                event_context: '',
-                my_behavior: '',
-                their_reaction: '',
-                relationship_change: 0,
-                ai_analysis: ''
-            });
+            if (isEditMode) {
+              const updated = await api.updateInteractionLog(initialData.id, { ...formData });
+              onSuccess(updated);
+            } else {
+              const created = await api.createInteractionLog({ ...formData, person_id: personId });
+              onSuccess(created);
+              // Reset form
+              setFormData({
+                  event_date: new Date().toISOString().split('T')[0],
+                  event_context: '',
+                  my_behavior: '',
+                  their_reaction: '',
+                  relationship_change: 0,
+                  ai_analysis: ''
+              });
+            }
         } catch (error) {
-            console.error("Failed to add log", error);
-            alert("添加失败");
+            console.error("Failed to save log", error);
+            alert(isEditMode ? "更新失败" : "添加失败");
         } finally {
             setLoading(false);
         }
@@ -3262,7 +3321,21 @@ function InteractionLogModal({ personId, onClose, onSuccess }: { personId: strin
         setRawInput('');
       } catch (error) {
         console.error('Failed to extract logs from text', error);
-        alert(error instanceof Error ? error.message : 'AI提取并添加失败');
+        const errMsg = error instanceof Error ? error.message : 'AI提取并添加失败';
+        const networkLike = /网络连接失败|Failed to fetch|NetworkError|timeout|超时|aborted/i.test(errMsg);
+        if (networkLike) {
+          try {
+            const latest = await api.getInteractionLogs(personId);
+            if (Array.isArray(latest) && latest.length > currentLogCount) {
+              alert('已写入，响应超时。记录已成功添加并自动刷新。');
+              onSuccess({ message: '已写入，响应超时' });
+              return;
+            }
+          } catch (e) {
+            console.error('Failed to verify logs after network-like error', e);
+          }
+        }
+        alert(errMsg);
       } finally {
         setAiExtracting(false);
       }
@@ -3272,13 +3345,13 @@ function InteractionLogModal({ personId, onClose, onSuccess }: { personId: strin
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
                 <div className="flex justify-between items-center p-6 border-b border-gray-100">
-                    <h2 className="text-xl font-bold text-gray-900">📝 添加互动记录</h2>
+                    <h2 className="text-xl font-bold text-gray-900">{isEditMode ? '✏️ 编辑互动记录' : '📝 添加互动记录'}</h2>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
                         <X className="w-6 h-6" />
                     </button>
                 </div>
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
-                    <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-3">
+                    {!isEditMode && <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-3">
                         <div className="flex items-center justify-between mb-2">
                             <label className="block text-sm font-semibold text-indigo-900">AI 批量提取（可多次互动）</label>
                             <button
@@ -3299,8 +3372,8 @@ function InteractionLogModal({ personId, onClose, onSuccess }: { personId: strin
                         <div className="mt-1 text-[11px] text-indigo-700/80">
                             示例：今天先在微信沟通了项目方向，晚上电话里又聊了预算分工。AI会按内容自动拆分。
                         </div>
-                    </div>
-                    <div className="text-xs text-gray-400 pt-1 border-t border-gray-100">或手动添加单条记录：</div>
+                    </div>}
+                    {!isEditMode && <div className="text-xs text-gray-400 pt-1 border-t border-gray-100">或手动添加单条记录：</div>}
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">互动日期</label>
                         <input 
@@ -3362,7 +3435,7 @@ function InteractionLogModal({ personId, onClose, onSuccess }: { personId: strin
                     <div className="pt-4 flex justify-end space-x-3">
                         <button type="button" onClick={onClose} className="px-4 py-2 text-gray-600 bg-gray-100 rounded-lg text-sm">取消</button>
                         <button type="submit" disabled={loading} className="px-6 py-2 text-white bg-primary rounded-lg text-sm">
-                            {loading ? '保存中...' : '保存记录'}
+                            {loading ? (isEditMode ? '更新中...' : '保存中...') : (isEditMode ? '保存修改' : '保存记录')}
                         </button>
                     </div>
                 </form>

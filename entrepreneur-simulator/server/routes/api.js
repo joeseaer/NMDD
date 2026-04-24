@@ -1469,6 +1469,36 @@ ${JSON.stringify(strategy)}
     }
   });
 
+  fastify.patch('/interaction/:logId', async (request, reply) => {
+    try {
+      const { logId } = request.params;
+      const updates = request.body || {};
+      const allow = ['event_date', 'event_context', 'my_behavior', 'their_reaction', 'relationship_change', 'ai_analysis'];
+      const safe = {};
+      allow.forEach((k) => {
+        if (Object.prototype.hasOwnProperty.call(updates, k)) safe[k] = updates[k];
+      });
+      if (Object.keys(safe).length === 0) return reply.code(400).send({ error: 'No valid fields to update' });
+      await dbService.updateInteractionLog(logId, safe);
+      return { id: logId, message: 'Interaction Log Updated Successfully' };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to update Interaction Log', detail: err?.message });
+    }
+  });
+
+  fastify.delete('/interaction/:logId', async (request, reply) => {
+    try {
+      const { logId } = request.params;
+      const deleted = await dbService.deleteInteractionLog(logId);
+      if (!deleted) return reply.code(404).send({ error: 'Log not found' });
+      return { id: deleted.id, person_id: deleted.person_id, message: 'Interaction Log Deleted Successfully' };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to delete Interaction Log', detail: err?.message });
+    }
+  });
+
   fastify.post('/interaction/parse-create', async (request, reply) => {
     try {
       const { person_id, text, default_date, userId } = request.body || {};
@@ -1541,7 +1571,6 @@ ${String(text).trim()}
 
       const createdIds = [];
       const createdLogs = [];
-      const proposals = [];
       for (const item of logs) {
         const payload = {
           person_id,
@@ -1557,26 +1586,32 @@ ${String(text).trim()}
         createdLogs.push({ id, ...payload });
       }
 
-      try {
-        const latestLogs = await dbService.getInteractionLogs(person_id);
-        const byId = new Map((latestLogs || []).map((l) => [String(l.id), l]));
-        for (const id of createdIds) {
-          const log = byId.get(String(id));
-          if (!log) continue;
-          const proposal = await chatService.generateMapPatchProposal({ profile, log });
-          if (proposal) proposals.push({ id, proposal });
-        }
-      } catch (e) {
-        request.log.warn({ msg: 'bulk generateMapPatchProposal failed', error: e?.message, person_id });
-      }
-
-      return {
+      // 先秒回：保证 parse-create 不被后续 AI 任务阻塞
+      const responsePayload = {
         count: createdIds.length,
         ids: createdIds,
         logs: createdLogs,
-        proposals,
+        proposals: [],
+        proposal_status: 'pending',
         message: `已添加 ${createdIds.length} 条互动记录`,
       };
+      reply.send(responsePayload);
+
+      // proposal 改为后台异步任务，不影响接口响应
+      setImmediate(async () => {
+        try {
+          const latestLogs = await dbService.getInteractionLogs(person_id);
+          const byId = new Map((latestLogs || []).map((l) => [String(l.id), l]));
+          for (const id of createdIds) {
+            const log = byId.get(String(id));
+            if (!log) continue;
+            await chatService.generateMapPatchProposal({ profile, log });
+          }
+        } catch (e) {
+          request.log.warn({ msg: 'bulk generateMapPatchProposal failed (async)', error: e?.message, person_id });
+        }
+      });
+      return;
     } catch (err) {
       request.log.error(err);
       reply.code(500).send({ error: 'Failed to parse and create interaction logs', detail: err?.message });
