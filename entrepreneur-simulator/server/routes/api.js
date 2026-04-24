@@ -1469,6 +1469,120 @@ ${JSON.stringify(strategy)}
     }
   });
 
+  fastify.post('/interaction/parse-create', async (request, reply) => {
+    try {
+      const { person_id, text, default_date, userId } = request.body || {};
+      if (!person_id) return reply.code(400).send({ error: 'person_id is required' });
+      if (!text || !String(text).trim()) return reply.code(400).send({ error: 'text is required' });
+
+      const uid = userId || 'user-1';
+      const profiles = await dbService.getPeopleProfiles(uid);
+      const profile = profiles.find((p) => p.id === person_id);
+      if (!profile) return reply.code(404).send({ error: 'Person not found' });
+
+      const client = secretaryService.getOpenAIClientOrNull ? secretaryService.getOpenAIClientOrNull() : null;
+      if (!client) return reply.code(503).send({ error: 'AI service unavailable', detail: 'OpenAI client not initialized' });
+
+      const fallbackDate = (() => {
+        const d = default_date ? new Date(String(default_date)) : new Date();
+        if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+        return d.toISOString().slice(0, 10);
+      })();
+
+      const prompt = `你是“互动记录结构化助手”。请从用户输入中抽取1条或多条互动记录。
+要求：
+1) 只输出 JSON，不要 markdown。
+2) 输出格式：{"logs":[{...}]}
+3) logs 数组可为 1 条或多条；若文本里包含多次互动，请拆分。
+4) 每条必须含字段：
+   - event_date: YYYY-MM-DD（不确定时用 ${fallbackDate}）
+   - event_context: 场景摘要（<= 30字）
+   - my_behavior: 我的行为/表达
+   - their_reaction: 对方反应/反馈
+   - relationship_change: -10 到 10 的整数（未知时 0）
+   - ai_analysis: 可选简短分析（<= 80字）
+5) 不要杜撰细节；不确定可概括但要合理。
+
+人物信息：
+- 姓名：${profile.name}
+- 身份：${profile.identity || '未知'}
+- 关系强度：${profile.relationship_strength}
+
+用户原文：
+${String(text).trim()}
+`;
+
+      const completion = await client.chat.completions.create({
+        model: secretaryService.getModel ? secretaryService.getModel() : 'gpt-3.5-turbo',
+        messages: [{ role: 'system', content: prompt }],
+        temperature: 0.2,
+      });
+      const content = completion?.choices?.[0]?.message?.content || '{}';
+      let cleaned = String(content).replace(/```(?:json)?\s*|```/g, '').trim();
+      const start = cleaned.indexOf('{');
+      const end = cleaned.lastIndexOf('}');
+      if (start !== -1 && end !== -1 && end >= start) cleaned = cleaned.slice(start, end + 1);
+      const parsed = JSON.parse(cleaned);
+      const logs = Array.isArray(parsed?.logs) ? parsed.logs : [];
+      if (!logs.length) return reply.code(422).send({ error: 'No interaction logs extracted' });
+
+      const normalizeDate = (v) => {
+        const raw = String(v || '').trim();
+        if (!raw) return fallbackDate;
+        const d = new Date(raw);
+        if (Number.isNaN(d.getTime())) return fallbackDate;
+        return d.toISOString().slice(0, 10);
+      };
+      const toInt = (v) => {
+        const n = Number(v);
+        if (!Number.isFinite(n)) return 0;
+        return Math.max(-10, Math.min(10, Math.round(n)));
+      };
+
+      const createdIds = [];
+      const createdLogs = [];
+      const proposals = [];
+      for (const item of logs) {
+        const payload = {
+          person_id,
+          event_date: normalizeDate(item?.event_date),
+          event_context: String(item?.event_context || '').trim() || '互动记录',
+          my_behavior: String(item?.my_behavior || '').trim() || '（未明确）',
+          their_reaction: String(item?.their_reaction || '').trim() || '（未明确）',
+          relationship_change: toInt(item?.relationship_change),
+          ai_analysis: String(item?.ai_analysis || '').trim(),
+        };
+        const id = await dbService.saveInteractionLog(payload);
+        createdIds.push(id);
+        createdLogs.push({ id, ...payload });
+      }
+
+      try {
+        const latestLogs = await dbService.getInteractionLogs(person_id);
+        const byId = new Map((latestLogs || []).map((l) => [String(l.id), l]));
+        for (const id of createdIds) {
+          const log = byId.get(String(id));
+          if (!log) continue;
+          const proposal = await chatService.generateMapPatchProposal({ profile, log });
+          if (proposal) proposals.push({ id, proposal });
+        }
+      } catch (e) {
+        request.log.warn({ msg: 'bulk generateMapPatchProposal failed', error: e?.message, person_id });
+      }
+
+      return {
+        count: createdIds.length,
+        ids: createdIds,
+        logs: createdLogs,
+        proposals,
+        message: `已添加 ${createdIds.length} 条互动记录`,
+      };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: 'Failed to parse and create interaction logs', detail: err?.message });
+    }
+  });
+
   // Generate Interaction Review
   fastify.post('/interaction/:logId/review', async (request, reply) => {
     try {

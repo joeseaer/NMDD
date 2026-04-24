@@ -816,8 +816,10 @@ export default function PersonalityManager() {
           } catch (err) {
               console.error("Failed to refresh people list", err);
           }
-          if (created?.proposal) {
-            setMapProposal(created.proposal);
+          if (created?.proposal) setMapProposal(created.proposal);
+          if (Array.isArray(created?.proposals) && created.proposals.length > 0) {
+            const first = created.proposals.find((x: any) => x?.proposal)?.proposal;
+            if (first) setMapProposal(first);
           }
       }
       setIsAddingLog(false);
@@ -3217,6 +3219,8 @@ function InteractionLogModal({ personId, onClose, onSuccess }: { personId: strin
         ai_analysis: '' // Optional
     });
     const [loading, setLoading] = useState(false);
+    const [rawInput, setRawInput] = useState('');
+    const [aiExtracting, setAiExtracting] = useState(false);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -3241,6 +3245,29 @@ function InteractionLogModal({ personId, onClose, onSuccess }: { personId: strin
         }
     };
 
+    const handleExtractAndCreate = async () => {
+      if (!rawInput.trim()) {
+        alert('请先输入互动描述文本');
+        return;
+      }
+      setAiExtracting(true);
+      try {
+        const result = await api.createInteractionLogsFromText({
+          person_id: personId,
+          text: rawInput,
+          default_date: formData.event_date,
+        });
+        alert(result?.message || '已通过 AI 添加互动记录');
+        onSuccess(result);
+        setRawInput('');
+      } catch (error) {
+        console.error('Failed to extract logs from text', error);
+        alert(error instanceof Error ? error.message : 'AI提取并添加失败');
+      } finally {
+        setAiExtracting(false);
+      }
+    };
+
     return (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
@@ -3251,6 +3278,29 @@ function InteractionLogModal({ personId, onClose, onSuccess }: { personId: strin
                     </button>
                 </div>
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                    <div className="rounded-lg border border-indigo-100 bg-indigo-50/40 p-3">
+                        <div className="flex items-center justify-between mb-2">
+                            <label className="block text-sm font-semibold text-indigo-900">AI 批量提取（可多次互动）</label>
+                            <button
+                                type="button"
+                                onClick={handleExtractAndCreate}
+                                disabled={aiExtracting}
+                                className="px-3 py-1.5 text-xs text-indigo-700 bg-white border border-indigo-200 rounded-lg hover:bg-indigo-50 disabled:opacity-60"
+                            >
+                                {aiExtracting ? '提取中…' : 'AI提取并添加'}
+                            </button>
+                        </div>
+                        <textarea
+                            className="w-full border border-indigo-200 rounded-lg px-3 py-2 h-24 resize-y text-sm"
+                            placeholder="直接粘贴一段长文字，AI会自动拆分为1条或多条互动记录并添加到时间线。"
+                            value={rawInput}
+                            onChange={e => setRawInput(e.target.value)}
+                        />
+                        <div className="mt-1 text-[11px] text-indigo-700/80">
+                            示例：今天先在微信沟通了项目方向，晚上电话里又聊了预算分工。AI会按内容自动拆分。
+                        </div>
+                    </div>
+                    <div className="text-xs text-gray-400 pt-1 border-t border-gray-100">或手动添加单条记录：</div>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">互动日期</label>
                         <input 

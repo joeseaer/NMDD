@@ -477,6 +477,25 @@ export const api = {
         return response.json();
     },
 
+    createInteractionLogsFromText: async (payload: { person_id: string; text: string; default_date?: string; userId?: string }) => {
+        const response = await fetch(`${API_BASE_URL}/interaction/parse-create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            if (!text) throw new Error('AI提取互动记录失败');
+            try {
+                const json = JSON.parse(text);
+                throw new Error(json?.detail || json?.error || 'AI提取互动记录失败');
+            } catch {
+                throw new Error(text.substring(0, 200));
+            }
+        }
+        return response.json();
+    },
+
     // Review Sessions
     getReviewSessions: async (userId: string = CURRENT_USER_ID) => {
         const response = await fetch(`${API_BASE_URL}/review/list/${userId}`);
