@@ -547,6 +547,15 @@ export default function PersonalityManager() {
     el.style.height = `${el.scrollHeight}px`;
   };
 
+  const formatStrategyVersion = (raw: any) => {
+    const text = String(raw || '').trim();
+    if (!text) return '未设置';
+    const dt = new Date(text);
+    if (Number.isNaN(dt.getTime())) return text;
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())} ${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}`;
+  };
+
   useEffect(() => {
     if (behaviorHabitsRef.current) autoResize(behaviorHabitsRef.current);
     if (lifeTrajectoryRef.current) autoResize(lifeTrajectoryRef.current);
@@ -2429,7 +2438,7 @@ export default function PersonalityManager() {
                     {strategySuggestion && (
                       <div className="p-3 rounded-lg border border-indigo-100 bg-indigo-50/40 space-y-2">
                         <div className="text-xs font-bold text-indigo-800">AI 策略建议草案（请手动录入）</div>
-                        <div className="text-xs text-indigo-700">基于策略版本：{strategySuggestion.strategy_version || '未设置'}</div>
+                        <div className="text-xs text-indigo-700">基于策略版本：{formatStrategyVersion(strategySuggestion.strategy_version)}</div>
                         <div className="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">
                           关系定位：{strategySuggestion?.recommendation?.relation_positioning || '-'}{'\n'}
                           关系优先级：{strategySuggestion?.recommendation?.relation_priority || '-'}{'\n'}
@@ -2457,7 +2466,7 @@ export default function PersonalityManager() {
                     {strategyEvaluation && (
                       <div className="p-3 rounded-lg border border-emerald-100 bg-emerald-50/40 space-y-1">
                         <div className="text-xs font-bold text-emerald-800">策略效果评估结果</div>
-                        <div className="text-xs text-emerald-700">基于策略版本：{strategyEvaluation.strategy_version || '未设置'}</div>
+                        <div className="text-xs text-emerald-700">基于策略版本：{formatStrategyVersion(strategyEvaluation.strategy_version)}</div>
                         <div className="text-sm text-gray-800">ROI评分：{strategyEvaluation.roi_score ?? '-'}</div>
                         <div className="text-xs text-gray-700">结果得分：{strategyEvaluation.outcome_score ?? '-'} ｜ 成本得分：{strategyEvaluation.cost_score ?? '-'}</div>
                         <div className="text-xs text-gray-700">系统建议：{strategyEvaluation.recommendation || '-'}</div>
