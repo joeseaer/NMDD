@@ -478,12 +478,20 @@ export const api = {
     },
 
     createInteractionLogsFromText: async (payload: { person_id: string; text: string; default_date?: string; userId?: string }) => {
-        const response = await fetch(`${API_BASE_URL}/interaction/parse-create`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+        let response: Response;
+        try {
+            response = await fetch(`${API_BASE_URL}/interaction/parse-create`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        } catch (err) {
+            throw new Error('网络连接失败：云端后端可能不可达或尚未发布该接口');
+        }
         if (!response.ok) {
+            if (response.status === 404) {
+                throw new Error('云端后端尚未发布 AI 提取接口（/api/interaction/parse-create），请先部署后端最新版');
+            }
             const text = await response.text().catch(() => '');
             if (!text) throw new Error('AI提取互动记录失败');
             try {
