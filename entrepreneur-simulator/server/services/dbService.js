@@ -869,6 +869,18 @@ const updateInteractionLog = async (logId, updates) => {
   return data;
 };
 
+const deleteInteractionLog = async (logId) => {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('interaction_logs')
+    .delete()
+    .eq('id', logId)
+    .select('id, person_id')
+    .single();
+  if (error) throw error;
+  return data;
+};
+
 const getInteractionLogs = async (personId) => {
   if (!supabase) return [];
 
@@ -1213,7 +1225,7 @@ const uploadFile = async (fileBuffer, fileName, mimeType) => {
 
 module.exports = { 
   initDB, saveScene, getRecentScenes, saveSOP, getSOPs, deleteSOP, deleteSOPsByTitle,
-  savePersonProfile, updatePersonPrivateInfo, updatePersonTriggersPleasers, updatePersonReactionLibrary, updatePersonAIFollowUp, deletePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog,
+  savePersonProfile, updatePersonPrivateInfo, updatePersonTriggersPleasers, updatePersonReactionLibrary, updatePersonAIFollowUp, deletePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog, deleteInteractionLog,
   saveReviewSession, getReviewSessions, getReviewSession, getUserStats,
   getPlannerLists, ensurePlannerInbox, createPlannerList, updatePlannerList, deletePlannerList,
   createPlannerItem, updatePlannerItem, deletePlannerItem, listPlannerItems,

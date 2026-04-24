@@ -7,6 +7,14 @@ function firstNonEmpty(...values) {
   return '';
 }
 
+function normalizeModelName(model) {
+  const m = String(model || '').trim();
+  if (!m) return '';
+  // 兼容旧配置名，统一升级到用户指定模型
+  if (m === 'doubao-seed-2-0-pro') return 'doubao-seed-2-0-pro-260215';
+  return m;
+}
+
 function getLlmApiKey() {
   return firstNonEmpty(
     process.env.ARK_API_KEY,
@@ -25,12 +33,13 @@ function getLlmBaseUrl() {
 }
 
 function getLlmModel() {
-  return firstNonEmpty(
+  const picked = firstNonEmpty(
     process.env.ARK_MODEL,
     process.env.VOLCENGINE_ARK_MODEL,
     process.env.OPENAI_MODEL,
     'doubao-seed-2-0-pro-260215'
   );
+  return normalizeModelName(picked);
 }
 
 function getOpenAIClientOptions() {

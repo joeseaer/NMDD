@@ -128,9 +128,10 @@ const analyzeScene = async (sceneData) => {
   `;
 
   try {
+    const openai = getOpenAIClient();
     const completion = await openai.chat.completions.create({
       messages: [{ role: "system", content: prompt }],
-      model: "doubao-seed-2-0-pro-260215",
+      model: getModel(),
     });
     const content = completion.choices[0].message.content.replace(/```json\n|\n```/g, '').replace(/```/g, '').trim();
     return JSON.parse(content);
@@ -193,9 +194,10 @@ const generateScene = async (userProfile, goal) => {
   
   try {
     console.log("Generating Scene with Doubao-Pro...");
+    const openai = getOpenAIClient();
     const completion = await openai.chat.completions.create({
       messages: [{ role: "system", content: prompt }],
-      model: "doubao-seed-2-0-pro-260215",
+      model: getModel(),
       temperature: 0.8, // Increased for variety
       max_tokens: 1500
     });
@@ -321,9 +323,10 @@ const processInteraction = async ({ scene_id, user_input, conversation_history, 
   `;
 
   try {
+    const openai = getOpenAIClient();
     const completion = await openai.chat.completions.create({
       messages: [{ role: "system", content: prompt }],
-      model: "doubao-seed-2-0-pro-260215",
+      model: getModel(),
     });
     const content = completion.choices[0].message.content.replace(/```json\n|\n```/g, '').replace(/```/g, '').trim();
     return JSON.parse(content);

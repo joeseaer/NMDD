@@ -477,6 +477,24 @@ export const api = {
         return response.json();
     },
 
+    updateInteractionLog: async (logId: string | number, updates: any) => {
+        const response = await fetch(`${API_BASE_URL}/interaction/${logId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updates || {})
+        });
+        if (!response.ok) throw new Error('Failed to update log');
+        return response.json();
+    },
+
+    deleteInteractionLog: async (logId: string | number) => {
+        const response = await fetch(`${API_BASE_URL}/interaction/${logId}`, {
+            method: 'DELETE'
+        });
+        if (!response.ok) throw new Error('Failed to delete log');
+        return response.json();
+    },
+
     createInteractionLogsFromText: async (payload: { person_id: string; text: string; default_date?: string; userId?: string }) => {
         let response: Response;
         try {
