@@ -906,18 +906,31 @@ type DatabaseFilter = {
   value: string;
 };
 
+type DatabaseSort = {
+  propertyId: string;
+  direction: 'asc' | 'desc';
+};
+
+type DatabaseViewConfig = {
+  id: string;
+  name: string;
+  mode: DatabaseViewMode;
+  filters: DatabaseFilter[];
+  groupBy: string | null;
+  sort?: DatabaseSort | null;
+};
+
 type SmartDocumentDatabase = {
   id: string;
   title: string;
   view: DatabaseViewMode;
+  views: DatabaseViewConfig[];
+  activeViewId: string | null;
   properties: DatabaseProperty[];
   rows: DatabaseRow[];
   filters: DatabaseFilter[];
   groupBy: string | null;
-  sort?: {
-    propertyId: string;
-    direction: 'asc' | 'desc';
-  } | null;
+  sort?: DatabaseSort | null;
 };
 
 const DATABASE_PROPERTY_TYPES: Array<{ value: DatabasePropertyType; label: string }> = [
@@ -950,16 +963,38 @@ const DATABASE_FILTER_OPERATORS: Array<{ value: DatabaseFilterOperator; label: s
   { value: 'empty', label: '为空', needsValue: false },
 ];
 
+const getDatabaseViewModeLabel = (mode: DatabaseViewMode) => {
+  return DATABASE_VIEW_OPTIONS.find((option) => option.value === mode)?.label || '视图';
+};
+
+const createDatabaseViewConfig = (mode: DatabaseViewMode = 'table', name?: string): DatabaseViewConfig => ({
+  id: createSmartDocumentId('view'),
+  name: name || getDatabaseViewModeLabel(mode),
+  mode,
+  filters: [],
+  groupBy: null,
+  sort: null,
+});
+
+const normalizeDatabaseViewMode = (value: unknown): DatabaseViewMode => {
+  return value === 'list' || value === 'board' || value === 'calendar' || value === 'timeline' || value === 'gallery'
+    ? value
+    : 'table';
+};
+
 const createDefaultDatabase = (): SmartDocumentDatabase => {
   const titlePropertyId = createSmartDocumentId('prop');
   const statusPropertyId = createSmartDocumentId('prop');
   const datePropertyId = createSmartDocumentId('prop');
   const firstRowId = createSmartDocumentId('row');
+  const defaultView = createDatabaseViewConfig('table');
 
   return {
     id: createSmartDocumentId('db'),
     title: '新数据库',
-    view: 'table',
+    view: defaultView.mode,
+    views: [defaultView],
+    activeViewId: defaultView.id,
     properties: [
       { id: titlePropertyId, name: '名称', type: 'title' },
       { id: statusPropertyId, name: '状态', type: 'status', options: DEFAULT_STATUS_OPTIONS },
@@ -978,9 +1013,9 @@ const createDefaultDatabase = (): SmartDocumentDatabase => {
         },
       },
     ],
-    filters: [],
-    groupBy: null,
-    sort: null,
+    filters: defaultView.filters,
+    groupBy: defaultView.groupBy,
+    sort: defaultView.sort,
   };
 };
 
@@ -1339,6 +1374,75 @@ const createDatabaseRow = (properties: DatabaseProperty[], title: string = ''): 
   };
 };
 
+const normalizeDatabaseSort = (value: any, properties: DatabaseProperty[]): DatabaseSort | null => {
+  return value && properties.some((property) => property.id === value.propertyId)
+    ? {
+      propertyId: String(value.propertyId),
+      direction: value.direction === 'desc' ? 'desc' : 'asc',
+    }
+    : null;
+};
+
+const normalizeDatabaseFilters = (value: unknown, propertyIds: Set<string>): DatabaseFilter[] => {
+  return Array.isArray(value)
+    ? value.map((filter: any) => {
+      const propertyId = String(filter?.propertyId || '');
+      if (!propertyIds.has(propertyId)) return null;
+
+      return {
+        id: String(filter?.id || createSmartDocumentId('filter')),
+        propertyId,
+        operator: normalizeFilterOperator(filter?.operator),
+        value: String(filter?.value || ''),
+      };
+    }).filter(Boolean) as DatabaseFilter[]
+    : [];
+};
+
+const normalizeDatabaseGroupBy = (value: unknown, propertyIds: Set<string>) => {
+  const rawGroupBy = String(value || '');
+  return propertyIds.has(rawGroupBy) ? rawGroupBy : null;
+};
+
+const normalizeDatabaseViews = (raw: any, properties: DatabaseProperty[], propertyIds: Set<string>): DatabaseViewConfig[] => {
+  const legacyView = createDatabaseViewConfig(
+    normalizeDatabaseViewMode(raw.view),
+    String(raw.viewName || raw.view_name || '').trim() || getDatabaseViewModeLabel(normalizeDatabaseViewMode(raw.view)),
+  );
+  const legacyConfig: DatabaseViewConfig = {
+    ...legacyView,
+    filters: normalizeDatabaseFilters(raw.filters, propertyIds),
+    groupBy: normalizeDatabaseGroupBy(raw.groupBy, propertyIds),
+    sort: normalizeDatabaseSort(raw.sort, properties),
+  };
+
+  const sourceViews = Array.isArray(raw.views) && raw.views.length
+    ? raw.views
+    : [legacyConfig];
+
+  const seen = new Set<string>();
+  const views = sourceViews.map((view: any, index: number) => {
+    const fallbackId = index === 0 ? legacyConfig.id : createSmartDocumentId('view');
+    const id = String(view?.id || fallbackId);
+    if (!id || seen.has(id)) return null;
+    seen.add(id);
+
+    const mode = normalizeDatabaseViewMode(view?.mode || view?.view || (index === 0 ? legacyConfig.mode : 'table'));
+    const name = String(view?.name || view?.title || '').trim() || getDatabaseViewModeLabel(mode);
+
+    return {
+      id,
+      name,
+      mode,
+      filters: normalizeDatabaseFilters(view?.filters, propertyIds),
+      groupBy: normalizeDatabaseGroupBy(view?.groupBy, propertyIds),
+      sort: normalizeDatabaseSort(view?.sort, properties),
+    };
+  }).filter(Boolean) as DatabaseViewConfig[];
+
+  return views.length ? views : [legacyConfig];
+};
+
 const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
   const raw: any = value && typeof value === 'object' ? value : {};
   const fallback = createDefaultDatabase();
@@ -1383,43 +1487,22 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
     }).filter((row: DatabaseRow) => row.id);
   const normalizedRows = rows.length ? rows : [createDatabaseRow(normalizedProperties, '新条目')];
 
-  const view: DatabaseViewMode = raw.view === 'list' || raw.view === 'board' || raw.view === 'calendar' || raw.view === 'timeline' || raw.view === 'gallery'
-    ? raw.view
-    : 'table';
-  const sort = raw.sort && normalizedProperties.some((property: DatabaseProperty) => property.id === raw.sort.propertyId)
-    ? {
-      propertyId: String(raw.sort.propertyId),
-      direction: raw.sort.direction === 'desc' ? 'desc' as const : 'asc' as const,
-    }
-    : null;
-  const propertyIds = new Set(normalizedProperties.map((property: DatabaseProperty) => property.id));
-  const filters = Array.isArray(raw.filters)
-    ? raw.filters.map((filter: any) => {
-      const propertyId = String(filter?.propertyId || '');
-      if (!propertyIds.has(propertyId)) return null;
-
-      return {
-        id: String(filter?.id || createSmartDocumentId('filter')),
-        propertyId,
-        operator: normalizeFilterOperator(filter?.operator),
-        value: String(filter?.value || ''),
-      };
-    }).filter(Boolean) as DatabaseFilter[]
-    : [];
-  const rawGroupBy = String(raw.groupBy || '');
-  const groupBy = propertyIds.has(rawGroupBy)
-    ? rawGroupBy
-    : null;
+  const propertyIds = new Set<string>(normalizedProperties.map((property: DatabaseProperty) => property.id));
+  const views = normalizeDatabaseViews(raw, normalizedProperties, propertyIds);
+  const requestedActiveViewId = String(raw.activeViewId || raw.active_view_id || '');
+  const activeView = views.find((item) => item.id === requestedActiveViewId) || views[0];
 
   return {
     id: String(raw.id || fallback.id),
     title: String(raw.title || fallback.title),
-    view,
+    view: activeView.mode,
+    views,
+    activeViewId: activeView.id,
     properties: normalizedProperties,
     rows: normalizedRows,
-    filters,
-    groupBy,
-    sort,
+    filters: activeView.filters,
+    groupBy: activeView.groupBy,
+    sort: activeView.sort,
   };
 };
 
@@ -1869,6 +1952,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
     : null;
   const boardGroupProperty = groupProperty || boardProperty || titleProperty || null;
   const statusProperties = database.properties.filter((property) => property.type === 'status');
+  const activeView = database.views.find((view) => view.id === database.activeViewId) || database.views[0];
   const [filterDraft, setFilterDraft] = useState<Pick<DatabaseFilter, 'propertyId' | 'operator' | 'value'>>({
     propertyId: database.properties[0]?.id || '',
     operator: 'contains',
@@ -1918,10 +2002,52 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
     updateAttributes({ database: normalizeDatabase(nextDatabase) });
   };
 
+  const commitWithActiveView = (nextDatabase: SmartDocumentDatabase, nextActiveView: DatabaseViewConfig) => {
+    commit({
+      ...nextDatabase,
+      activeViewId: nextActiveView.id,
+      view: nextActiveView.mode,
+      filters: nextActiveView.filters,
+      groupBy: nextActiveView.groupBy,
+      sort: nextActiveView.sort,
+    });
+  };
+
+  const updateActiveView = (patch: Partial<DatabaseViewConfig>) => {
+    if (!activeView) return;
+    const nextActiveView = {
+      ...activeView,
+      ...patch,
+      name: String((patch.name ?? activeView.name) || '').trim() || getDatabaseViewModeLabel(patch.mode || activeView.mode),
+    };
+    const views = database.views.map((view) => view.id === nextActiveView.id ? nextActiveView : view);
+    commitWithActiveView({ ...database, views }, nextActiveView);
+  };
+
+  const selectDatabaseView = (viewId: string) => {
+    const nextActiveView = database.views.find((view) => view.id === viewId);
+    if (!nextActiveView) return;
+    commitWithActiveView({ ...database }, nextActiveView);
+  };
+
+  const addDatabaseView = () => {
+    const nextViewNumber = database.views.length + 1;
+    const nextView = createDatabaseViewConfig('table', `视图 ${nextViewNumber}`);
+    commitWithActiveView({ ...database, views: [...database.views, nextView] }, nextView);
+  };
+
+  const deleteActiveDatabaseView = () => {
+    if (!activeView || database.views.length <= 1) return;
+    const activeIndex = database.views.findIndex((view) => view.id === activeView.id);
+    const views = database.views.filter((view) => view.id !== activeView.id);
+    const nextActiveView = views[Math.max(0, activeIndex - 1)] || views[0];
+    commitWithActiveView({ ...database, views }, nextActiveView);
+  };
+
   const updateTitle = (title: string) => commit({ ...database, title });
-  const updateView = (view: DatabaseViewMode) => commit({ ...database, view });
+  const updateView = (view: DatabaseViewMode) => updateActiveView({ mode: view });
   const updateGroupBy = (propertyId: string) => {
-    commit({ ...database, groupBy: propertyId || null });
+    updateActiveView({ groupBy: propertyId || null });
   };
 
   const addFilter = () => {
@@ -1931,8 +2057,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
     const value = filterNeedsValue(operator) ? filterDraft.value.trim() : '';
     if (filterNeedsValue(operator) && !value) return;
 
-    commit({
-      ...database,
+    updateActiveView({
       filters: [
         ...database.filters,
         {
@@ -1947,7 +2072,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
   };
 
   const deleteFilter = (filterId: string) => {
-    commit({ ...database, filters: database.filters.filter((filter) => filter.id !== filterId) });
+    updateActiveView({ filters: database.filters.filter((filter) => filter.id !== filterId) });
   };
 
   const updateStatusOptions = (propertyId: string, value: string) => {
@@ -1973,14 +2098,14 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
   const updateSort = (propertyId: string) => {
     const current = database.sort;
     if (current?.propertyId !== propertyId) {
-      commit({ ...database, sort: { propertyId, direction: 'asc' } });
+      updateActiveView({ sort: { propertyId, direction: 'asc' } });
       return;
     }
     if (current.direction === 'asc') {
-      commit({ ...database, sort: { propertyId, direction: 'desc' } });
+      updateActiveView({ sort: { propertyId, direction: 'desc' } });
       return;
     }
-    commit({ ...database, sort: null });
+    updateActiveView({ sort: null });
   };
 
   const addProperty = () => {
@@ -2014,18 +2139,23 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
   const deleteProperty = (propertyId: string) => {
     const property = database.properties.find((item) => item.id === propertyId);
     if (!property || property.type === 'title') return;
+    const views = database.views.map((view) => ({
+      ...view,
+      filters: view.filters.filter((filter) => filter.propertyId !== propertyId),
+      groupBy: view.groupBy === propertyId ? null : view.groupBy,
+      sort: view.sort?.propertyId === propertyId ? null : view.sort,
+    }));
+    const nextActiveView = views.find((view) => view.id === database.activeViewId) || views[0];
 
-    commit({
+    commitWithActiveView({
       ...database,
+      views,
       properties: database.properties.filter((item) => item.id !== propertyId),
       rows: database.rows.map((row) => {
         const { [propertyId]: _removed, ...cells } = row.cells;
         return { ...row, cells };
       }),
-      filters: database.filters.filter((filter) => filter.propertyId !== propertyId),
-      groupBy: database.groupBy === propertyId ? null : database.groupBy,
-      sort: database.sort?.propertyId === propertyId ? null : database.sort,
-    });
+    }, nextActiveView);
   };
 
   const addRow = () => {
@@ -2717,17 +2847,58 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
       id={blockDomId(node.attrs.blockId)}
       contentEditable={false}
     >
-      <div className="flex flex-col gap-3 border-b border-gray-100 px-3 py-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 items-center gap-2">
-          <Database className="h-4 w-4 flex-shrink-0 text-gray-500" />
-          <input value={database.title} onChange={(event) => updateTitle(event.target.value)} className="min-w-0 flex-1 border-none bg-transparent px-0 text-sm font-semibold text-gray-900 outline-none focus:ring-0" />
-        </div>
-        <div className="flex flex-wrap items-center gap-1">
-          {DATABASE_VIEW_OPTIONS.map((view) => (
-            <button key={view.value} type="button" onClick={() => updateView(view.value)} className={`rounded px-2 py-1 text-xs font-medium ${database.view === view.value ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-              {view.label}
+      <div className="space-y-3 border-b border-gray-100 px-3 py-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-2">
+            <Database className="h-4 w-4 flex-shrink-0 text-gray-500" />
+            <input value={database.title} onChange={(event) => updateTitle(event.target.value)} className="min-w-0 flex-1 border-none bg-transparent px-0 text-sm font-semibold text-gray-900 outline-none focus:ring-0" />
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            {database.views.map((view) => (
+              <button
+                key={view.id}
+                type="button"
+                onClick={() => selectDatabaseView(view.id)}
+                className={`flex h-7 max-w-40 items-center gap-1 rounded px-2 text-xs font-medium transition-colors ${
+                  activeView?.id === view.id
+                    ? 'bg-gray-900 text-white'
+                    : 'text-gray-500 hover:bg-gray-100'
+                }`}
+                title={`${view.name} · ${getDatabaseViewModeLabel(view.mode)}`}
+              >
+                <span className="truncate">{view.name}</span>
+              </button>
+            ))}
+            <button type="button" onClick={addDatabaseView} className="flex h-7 items-center gap-1 rounded border border-gray-200 bg-white px-2 text-xs font-medium text-gray-500 hover:bg-gray-100">
+              <Plus className="h-3.5 w-3.5" /> 视图
             </button>
-          ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-2">
+            <input
+              value={activeView?.name || ''}
+              onChange={(event) => updateActiveView({ name: event.target.value })}
+              className="h-7 min-w-0 rounded border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-none focus:border-gray-400"
+              aria-label="数据库视图名称"
+            />
+            <button
+              type="button"
+              onClick={deleteActiveDatabaseView}
+              disabled={database.views.length <= 1}
+              className="flex h-7 w-7 items-center justify-center rounded text-gray-300 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
+              title="删除当前视图"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            {DATABASE_VIEW_OPTIONS.map((view) => (
+              <button key={view.value} type="button" onClick={() => updateView(view.value)} className={`rounded px-2 py-1 text-xs font-medium ${database.view === view.value ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+                {view.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       {renderDatabaseControls()}
