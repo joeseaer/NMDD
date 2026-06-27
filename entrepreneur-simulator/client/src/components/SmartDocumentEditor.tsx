@@ -40,6 +40,7 @@ import {
     BookmarkBlock,
     EmbedBlock,
     MediaBlock,
+    EquationBlock,
 } from './TiptapExtensions';
 
 // --- Parsers ---
@@ -67,6 +68,7 @@ const BLOCK_ID_TYPES = [
     'bookmarkBlock',
     'embedBlock',
     'mediaBlock',
+    'equationBlock',
 ];
 
 const LIST_CONTAINER_TYPES = new Set(['bulletList', 'orderedList', 'taskList']);
@@ -657,7 +659,7 @@ turndownService.addRule('keepSmartDocumentBlocks', {
 
     return (
       (nodeName === 'details' && dataType === 'toggle') ||
-      (nodeName === 'div' && ['callout', 'embed', 'media'].includes(dataType || '')) ||
+      (nodeName === 'div' && ['callout', 'embed', 'media', 'equation'].includes(dataType || '')) ||
       (nodeName === 'a' && dataType === 'bookmark')
     );
   },
@@ -1303,6 +1305,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
             BookmarkBlock,
             EmbedBlock,
             MediaBlock,
+            EquationBlock,
             Table.configure({
                 resizable: true,
             }),

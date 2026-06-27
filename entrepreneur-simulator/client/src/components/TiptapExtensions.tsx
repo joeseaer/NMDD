@@ -1,14 +1,16 @@
 
 import { Node, mergeAttributes, InputRule, Extension } from '@tiptap/core';
 import Suggestion from '@tiptap/suggestion';
-import { ReactRenderer, ReactNodeViewRenderer } from '@tiptap/react';
+import { ReactRenderer, ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
 import tippy from 'tippy.js';
-import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
+import { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
+import katex from 'katex';
+import 'katex/dist/katex.min.css';
 import { 
   Heading1, Heading2, Heading3, List, ListOrdered, CheckSquare, 
   Quote, Minus, Code, Layout, Image as ImageIcon,
   Type, Network, ChevronRight, AlertTriangle, Bookmark, Globe,
-  Paperclip, Video, Music, FileText
+  Paperclip, Video, Music, FileText, Sigma
 } from 'lucide-react';
 import { MindMapComponent } from './MindMapExtension';
 
@@ -533,6 +535,138 @@ export const MediaBlock = Node.create({
   },
 });
 
+const DEFAULT_EQUATION = 'E = mc^2';
+
+const blockDomId = (blockId?: string | null) => blockId ? `block-${blockId}` : undefined;
+
+const encodeJsonAttribute = (value: unknown) => {
+  try {
+    return encodeURIComponent(JSON.stringify(value));
+  } catch {
+    return undefined;
+  }
+};
+
+const renderEquation = (formula: string) => {
+  const source = formula.trim() || DEFAULT_EQUATION;
+  try {
+    return katex.renderToString(source, {
+      displayMode: true,
+      throwOnError: false,
+      strict: false,
+      output: 'html',
+    });
+  } catch {
+    return katex.renderToString(DEFAULT_EQUATION, {
+      displayMode: true,
+      throwOnError: false,
+      strict: false,
+      output: 'html',
+    });
+  }
+};
+
+const decodeEquationAttribute = (value: string | null) => {
+  if (!value) return '';
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+};
+
+const EquationBlockView = ({ node, updateAttributes, selected }: any) => {
+  const formula = node.attrs.formula || DEFAULT_EQUATION;
+  const [draft, setDraft] = useState(formula);
+  const previewHtml = useMemo(() => renderEquation(draft), [draft]);
+  const commentsAttr = Array.isArray(node.attrs.blockComments) && node.attrs.blockComments.length
+    ? encodeJsonAttribute(node.attrs.blockComments)
+    : undefined;
+
+  useEffect(() => {
+    setDraft(formula);
+  }, [formula]);
+
+  const commit = () => {
+    const next = draft.trim() || DEFAULT_EQUATION;
+    setDraft(next);
+    if (next !== formula) updateAttributes({ formula: next });
+  };
+
+  return (
+    <NodeViewWrapper
+      className={`smart-doc-equation group my-3 rounded-md border bg-white px-4 py-3 transition-colors ${
+        selected ? 'border-gray-400 shadow-sm' : 'border-gray-200 hover:border-gray-300'
+      }`}
+      data-type="equation"
+      data-equation={encodeURIComponent(formula)}
+      data-block-id={node.attrs.blockId || undefined}
+      data-comments={commentsAttr}
+      id={blockDomId(node.attrs.blockId)}
+      contentEditable={false}
+    >
+      <div
+        className="min-h-10 overflow-x-auto rounded bg-gray-50 px-3 py-3 text-center text-gray-900"
+        aria-label={formula}
+        dangerouslySetInnerHTML={{ __html: previewHtml }}
+      />
+      <textarea
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            event.preventDefault();
+            commit();
+          }
+        }}
+        placeholder="输入 LaTeX 公式"
+        className="mt-2 min-h-12 w-full resize-y rounded border border-gray-200 bg-white px-3 py-2 font-mono text-xs text-gray-700 outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-100"
+      />
+    </NodeViewWrapper>
+  );
+};
+
+export const EquationBlock = Node.create({
+  name: 'equationBlock',
+  group: 'block',
+  atom: true,
+  defining: true,
+
+  addAttributes() {
+    return {
+      formula: {
+        default: DEFAULT_EQUATION,
+        parseHTML: element => decodeEquationAttribute(element.getAttribute('data-equation')) || element.textContent?.trim() || DEFAULT_EQUATION,
+        renderHTML: attributes => ({
+          'data-equation': encodeURIComponent(attributes.formula || DEFAULT_EQUATION),
+        }),
+      },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-type="equation"]' }]
+  },
+
+  renderHTML({ node, HTMLAttributes }) {
+    const formula = node.attrs.formula || DEFAULT_EQUATION;
+    return [
+      'div',
+      mergeAttributes(HTMLAttributes, {
+        'data-type': 'equation',
+        'data-equation': encodeURIComponent(formula),
+        class: 'smart-doc-equation my-3 rounded-md border border-gray-200 bg-white px-4 py-3 text-center font-mono text-sm text-gray-800',
+      }),
+      formula,
+    ]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(EquationBlockView)
+  },
+});
+
 
 // --- Slash Command Extension ---
 
@@ -848,6 +982,17 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
         editor.chain().focus().deleteRange(range).insertContent({
           type: 'embedBlock',
           attrs: { url, title: 'Embed' },
+        }).run();
+      },
+    },
+    {
+      title: '公式',
+      shortcut: '/equation',
+      icon: <Sigma className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        editor.chain().focus().deleteRange(range).insertContent({
+          type: 'equationBlock',
+          attrs: { formula: DEFAULT_EQUATION },
         }).run();
       },
     },

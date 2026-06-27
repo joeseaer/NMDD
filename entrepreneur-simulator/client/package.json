@@ -29,6 +29,7 @@
     "clsx": "^2.1.0",
     "dagre": "^0.8.5",
     "framer-motion": "^11.0.14",
+    "katex": "^0.17.0",
     "lucide-react": "^0.358.0",
     "markdown-it": "^14.1.1",
     "react": "^18.2.0",
