@@ -2768,6 +2768,30 @@ const EditorToolbar = ({ editor, onAddImage, showTOC, onToggleTOC }: { editor: a
                 label="-行"
             />
             <ToolbarBtn
+                onClick={() => editor.chain().focus().toggleHeaderRow().run()}
+                disabled={!editor.can().toggleHeaderRow()}
+                icon={<TableIcon className="w-4 h-4"/>}
+                label="表头行"
+            />
+            <ToolbarBtn
+                onClick={() => editor.chain().focus().toggleHeaderColumn().run()}
+                disabled={!editor.can().toggleHeaderColumn()}
+                icon={<TableIcon className="w-4 h-4"/>}
+                label="表头列"
+            />
+            <ToolbarBtn
+                onClick={() => editor.chain().focus().mergeCells().run()}
+                disabled={!editor.can().mergeCells()}
+                icon={<TableIcon className="w-4 h-4"/>}
+                label="合并"
+            />
+            <ToolbarBtn
+                onClick={() => editor.chain().focus().splitCell().run()}
+                disabled={!editor.can().splitCell()}
+                icon={<TableIcon className="w-4 h-4"/>}
+                label="拆分"
+            />
+            <ToolbarBtn
                 onClick={() => editor.chain().focus().deleteTable().run()}
                 disabled={!editor.can().deleteTable()}
                 icon={<X className="w-4 h-4"/>}
