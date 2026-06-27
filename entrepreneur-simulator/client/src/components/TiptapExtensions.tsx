@@ -865,7 +865,7 @@ export const SyncedBlock = Node.create({
   },
 });
 
-type DatabasePropertyType = 'title' | 'text' | 'number' | 'status' | 'date' | 'checkbox' | 'url';
+type DatabasePropertyType = 'title' | 'text' | 'number' | 'status' | 'date' | 'checkbox' | 'url' | 'formula';
 type DatabaseViewMode = 'table' | 'list' | 'board' | 'calendar' | 'timeline' | 'gallery';
 type DatabaseFilterOperator = 'contains' | 'equals' | 'not_empty' | 'empty';
 
@@ -874,6 +874,7 @@ type DatabaseProperty = {
   name: string;
   type: DatabasePropertyType;
   options?: string[];
+  formula?: string;
 };
 
 type DatabaseRow = {
@@ -914,6 +915,7 @@ const DATABASE_PROPERTY_TYPES: Array<{ value: DatabasePropertyType; label: strin
   { value: 'date', label: '日期' },
   { value: 'checkbox', label: '勾选' },
   { value: 'url', label: '链接' },
+  { value: 'formula', label: '公式' },
 ];
 
 const DATABASE_VIEW_OPTIONS: Array<{ value: DatabaseViewMode; label: string }> = [
@@ -997,6 +999,7 @@ const normalizeStatusOptions = (value: unknown) => {
 };
 
 const normalizeDatabaseCellValue = (property: DatabaseProperty, value: any) => {
+  if (property.type === 'formula') return '';
   if (property.type === 'checkbox') return Boolean(value);
   if (property.type === 'status') {
     const options = property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS;
@@ -1011,6 +1014,230 @@ const getDefaultDatabaseCellValue = (property: DatabaseProperty) => {
   if (property.type === 'checkbox') return false;
   if (property.type === 'status') return property.options?.[0] || DEFAULT_STATUS_OPTIONS[0];
   return '';
+};
+
+type DatabaseFormulaResult = {
+  value: number | string | boolean | null;
+  error?: string;
+};
+
+type FormulaToken =
+  | { type: 'number'; value: number }
+  | { type: 'reference'; value: string }
+  | { type: 'identifier'; value: string }
+  | { type: 'operator' | 'paren' | 'comma'; value: string };
+
+const isFormulaResultError = (result: DatabaseFormulaResult) => Boolean(result.error);
+
+const tokenizeDatabaseFormula = (formula: string): FormulaToken[] => {
+  const tokens: FormulaToken[] = [];
+  let index = 0;
+
+  while (index < formula.length) {
+    const char = formula[index];
+
+    if (/\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+
+    if (char === '{') {
+      const end = formula.indexOf('}', index + 1);
+      if (end === -1) throw new Error('缺少 }');
+      const value = formula.slice(index + 1, end).trim();
+      if (!value) throw new Error('空属性引用');
+      tokens.push({ type: 'reference', value });
+      index = end + 1;
+      continue;
+    }
+
+    if (/[0-9.]/.test(char)) {
+      const match = formula.slice(index).match(/^\d*\.?\d+/);
+      if (!match) throw new Error('数字格式错误');
+      tokens.push({ type: 'number', value: Number(match[0]) });
+      index += match[0].length;
+      continue;
+    }
+
+    if (/[a-z_]/i.test(char)) {
+      const match = formula.slice(index).match(/^[a-z_][a-z0-9_]*/i);
+      if (!match) throw new Error('函数名错误');
+      tokens.push({ type: 'identifier', value: match[0].toLowerCase() });
+      index += match[0].length;
+      continue;
+    }
+
+    if ('+-*/'.includes(char)) {
+      tokens.push({ type: 'operator', value: char });
+      index += 1;
+      continue;
+    }
+
+    if (char === '(' || char === ')') {
+      tokens.push({ type: 'paren', value: char });
+      index += 1;
+      continue;
+    }
+
+    if (char === ',') {
+      tokens.push({ type: 'comma', value: char });
+      index += 1;
+      continue;
+    }
+
+    throw new Error(`不支持的字符 ${char}`);
+  }
+
+  return tokens;
+};
+
+const toFormulaNumber = (value: unknown) => {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  const text = String(value ?? '').trim();
+  if (!text) return 0;
+  const numeric = Number(text);
+  return Number.isFinite(numeric) ? numeric : 0;
+};
+
+const formatDatabaseFormulaValue = (value: DatabaseFormulaResult['value']) => {
+  if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'boolean') return value ? 'true' : 'false';
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return '';
+    const rounded = Math.round(value * 1000000) / 1000000;
+    return Number.isInteger(rounded) ? String(rounded) : String(rounded);
+  }
+  return String(value);
+};
+
+const evaluateDatabaseFormula = (
+  database: SmartDocumentDatabase,
+  row: DatabaseRow,
+  property: DatabaseProperty,
+  seen: Set<string> = new Set(),
+): DatabaseFormulaResult => {
+  const formula = String(property.formula || '').trim();
+  if (!formula) return { value: '' };
+  if (seen.has(property.id)) return { value: null, error: '循环引用' };
+
+  const resolveReference = (reference: string): DatabaseFormulaResult => {
+    const normalizedReference = reference.toLowerCase();
+    const target = database.properties.find((item) => (
+      item.id === reference ||
+      item.name.toLowerCase() === normalizedReference
+    ));
+
+    if (!target) return { value: null, error: `找不到属性 ${reference}` };
+    if (target.id === property.id) return { value: null, error: '循环引用' };
+    if (target.type === 'formula') {
+      return evaluateDatabaseFormula(database, row, target, new Set([...seen, property.id]));
+    }
+    if (target.type === 'checkbox') return { value: Boolean(row.cells[target.id]) };
+    return { value: row.cells[target.id] ?? '' };
+  };
+
+  if (/^\{[^}]+\}$/.test(formula)) {
+    return resolveReference(formula.slice(1, -1).trim());
+  }
+
+  try {
+    const tokens = tokenizeDatabaseFormula(formula);
+    let index = 0;
+
+    const peek = () => tokens[index] || null;
+    const consume = () => tokens[index++] || null;
+
+    const parseExpression = (): number => {
+      let value = parseTerm();
+
+      while (peek()?.type === 'operator' && (peek()?.value === '+' || peek()?.value === '-')) {
+        const operator = consume()?.value;
+        const right = parseTerm();
+        value = operator === '+' ? value + right : value - right;
+      }
+
+      return value;
+    };
+
+    const parseTerm = (): number => {
+      let value = parseFactor();
+
+      while (peek()?.type === 'operator' && (peek()?.value === '*' || peek()?.value === '/')) {
+        const operator = consume()?.value;
+        const right = parseFactor();
+        value = operator === '*'
+          ? value * right
+          : right === 0
+            ? Number.NaN
+            : value / right;
+      }
+
+      return value;
+    };
+
+    const parseFunction = (name: string): number => {
+      const open = consume();
+      if (open?.type !== 'paren' || open.value !== '(') throw new Error('函数缺少 (');
+
+      const args: number[] = [];
+      if (peek()?.type === 'paren' && peek()?.value === ')') {
+        consume();
+      } else {
+        while (true) {
+          args.push(parseExpression());
+          if (peek()?.type === 'comma') {
+            consume();
+            continue;
+          }
+          const close = consume();
+          if (close?.type !== 'paren' || close.value !== ')') throw new Error('函数缺少 )');
+          break;
+        }
+      }
+
+      const finiteArgs = args.map((value) => Number.isFinite(value) ? value : 0);
+      if (name === 'sum') return finiteArgs.reduce((total, value) => total + value, 0);
+      if (name === 'avg') return finiteArgs.length ? finiteArgs.reduce((total, value) => total + value, 0) / finiteArgs.length : 0;
+      if (name === 'min') return finiteArgs.length ? Math.min(...finiteArgs) : 0;
+      if (name === 'max') return finiteArgs.length ? Math.max(...finiteArgs) : 0;
+      if (name === 'round') return Math.round(finiteArgs[0] || 0);
+      if (name === 'abs') return Math.abs(finiteArgs[0] || 0);
+      if (name === 'ceil') return Math.ceil(finiteArgs[0] || 0);
+      if (name === 'floor') return Math.floor(finiteArgs[0] || 0);
+
+      throw new Error(`未知函数 ${name}`);
+    };
+
+    const parseFactor = (): number => {
+      const token = consume();
+      if (!token) throw new Error('公式不完整');
+
+      if (token.type === 'operator' && token.value === '-') return -parseFactor();
+      if (token.type === 'number') return token.value;
+      if (token.type === 'reference') {
+        const result = resolveReference(token.value);
+        if (isFormulaResultError(result)) throw new Error(result.error);
+        return toFormulaNumber(result.value);
+      }
+      if (token.type === 'identifier') return parseFunction(token.value);
+      if (token.type === 'paren' && token.value === '(') {
+        const value = parseExpression();
+        const close = consume();
+        if (close?.type !== 'paren' || close.value !== ')') throw new Error('缺少 )');
+        return value;
+      }
+
+      throw new Error('公式格式错误');
+    };
+
+    const value = parseExpression();
+    if (index < tokens.length) throw new Error('公式末尾有多余内容');
+    if (!Number.isFinite(value)) return { value: null, error: '计算结果无效' };
+    return { value };
+  } catch (error: any) {
+    return { value: null, error: error?.message || '公式错误' };
+  }
 };
 
 const createDatabaseCells = (properties: DatabaseProperty[], existingCells: Record<string, any> = {}) => {
@@ -1052,12 +1279,16 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
       const options = type === 'status'
         ? normalizeStatusOptions(property?.options)
         : undefined;
+      const formula = type === 'formula'
+        ? String(property?.formula || '').trim()
+        : undefined;
 
       return {
         id: String(property?.id || createSmartDocumentId('prop')),
         name: String(property?.name || (index === 0 ? '名称' : '属性')).trim() || '属性',
         type,
         options,
+        formula,
       };
     }).filter((property: DatabaseProperty) => property.id)
     : fallback.properties;
@@ -1123,25 +1354,39 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
   };
 };
 
-const getCellSortValue = (row: DatabaseRow, property: DatabaseProperty) => {
+const getCellDisplayValue = (database: SmartDocumentDatabase, row: DatabaseRow, property: DatabaseProperty) => {
+  if (property.type === 'formula') {
+    const result = evaluateDatabaseFormula(database, row, property);
+    return result.error ? `#${result.error}` : formatDatabaseFormulaValue(result.value);
+  }
+  if (property.type === 'checkbox') return row.cells[property.id] ? 'true' : '';
+  return String(row.cells[property.id] || '').trim();
+};
+
+const getCellSortValue = (database: SmartDocumentDatabase, row: DatabaseRow, property: DatabaseProperty) => {
+  if (property.type === 'formula') {
+    const result = evaluateDatabaseFormula(database, row, property);
+    if (result.error) return `#${result.error}`.toLowerCase();
+    if (typeof result.value === 'number') return result.value;
+    if (typeof result.value === 'boolean') return result.value ? 1 : 0;
+    return String(result.value || '').toLowerCase();
+  }
   const value = row.cells[property.id];
   if (property.type === 'checkbox') return value ? 1 : 0;
   if (property.type === 'number') return Number(value || 0);
   return String(value || '').toLowerCase();
 };
 
-const getCellTextValue = (row: DatabaseRow, property: DatabaseProperty) => {
-  const value = row.cells[property.id];
-  if (property.type === 'checkbox') return value ? 'true' : '';
-  return String(value || '').trim();
+const getCellTextValue = (database: SmartDocumentDatabase, row: DatabaseRow, property: DatabaseProperty) => {
+  return getCellDisplayValue(database, row, property);
 };
 
 const filterNeedsValue = (operator: DatabaseFilterOperator) => {
   return DATABASE_FILTER_OPERATORS.find((item) => item.value === operator)?.needsValue ?? true;
 };
 
-const rowMatchesFilter = (row: DatabaseRow, property: DatabaseProperty, filter: DatabaseFilter) => {
-  const cellValue = getCellTextValue(row, property);
+const rowMatchesFilter = (database: SmartDocumentDatabase, row: DatabaseRow, property: DatabaseProperty, filter: DatabaseFilter) => {
+  const cellValue = getCellTextValue(database, row, property);
   const filterValue = String(filter.value || '').trim();
 
   if (filter.operator === 'not_empty') return Boolean(cellValue);
@@ -1158,7 +1403,7 @@ const getFilteredDatabaseRows = (database: SmartDocumentDatabase) => {
       const property = database.properties.find((item) => item.id === filter.propertyId);
       if (!property) return true;
       if (filterNeedsValue(filter.operator) && !String(filter.value || '').trim()) return true;
-      return rowMatchesFilter(row, property, filter);
+      return rowMatchesFilter(database, row, property, filter);
     })
   ));
 };
@@ -1170,8 +1415,8 @@ const getSortedDatabaseRows = (database: SmartDocumentDatabase) => {
   if (!property) return database.rows;
 
   return [...database.rows].sort((left, right) => {
-    const leftValue = getCellSortValue(left, property);
-    const rightValue = getCellSortValue(right, property);
+    const leftValue = getCellSortValue(database, left, property);
+    const rightValue = getCellSortValue(database, right, property);
     if (leftValue < rightValue) return database.sort?.direction === 'desc' ? 1 : -1;
     if (leftValue > rightValue) return database.sort?.direction === 'desc' ? -1 : 1;
     return 0;
@@ -1182,12 +1427,12 @@ const getVisibleDatabaseRows = (database: SmartDocumentDatabase) => {
   return getSortedDatabaseRows({ ...database, rows: getFilteredDatabaseRows(database) });
 };
 
-const getDatabaseGroupLabel = (row: DatabaseRow, property: DatabaseProperty) => {
+const getDatabaseGroupLabel = (database: SmartDocumentDatabase, row: DatabaseRow, property: DatabaseProperty) => {
   if (property.type === 'checkbox') return row.cells[property.id] ? '已勾选' : '未勾选';
-  return getCellTextValue(row, property) || EMPTY_DATABASE_GROUP;
+  return getCellTextValue(database, row, property) || EMPTY_DATABASE_GROUP;
 };
 
-const getDatabaseGroups = (rows: DatabaseRow[], property: DatabaseProperty | null) => {
+const getDatabaseGroups = (database: SmartDocumentDatabase, rows: DatabaseRow[], property: DatabaseProperty | null) => {
   if (!property) {
     return [{ label: '全部', rows }];
   }
@@ -1199,13 +1444,13 @@ const getDatabaseGroups = (rows: DatabaseRow[], property: DatabaseProperty | nul
       : [];
 
   for (const row of rows) {
-    const label = getDatabaseGroupLabel(row, property);
+    const label = getDatabaseGroupLabel(database, row, property);
     if (!labels.includes(label)) labels.push(label);
   }
 
   return labels.map((label) => ({
     label,
-    rows: rows.filter((row) => getDatabaseGroupLabel(row, property) === label),
+    rows: rows.filter((row) => getDatabaseGroupLabel(database, row, property) === label),
   }));
 };
 
@@ -1256,10 +1501,10 @@ const getDatabaseRowTitle = (row: DatabaseRow, property: DatabaseProperty) => {
   return String(row.cells[property.id] || '').trim() || '未命名';
 };
 
-const getDatabasePropertyPreview = (row: DatabaseRow, property?: DatabaseProperty | null) => {
+const getDatabasePropertyPreview = (database: SmartDocumentDatabase, row: DatabaseRow, property?: DatabaseProperty | null) => {
   if (!property) return '';
   if (property.type === 'checkbox') return row.cells[property.id] ? '已勾选' : '未勾选';
-  return String(row.cells[property.id] || '').trim();
+  return getCellDisplayValue(database, row, property);
 };
 
 const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
@@ -1415,6 +1660,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
         ...patch,
         type: nextType,
         options: nextType === 'status' ? (property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS) : undefined,
+        formula: nextType === 'formula' ? String(patch.formula ?? property.formula ?? '') : undefined,
       };
     });
     commit({
@@ -1495,6 +1741,25 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     if (property.type === 'date') return <input type="date" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
     if (property.type === 'number') return <input type="number" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
     if (property.type === 'url') return <input type="url" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} placeholder="https://" />;
+    if (property.type === 'formula') {
+      const result = evaluateDatabaseFormula(database, row, property);
+      const formulaText = String(property.formula || '').trim();
+      const displayValue = result.error ? `#${result.error}` : formatDatabaseFormulaValue(result.value);
+      return (
+        <div
+          title={formulaText || '未设置公式'}
+          className={`flex h-8 min-w-0 items-center rounded px-2 text-xs ${
+            result.error
+              ? 'bg-red-50 text-red-600'
+              : formulaText
+                ? 'bg-gray-50 font-medium text-gray-700'
+                : 'bg-gray-50 text-gray-400'
+          }`}
+        >
+          <span className="truncate">{formulaText ? displayValue : '设置公式'}</span>
+        </div>
+      );
+    }
 
     return <input type="text" value={String(rawValue || '')} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={`${inputClass} ${property.type === 'title' ? 'font-medium text-gray-900' : ''}`} />;
   };
@@ -1634,6 +1899,17 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
                   )}
                 </div>
                 <input value={property.name} onChange={(event) => updateProperty(property.id, { name: event.target.value })} className="mt-1 h-6 w-full rounded border border-transparent bg-transparent px-1 text-[11px] font-normal text-gray-600 outline-none hover:border-gray-200 focus:border-gray-400 focus:bg-white" />
+                {property.type === 'formula' && (
+                  <label className="mt-1 flex min-w-0 items-center gap-1 rounded border border-gray-200 bg-white px-1.5 py-1 text-[10px] font-normal text-gray-500">
+                    <Sigma className="h-3 w-3 flex-shrink-0" />
+                    <input
+                      value={property.formula || ''}
+                      onChange={(event) => updateProperty(property.id, { formula: event.target.value })}
+                      placeholder="{数字} * 2"
+                      className="min-w-0 flex-1 border-none bg-transparent px-0 text-[11px] text-gray-700 outline-none placeholder:text-gray-300 focus:ring-0"
+                    />
+                  </label>
+                )}
               </th>
             ))}
             <th className="w-10 border-b border-gray-100 bg-gray-50 px-2 py-2">
@@ -1644,7 +1920,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
           </tr>
         </thead>
         {groupProperty ? (
-          getDatabaseGroups(rows, groupProperty).map((group) => (
+          getDatabaseGroups(database, rows, groupProperty).map((group) => (
             <tbody key={group.label}>
               <tr>
                 <td colSpan={database.properties.length + 1} className="border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
@@ -1689,7 +1965,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
   const renderListView = () => (
     <div className="divide-y divide-gray-100 rounded border border-gray-100">
       {groupProperty
-        ? getDatabaseGroups(rows, groupProperty).map((group) => (
+        ? getDatabaseGroups(database, rows, groupProperty).map((group) => (
           <div key={group.label}>
             <div className="bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
               {group.label} <span className="font-normal text-gray-400">{group.rows.length}</span>
@@ -1705,7 +1981,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
   );
 
   const renderBoardView = () => {
-    const groups = getDatabaseGroups(rows, boardGroupProperty);
+    const groups = getDatabaseGroups(database, rows, boardGroupProperty);
 
     return (
       <div className="grid gap-3 md:grid-cols-3">
@@ -1899,7 +2175,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     };
 
     const timelineGroups = groupProperty
-      ? getDatabaseGroups(currentMonthRows, groupProperty).filter((group) => group.rows.length > 0)
+      ? getDatabaseGroups(database, currentMonthRows, groupProperty).filter((group) => group.rows.length > 0)
       : [{ label: '', rows: currentMonthRows }];
 
     return (
@@ -1970,7 +2246,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
   };
 
   const renderGalleryCard = (row: DatabaseRow) => {
-    const urlValue = getDatabasePropertyPreview(row, urlProperty);
+    const urlValue = getDatabasePropertyPreview(database, row, urlProperty);
 
     return (
       <div key={row.id} className="group min-w-0 rounded border border-gray-200 bg-white p-3 shadow-sm transition-colors hover:border-gray-300">
@@ -2017,7 +2293,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
   const renderGalleryView = () => (
     <div className="space-y-3">
       {groupProperty
-        ? getDatabaseGroups(rows, groupProperty).map((group) => (
+        ? getDatabaseGroups(database, rows, groupProperty).map((group) => (
           <div key={group.label} className="space-y-2">
             <div className="text-xs font-semibold text-gray-500">
               {group.label} <span className="font-normal text-gray-400">{group.rows.length}</span>
