@@ -210,7 +210,42 @@ const isValidDocJson = (value: unknown): value is JSONContent => {
     return !!value && typeof value === 'object' && (value as any).type === 'doc';
 };
 
-const markdownToHtml = (value: string) => mdParser.render(value || '');
+const isMarkdownStructureLine = (line: string) => {
+    const trimmed = line.trim();
+    return (
+        /^#{1,6}\s+/.test(trimmed) ||
+        /^([-*+]|\d+[.)])\s+/.test(trimmed) ||
+        /^>\s?/.test(trimmed) ||
+        /^(```|~~~)/.test(trimmed) ||
+        /^\|.*\|$/.test(trimmed) ||
+        /^<\/?[a-z][\s\S]*>/i.test(trimmed)
+    );
+};
+
+const preserveLegacyMarkdownBlankLines = (value: string) => {
+    const normalized = (value || '').replace(/\r\n/g, '\n');
+    const lines = normalized.split('\n');
+    let inFence = false;
+
+    return lines.map((line, index) => {
+        const trimmed = line.trim();
+        if (/^(```|~~~)/.test(trimmed)) {
+            inFence = !inFence;
+            return line;
+        }
+
+        if (inFence || trimmed !== '') return line;
+
+        const previous = [...lines.slice(0, index)].reverse().find((item) => item.trim() !== '');
+        const next = lines.slice(index + 1).find((item) => item.trim() !== '');
+        if (!previous || !next) return line;
+        if (isMarkdownStructureLine(previous) || isMarkdownStructureLine(next)) return line;
+
+        return '\n<p data-preserved-blank-line></p>\n';
+    }).join('\n');
+};
+
+const markdownToHtml = (value: string) => mdParser.render(preserveLegacyMarkdownBlankLines(value || ''));
 
 const editorToMarkdown = (editor: any) => {
     const html = editor.getHTML();
