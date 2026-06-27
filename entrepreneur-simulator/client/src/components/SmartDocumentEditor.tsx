@@ -40,6 +40,7 @@ import {
     BookmarkBlock,
     EmbedBlock,
     MediaBlock,
+    SyncedBlock,
     PageLinkBlock,
     EquationBlock,
 } from './TiptapExtensions';
@@ -69,6 +70,7 @@ const BLOCK_ID_TYPES = [
     'bookmarkBlock',
     'embedBlock',
     'mediaBlock',
+    'syncedBlock',
     'pageLinkBlock',
     'equationBlock',
 ];
@@ -661,7 +663,7 @@ turndownService.addRule('keepSmartDocumentBlocks', {
 
     return (
       (nodeName === 'details' && dataType === 'toggle') ||
-      (nodeName === 'div' && ['callout', 'embed', 'media', 'equation'].includes(dataType || '')) ||
+      (nodeName === 'div' && ['callout', 'embed', 'media', 'equation', 'synced-block'].includes(dataType || '')) ||
       (nodeName === 'a' && ['bookmark', 'page-link'].includes(dataType || ''))
     );
   },
@@ -1340,6 +1342,7 @@ export const SmartDocumentEditor = ({
             BookmarkBlock,
             EmbedBlock,
             MediaBlock,
+            SyncedBlock,
             PageLinkBlock,
             EquationBlock,
             Table.configure({

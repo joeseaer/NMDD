@@ -2,6 +2,8 @@
 import { Node, mergeAttributes, InputRule, Extension } from '@tiptap/core';
 import Suggestion from '@tiptap/suggestion';
 import { ReactRenderer, ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Fragment } from '@tiptap/pm/model';
 import tippy from 'tippy.js';
 import { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
 import katex from 'katex';
@@ -10,7 +12,7 @@ import {
   Heading1, Heading2, Heading3, List, ListOrdered, CheckSquare, 
   Quote, Minus, Code, Layout, Image as ImageIcon,
   Type, Network, ChevronRight, AlertTriangle, Bookmark, Globe,
-  Paperclip, Video, Music, FileText, Sigma
+  Paperclip, Video, Music, FileText, Sigma, RefreshCw
 } from 'lucide-react';
 import { MindMapComponent } from './MindMapExtension';
 
@@ -546,6 +548,132 @@ const encodeJsonAttribute = (value: unknown) => {
     return undefined;
   }
 };
+
+const createSyncedBlockId = () => {
+  const randomPart = Math.random().toString(36).slice(2, 9);
+  return `sync_${Date.now().toString(36)}_${randomPart}`;
+};
+
+const syncedBlockPluginKey = new PluginKey('syncedBlockContent');
+
+const stripSyncedRuntimeAttrs = (value: any): any => {
+  if (Array.isArray(value)) return value.map(stripSyncedRuntimeAttrs);
+  if (!value || typeof value !== 'object') return value;
+
+  const next: any = { ...value };
+  if (next.attrs && typeof next.attrs === 'object') {
+    const { blockId, blockComments, ...restAttrs } = next.attrs;
+    next.attrs = restAttrs;
+  }
+  if (Array.isArray(next.content)) next.content = next.content.map(stripSyncedRuntimeAttrs);
+  return next;
+};
+
+const getSyncedContentJson = (node: any) => stripSyncedRuntimeAttrs(node.content.toJSON());
+
+const getNodeContentSignature = (node: any) => JSON.stringify(getSyncedContentJson(node));
+
+const createSyncedContentFragment = (node: any, schema: any) => {
+  const contentJson = getSyncedContentJson(node);
+  if (!Array.isArray(contentJson)) return Fragment.empty;
+  return Fragment.fromArray(contentJson.map((child) => schema.nodeFromJSON(child)));
+};
+
+export const SyncedBlock = Node.create({
+  name: 'syncedBlock',
+  group: 'block',
+  content: 'block+',
+  defining: true,
+  isolating: true,
+
+  addAttributes() {
+    return {
+      syncId: {
+        default: null,
+        parseHTML: element => element.getAttribute('data-sync-id') || null,
+        renderHTML: attributes => ({ 'data-sync-id': attributes.syncId || undefined }),
+      },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-type="synced-block"]', contentElement: '[data-synced-content]' }]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return [
+      'div',
+      mergeAttributes(HTMLAttributes, {
+        'data-type': 'synced-block',
+        class: 'smart-doc-synced-block my-3 rounded-md border border-gray-200 bg-white',
+      }),
+      ['div', { contenteditable: 'false', class: 'border-b border-gray-100 px-3 py-1.5 text-xs font-medium text-gray-500' }, '同步块'],
+      ['div', { 'data-synced-content': 'true', class: 'px-3 py-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0' }, 0],
+    ]
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        key: syncedBlockPluginKey,
+        appendTransaction: (transactions, oldState, newState) => {
+          if (!transactions.some((transaction) => transaction.docChanged)) return null;
+          if (transactions.some((transaction) => transaction.getMeta(syncedBlockPluginKey) === 'sync')) return null;
+
+          const oldByBlockId = new Map<string, any>();
+          oldState.doc.descendants((node) => {
+            if (node.type.name !== 'syncedBlock') return true;
+            const blockId = node.attrs.blockId;
+            if (blockId) oldByBlockId.set(blockId, node);
+            return true;
+          });
+
+          const groups = new Map<string, Array<{ node: any; pos: number }>>();
+          newState.doc.descendants((node, pos) => {
+            if (node.type.name !== 'syncedBlock') return true;
+
+            const syncId = node.attrs.syncId;
+            if (!syncId) return true;
+
+            const entries = groups.get(syncId) || [];
+            entries.push({ node, pos });
+            groups.set(syncId, entries);
+            return true;
+          });
+
+          const tr = newState.tr;
+
+          for (const entries of groups.values()) {
+            if (entries.length < 2) continue;
+
+            const changedEntries = entries.filter((entry) => {
+              const blockId = entry.node.attrs.blockId;
+              const oldNode = blockId ? oldByBlockId.get(blockId) : null;
+              if (!oldNode) return true;
+              return getNodeContentSignature(oldNode) !== getNodeContentSignature(entry.node);
+            });
+            const source = changedEntries[changedEntries.length - 1] || entries[0];
+            const sourceSignature = getNodeContentSignature(source.node);
+
+            for (const entry of entries) {
+              if (entry === source) continue;
+              if (getNodeContentSignature(entry.node) === sourceSignature) continue;
+
+              const from = tr.mapping.map(entry.pos + 1);
+              const to = tr.mapping.map(entry.pos + entry.node.nodeSize - 1);
+              tr.replaceWith(from, to, createSyncedContentFragment(source.node, newState.schema));
+            }
+          }
+
+          if (!tr.docChanged) return null;
+          tr.setMeta(syncedBlockPluginKey, 'sync');
+          tr.setMeta('addToHistory', false);
+          return tr;
+        },
+      }),
+    ];
+  },
+});
 
 type SmartDocumentPageLinkOption = {
   id: string;
@@ -1163,6 +1291,18 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
         editor.chain().focus().deleteRange(range).insertContent({
           type: 'equationBlock',
           attrs: { formula: DEFAULT_EQUATION },
+        }).run();
+      },
+    },
+    {
+      title: '同步块',
+      shortcut: '/sync',
+      icon: <RefreshCw className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        editor.chain().focus().deleteRange(range).insertContent({
+          type: 'syncedBlock',
+          attrs: { syncId: createSyncedBlockId() },
+          content: [{ type: 'paragraph' }],
         }).run();
       },
     },
