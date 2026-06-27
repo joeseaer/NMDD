@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS sops (
   tags TEXT[],
   version TEXT DEFAULT 'V1.0',
   content TEXT,
+  content_json JSONB,
   related_scenes TEXT[], -- Legacy field, kept for compatibility
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -65,6 +66,7 @@ CREATE TABLE IF NOT EXISTS sop_versions (
   sop_id UUID REFERENCES sops(id) ON DELETE CASCADE,
   version TEXT NOT NULL,
   content TEXT,
+  content_json JSONB,
   version_note TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );

@@ -461,23 +461,19 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
         shortcut: '/tp',
         icon: <ImageIcon className="w-3 h-3" />,
         command: ({ editor, range }: any) => {
-            // Trigger image upload dialog
-             const input = document.createElement('input');
-             input.type = 'file';
-             input.accept = 'image/*';
-             input.onchange = async () => {
-                 if (input.files?.length) {
-                    // Note: We need to access the uploadImage function from the editor context
-                    // For now, we'll dispatch a custom event or rely on the parent component
-                    // This is a limitation of this decoupled implementation
-                    alert("请点击工具栏图片按钮上传");
-                 }
-             };
-             // Ideally we would trigger the parent's upload handler
-             editor.chain().focus().deleteRange(range).run();
-             // input.click(); // Removed for now as we need async upload logic
-             
-             // Alternative: just delete range and let user click toolbar
+            editor.chain().focus().deleteRange(range).run();
+            const uploadImage = editor.storage?.smartDocument?.uploadImage;
+            if (typeof uploadImage !== 'function') return;
+
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = 'image/*';
+            input.onchange = async () => {
+                if (!input.files?.length) return;
+                const url = await uploadImage(input.files[0]);
+                if (url) editor.chain().focus().setImage({ src: url }).run();
+            };
+            input.click();
         },
     },
     {

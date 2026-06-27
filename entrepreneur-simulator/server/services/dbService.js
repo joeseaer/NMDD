@@ -17,6 +17,58 @@ const chromaClient = new ChromaClient({
 let scenesCollection = null;
 let sopCollection = null;
 
+const SMART_DOC_JSON_PREFIX = '<!-- smart-document-json:';
+const SMART_DOC_JSON_SUFFIX = '-->';
+
+const normalizeContentJson = (value) => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && parsed.type === 'doc' ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  return value && typeof value === 'object' && value.type === 'doc' ? value : null;
+};
+
+const unpackSmartDocumentContent = (value) => {
+  const rawContent = typeof value === 'string' ? value : '';
+  if (!rawContent.startsWith(SMART_DOC_JSON_PREFIX)) {
+    return { content: rawContent, contentJson: null };
+  }
+
+  const endIndex = rawContent.indexOf(SMART_DOC_JSON_SUFFIX);
+  if (endIndex < 0) return { content: rawContent, contentJson: null };
+
+  const encoded = rawContent.slice(SMART_DOC_JSON_PREFIX.length, endIndex).trim();
+  const content = rawContent.slice(endIndex + SMART_DOC_JSON_SUFFIX.length).replace(/^\r?\n/, '');
+
+  try {
+    const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+    return {
+      content,
+      contentJson: normalizeContentJson(decoded),
+    };
+  } catch {
+    return { content: rawContent, contentJson: null };
+  }
+};
+
+const packSmartDocumentContent = (content, contentJson) => {
+  const normalizedJson = normalizeContentJson(contentJson);
+  if (!normalizedJson) return content;
+
+  const encoded = Buffer.from(JSON.stringify(normalizedJson), 'utf8').toString('base64');
+  return `${SMART_DOC_JSON_PREFIX}${encoded}${SMART_DOC_JSON_SUFFIX}\n${content || ''}`;
+};
+
+const isMissingContentJsonColumn = (error) => {
+  const message = String(error?.message || error?.details || '');
+  return error?.code === 'PGRST204' || message.includes("'content_json' column");
+};
+
 function summarizeMindMapContent(content) {
   const text = typeof content === 'string' ? content : '';
   const hasFence = text.includes('```mindmap');
@@ -110,6 +162,10 @@ const saveSOP = async (sopData) => {
   if (!supabase) throw new Error("Database connection not established. Check environment variables.");
 
   let sopId = sopData.id;
+  const unpackedContent = unpackSmartDocumentContent(sopData.content);
+  const contentJson = normalizeContentJson(sopData.content_json) || unpackedContent.contentJson;
+  const content = unpackedContent.content;
+  const fallbackContent = packSmartDocumentContent(content, contentJson);
 
   // Ensure content is processed if it contains URL-encoded mindmap data
   // Although frontend decodes it for display, we want to store it as is or decoded?
@@ -118,19 +174,32 @@ const saveSOP = async (sopData) => {
   
   // Check if updating or inserting
   if (sopData.id && sopData.id.length > 10) { // Simple check for UUID vs mock ID
-      const { data, error } = await supabase
+      const payload = {
+          title: sopData.title,
+          category: sopData.category,
+          tags: sopData.tags,
+          version: sopData.version,
+          content,
+          content_json: contentJson,
+          updated_at: new Date()
+      };
+
+      let { data, error } = await supabase
         .from('sops')
-        .update({
-            title: sopData.title,
-            category: sopData.category,
-            tags: sopData.tags,
-            version: sopData.version,
-            content: sopData.content,
-            updated_at: new Date()
-        })
+        .update(payload)
         .eq('id', sopData.id)
         .select('id')
         .single();
+
+      if (error && isMissingContentJsonColumn(error)) {
+        const { content_json, ...fallbackPayload } = payload;
+        ({ data, error } = await supabase
+          .from('sops')
+          .update({ ...fallbackPayload, content: fallbackContent })
+          .eq('id', sopData.id)
+          .select('id')
+          .single());
+      }
         
       if (error) throw error;
       sopId = data.id;
@@ -138,27 +207,38 @@ const saveSOP = async (sopData) => {
       // If ID is missing or short (temp ID), treat as insert
       // Remove temp ID from payload so Postgres generates new UUID
       const { id, ...insertData } = sopData;
+      const payload = {
+          user_id: insertData.user_id || DEFAULT_USER_ID,
+          title: insertData.title,
+          category: insertData.category,
+          tags: insertData.tags,
+          version: insertData.version,
+          content,
+          content_json: contentJson,
+          // related_scenes is legacy, we use relational tables now
+      };
       
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('sops')
-        .insert([{
-            user_id: insertData.user_id || DEFAULT_USER_ID,
-            title: insertData.title,
-            category: insertData.category,
-            tags: insertData.tags,
-            version: insertData.version,
-            content: insertData.content,
-            // related_scenes is legacy, we use relational tables now
-        }])
+        .insert([payload])
         .select('id')
         .single();
+
+      if (error && isMissingContentJsonColumn(error)) {
+        const { content_json, ...fallbackPayload } = payload;
+        ({ data, error } = await supabase
+          .from('sops')
+          .insert([{ ...fallbackPayload, content: fallbackContent }])
+          .select('id')
+          .single());
+      }
 
       if (error) throw error;
       sopId = data.id;
   }
 
   try {
-    const mm = summarizeMindMapContent(sopData?.content);
+    const mm = summarizeMindMapContent(content);
     if (mm.hasFence || mm.hasDiv) {
       const { data: saved, error: savedError } = await supabase
         .from('sops')
@@ -185,12 +265,21 @@ const saveSOP = async (sopData) => {
         .single();
 
       if (!existingVersion) {
-        await supabase.from('sop_versions').insert({
+        const versionPayload = {
             sop_id: sopId,
             version: latestHistory.version,
-            content: sopData.content,
+            content,
+            content_json: contentJson,
             version_note: latestHistory.note
-        });
+        };
+        let { error: versionError } = await supabase.from('sop_versions').insert(versionPayload);
+        if (versionError && isMissingContentJsonColumn(versionError)) {
+          const { content_json, ...fallbackVersionPayload } = versionPayload;
+          ({ error: versionError } = await supabase
+            .from('sop_versions')
+            .insert({ ...fallbackVersionPayload, content: fallbackContent }));
+        }
+        if (versionError) throw versionError;
       }
   }
 
@@ -276,6 +365,8 @@ const getSOPs = async (userId) => {
   
   // Transform data to match frontend SOPEntity structure
   return data.map(sop => {
+    const unpackedContent = unpackSmartDocumentContent(sop.content);
+    const contentJson = normalizeContentJson(sop.content_json) || unpackedContent.contentJson;
     const usageLogs = sop.sop_usage_logs || [];
     const versions = sop.sop_versions || [];
     
@@ -334,7 +425,8 @@ const getSOPs = async (userId) => {
       version: sop.version,
       created_at: new Date(sop.created_at).toLocaleDateString(),
       updated_at: new Date(sop.updated_at).toLocaleDateString(),
-      content: sop.content,
+      content: unpackedContent.content,
+      content_json: contentJson,
       stats: {
         use_count,
         avg_score: Number(avg_score),

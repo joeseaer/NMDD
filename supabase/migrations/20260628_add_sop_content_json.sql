@@ -1,0 +1,5 @@
+ALTER TABLE sops
+ADD COLUMN IF NOT EXISTS content_json JSONB;
+
+ALTER TABLE sop_versions
+ADD COLUMN IF NOT EXISTS content_json JSONB;

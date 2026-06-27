@@ -5,7 +5,7 @@ import {
   ArrowLeft
 } from 'lucide-react';
 import { api } from '../services/api';
-import { TiptapEditor } from '../components/TiptapEditor';
+import { SmartDocumentEditor, type SmartDocumentValue } from '../components/SmartDocumentEditor';
 import { useSearchParams } from 'react-router-dom';
 
 // --- Types ---
@@ -18,6 +18,7 @@ interface SOPEntity {
   created_at: string;
   updated_at: string;
   content: string;
+  content_json?: any | null;
   stats: {
     use_count: number;
     avg_score: number;
@@ -47,6 +48,7 @@ const normalizeSopEntity = (raw: any): SOPEntity => {
     created_at: String(raw?.created_at || ''),
     updated_at: String(raw?.updated_at || ''),
     content: String(raw?.content || ''),
+    content_json: raw?.content_json || null,
     stats: raw?.stats && typeof raw.stats === 'object'
       ? {
           use_count: Number(raw.stats.use_count || 0),
@@ -192,6 +194,7 @@ export default function NoteManager() {
           tags: [],
           version: 'V1.0',
           content: '',
+          content_json: null,
           related: { scenes: [], people: [], sops: [] }, 
           history: [{ version: 'V1.0', date: new Date().toISOString().split('T')[0], note: '初始创建' }],
           stats: { use_count: 0, avg_score: 0, last_used: '-', related_scenes_count: 0 },
@@ -395,11 +398,14 @@ function NoteDetailView({
       onUpdate({ ...note, tags, updated_at: new Date().toISOString().split('T')[0] });
   };
 
-  const handleContentUpdate = (newContent: string) => {
+  const handleContentUpdate = (value: SmartDocumentValue) => {
       // Auto-extract title from first line if title is "未命名文档" or empty
       let newTitle = note.title;
       if (note.title === '未命名文档' || !note.title) {
-          const firstLine = newContent.split('\n')[0].replace(/^#+\s*/, '').trim();
+          const firstLine = (value.text || value.markdown)
+              .split('\n')
+              .map((line) => line.replace(/^#+\s*/, '').trim())
+              .find(Boolean);
           if (firstLine && firstLine.length < 50) {
               newTitle = firstLine;
           }
@@ -407,7 +413,8 @@ function NoteDetailView({
 
       const updatedNote = { 
           ...note, 
-          content: newContent, 
+          content: value.markdown,
+          content_json: value.json,
           updated_at: new Date().toISOString().split('T')[0] 
       };
 
@@ -545,11 +552,12 @@ function NoteDetailView({
               
               {/* Editor */}
               <div className="flex-1 flex flex-col">
-                 <TiptapEditor 
+                 <SmartDocumentEditor
                     key={note.id}
-                    content={note.content || ''} 
-                    onChange={handleContentUpdate} 
-                 />
+                    content={note.content || ''}
+                    contentJson={note.content_json || null}
+                    onChange={handleContentUpdate}
+                  />
               </div>
           </div>
       </div>
