@@ -5,7 +5,7 @@ import {
   Link as LinkIcon, Unlink, AlignLeft, AlignCenter, AlignRight, Captions,
   ImagePlus, Download, ExternalLink, Maximize2, Trash2, Copy, GripVertical,
   MoreHorizontal, ArrowUp, ArrowDown, Heading1, Heading2, Heading3, MessageSquare,
-  Paperclip, Video, Music, FileText, RefreshCw
+  Paperclip, Video, Music, FileText, RefreshCw, Palette
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -24,6 +24,7 @@ import { DOMParser as ProseMirrorDOMParser } from 'prosemirror-model';
 import { Extension, type JSONContent } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
+import { selectedRect } from '@tiptap/pm/tables';
 import MarkdownIt from 'markdown-it';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
@@ -83,11 +84,66 @@ const BLOCK_ID_TYPES = [
 const LIST_CONTAINER_TYPES = new Set(['bulletList', 'orderedList', 'taskList']);
 const LIST_ITEM_TYPES = new Set(['listItem', 'taskItem']);
 const TEXT_TURN_TYPES = new Set(['paragraph', 'heading']);
+const TABLE_CELL_BACKGROUND_ATTRIBUTE = 'backgroundColor';
+
+const TABLE_CELL_BACKGROUND_COLORS = [
+    { label: '默认', value: null, swatch: 'transparent' },
+    { label: '灰色', value: '#f3f4f6', swatch: '#f3f4f6' },
+    { label: '黄色', value: '#fef3c7', swatch: '#fef3c7' },
+    { label: '橙色', value: '#ffedd5', swatch: '#ffedd5' },
+    { label: '红色', value: '#fee2e2', swatch: '#fee2e2' },
+    { label: '绿色', value: '#dcfce7', swatch: '#dcfce7' },
+    { label: '蓝色', value: '#dbeafe', swatch: '#dbeafe' },
+    { label: '紫色', value: '#ede9fe', swatch: '#ede9fe' },
+];
 
 const createBlockId = () => {
     const randomPart = Math.random().toString(36).slice(2, 9);
     return `blk_${Date.now().toString(36)}_${randomPart}`;
 };
+
+const normalizeTableCellBackground = (value: unknown) => {
+    const color = String(value || '').trim().toLowerCase();
+    if (!color || color === 'transparent' || color === 'none') return null;
+    const allowed = new Set(TABLE_CELL_BACKGROUND_COLORS.map((item) => item.value).filter(Boolean));
+    return allowed.has(color) ? color : null;
+};
+
+const renderTableCellBackground = (value: unknown) => {
+    const color = normalizeTableCellBackground(value);
+    if (!color) return {};
+
+    return {
+        'data-background-color': color,
+        style: `background-color: ${color};`,
+    };
+};
+
+const tableCellBackgroundAttribute = {
+    default: null,
+    parseHTML: (element: HTMLElement) => (
+        normalizeTableCellBackground(element.getAttribute('data-background-color') || element.style.backgroundColor)
+    ),
+    renderHTML: (attributes: Record<string, any>) => renderTableCellBackground(attributes[TABLE_CELL_BACKGROUND_ATTRIBUTE]),
+};
+
+const TableCellWithBackground = TableCell.extend({
+    addAttributes() {
+        return {
+            ...(this.parent?.() || {}),
+            [TABLE_CELL_BACKGROUND_ATTRIBUTE]: tableCellBackgroundAttribute,
+        };
+    },
+});
+
+const TableHeaderWithBackground = TableHeader.extend({
+    addAttributes() {
+        return {
+            ...(this.parent?.() || {}),
+            [TABLE_CELL_BACKGROUND_ATTRIBUTE]: tableCellBackgroundAttribute,
+        };
+    },
+});
 
 type BlockComment = {
     id: string;
@@ -290,6 +346,83 @@ type ColumnResizeHandleInfo = {
     top: number;
     left: number;
     height: number;
+};
+
+type TableCellBackgroundScope = 'cell' | 'row' | 'column';
+
+const TABLE_CELL_NODE_TYPES = new Set(['tableCell', 'tableHeader']);
+
+const canUpdateTableCellBackground = (editor: any) => {
+    try {
+        return Boolean(editor?.isActive('table') && editor.can().setCellAttribute(TABLE_CELL_BACKGROUND_ATTRIBUTE, TABLE_CELL_BACKGROUND_COLORS[1].value));
+    } catch {
+        return false;
+    }
+};
+
+const getCurrentTableCellBackground = (editor: any) => {
+    const cellColor = normalizeTableCellBackground(editor?.getAttributes('tableCell')?.[TABLE_CELL_BACKGROUND_ATTRIBUTE]);
+    const headerColor = normalizeTableCellBackground(editor?.getAttributes('tableHeader')?.[TABLE_CELL_BACKGROUND_ATTRIBUTE]);
+    return cellColor || headerColor;
+};
+
+const getTableCellPositionsForScope = (editor: any, scope: Exclude<TableCellBackgroundScope, 'cell'>) => {
+    try {
+        const rect = selectedRect(editor.state);
+        const positions = new Set<number>();
+
+        if (scope === 'row') {
+            for (let row = rect.top; row < rect.bottom; row += 1) {
+                for (let col = 0; col < rect.map.width; col += 1) {
+                    positions.add(rect.map.map[row * rect.map.width + col]);
+                }
+            }
+        } else {
+            for (let col = rect.left; col < rect.right; col += 1) {
+                for (let row = 0; row < rect.map.height; row += 1) {
+                    positions.add(rect.map.map[row * rect.map.width + col]);
+                }
+            }
+        }
+
+        return { rect, positions: Array.from(positions) };
+    } catch {
+        return null;
+    }
+};
+
+const setTableCellBackground = (editor: any, scope: TableCellBackgroundScope, value: string | null) => {
+    const color = normalizeTableCellBackground(value);
+    const nextValue = color || null;
+
+    if (scope === 'cell') {
+        return editor.chain().focus().setCellAttribute(TABLE_CELL_BACKGROUND_ATTRIBUTE, nextValue).run();
+    }
+
+    const target = getTableCellPositionsForScope(editor, scope);
+    if (!target || !target.positions.length) return false;
+
+    const { rect, positions } = target;
+    const tr = editor.state.tr;
+
+    positions.forEach((relativePos) => {
+        const cell = rect.table.nodeAt(relativePos);
+        if (!cell || !TABLE_CELL_NODE_TYPES.has(cell.type.name)) return;
+
+        tr.setNodeMarkup(
+            tr.mapping.map(rect.tableStart + relativePos),
+            undefined,
+            {
+                ...cell.attrs,
+                [TABLE_CELL_BACKGROUND_ATTRIBUTE]: nextValue,
+            },
+            cell.marks,
+        );
+    });
+
+    editor.view.dispatch(tr.scrollIntoView());
+    editor.view.focus();
+    return true;
 };
 
 const getBlockElementScore = (element: HTMLElement) => {
@@ -1576,8 +1709,8 @@ export const SmartDocumentEditor = ({
                 resizable: true,
             }),
             TableRow,
-            TableHeader,
-            TableCell,
+            TableHeaderWithBackground,
+            TableCellWithBackground,
         ],
         content: getInitialContent(contentJson, content),
         editorProps: {
@@ -1978,6 +2111,14 @@ export const SmartDocumentEditor = ({
         setColumnResizeHandles([]);
     }, [blockMenuOpen, dragBlock]);
 
+    const handleEditorCanvasClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        if (!editor) return;
+        const target = event.target instanceof HTMLElement ? event.target : null;
+        if (target?.closest('.ProseMirror')) return;
+
+        editor.chain().focus().run();
+    }, [editor]);
+
     const applyColumnWidths = useCallback((leftColumnId: string, rightColumnId: string, leftWidth: number, rightWidth: number, addToHistory = false) => {
         if (!editor) return;
 
@@ -2235,7 +2376,7 @@ export const SmartDocumentEditor = ({
                 />
                 <div
                     className="flex-1 bg-white cursor-text p-8 sm:p-12 max-w-5xl mx-auto w-full"
-                    onClick={() => editor.chain().focus().run()}
+                    onClick={handleEditorCanvasClick}
                     onMouseMove={handleEditorMouseMove}
                     onMouseLeave={handleEditorMouseLeave}
                 >
@@ -2791,6 +2932,7 @@ const EditorToolbar = ({ editor, onAddImage, showTOC, onToggleTOC }: { editor: a
                 icon={<TableIcon className="w-4 h-4"/>}
                 label="拆分"
             />
+            <TableCellBackgroundMenu editor={editor} />
             <ToolbarBtn
                 onClick={() => editor.chain().focus().deleteTable().run()}
                 disabled={!editor.can().deleteTable()}
@@ -2816,6 +2958,110 @@ const EditorToolbar = ({ editor, onAddImage, showTOC, onToggleTOC }: { editor: a
                 icon={<ImageIcon className="w-4 h-4"/>} 
                 label="图片"
             />
+        </div>
+    );
+};
+
+const TABLE_BACKGROUND_SCOPE_OPTIONS: Array<{ value: TableCellBackgroundScope; label: string }> = [
+    { value: 'cell', label: '单元格' },
+    { value: 'row', label: '整行' },
+    { value: 'column', label: '整列' },
+];
+
+const TableCellBackgroundMenu = ({ editor }: { editor: any }) => {
+    const [open, setOpen] = useState(false);
+    const [scope, setScope] = useState<TableCellBackgroundScope>('cell');
+    const canUse = canUpdateTableCellBackground(editor);
+    const activeColor = getCurrentTableCellBackground(editor);
+
+    useEffect(() => {
+        if (!canUse) setOpen(false);
+    }, [canUse]);
+
+    const applyColor = (value: string | null) => {
+        if (!canUse) return;
+        if (setTableCellBackground(editor, scope, value)) setOpen(false);
+    };
+
+    return (
+        <div className="relative flex-shrink-0">
+            <button
+                type="button"
+                title="表格背景色"
+                disabled={!canUse}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => setOpen((current) => !current)}
+                className={`p-1.5 rounded flex items-center gap-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    open ? 'bg-gray-200 text-black' : 'text-gray-600 hover:bg-gray-200'
+                }`}
+            >
+                <Palette className="w-4 h-4" />
+                <span
+                    className="h-3 w-3 rounded-sm border border-gray-300"
+                    style={{
+                        background: activeColor || 'linear-gradient(135deg, #ffffff 0 45%, #ef4444 46% 54%, #ffffff 55% 100%)',
+                    }}
+                />
+            </button>
+
+            {open && (
+                <div
+                    className="absolute left-0 top-9 z-50 w-64 rounded-lg border border-gray-200 bg-white p-2 shadow-xl"
+                    onMouseDown={(event) => event.preventDefault()}
+                >
+                    <div className="mb-2 grid grid-cols-3 rounded-md bg-gray-100 p-0.5">
+                        {TABLE_BACKGROUND_SCOPE_OPTIONS.map((option) => (
+                            <button
+                                key={option.value}
+                                type="button"
+                                onClick={() => setScope(option.value)}
+                                className={`h-7 rounded text-xs font-medium transition-colors ${
+                                    scope === option.value
+                                        ? 'bg-white text-gray-900 shadow-sm'
+                                        : 'text-gray-500 hover:text-gray-800'
+                                }`}
+                            >
+                                {option.label}
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-1.5">
+                        {TABLE_CELL_BACKGROUND_COLORS.map((color) => {
+                            const isActive = normalizeTableCellBackground(color.value) === activeColor;
+                            return (
+                                <button
+                                    key={color.label}
+                                    type="button"
+                                    title={color.label}
+                                    onClick={() => applyColor(color.value)}
+                                    className={`flex h-8 items-center justify-center rounded border transition-colors ${
+                                        isActive ? 'border-gray-900 bg-gray-50' : 'border-gray-200 hover:border-gray-400'
+                                    }`}
+                                >
+                                    <span
+                                        className="h-4 w-4 rounded-sm border border-gray-300"
+                                        style={{
+                                            background: color.value
+                                                ? color.swatch
+                                                : 'linear-gradient(135deg, #ffffff 0 45%, #ef4444 46% 54%, #ffffff 55% 100%)',
+                                        }}
+                                    />
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    <button
+                        type="button"
+                        onClick={() => applyColor(null)}
+                        className="mt-2 flex h-8 w-full items-center justify-center gap-1.5 rounded-md text-xs font-medium text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                    >
+                        <X className="h-3.5 w-3.5" />
+                        清除颜色
+                    </button>
+                </div>
+            )}
         </div>
     );
 };
