@@ -7,7 +7,8 @@ import { useState, useEffect, forwardRef, useImperativeHandle } from 'react';
 import { 
   Heading1, Heading2, Heading3, List, ListOrdered, CheckSquare, 
   Quote, Minus, Code, Layout, Image as ImageIcon,
-  Type, Network
+  Type, Network, ChevronRight, AlertTriangle, Bookmark, Globe,
+  Paperclip, Video, Music, FileText
 } from 'lucide-react';
 import { MindMapComponent } from './MindMapExtension';
 
@@ -307,6 +308,231 @@ export const MindMap = Node.create({
   },
 });
 
+// --- Smart Document Blocks ---
+
+export const ToggleBlock = Node.create({
+  name: 'toggleBlock',
+  group: 'block',
+  content: 'block+',
+  defining: true,
+
+  addAttributes() {
+    return {
+      title: {
+        default: 'Toggle',
+        parseHTML: element => element.getAttribute('data-title') || 'Toggle',
+        renderHTML: attributes => ({ 'data-title': attributes.title || 'Toggle' }),
+      },
+      open: {
+        default: true,
+        parseHTML: element => element.hasAttribute('open'),
+        renderHTML: attributes => attributes.open ? { open: 'open' } : {},
+      },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'details[data-type="toggle"]' }]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    const title = HTMLAttributes['data-title'] || 'Toggle';
+    return [
+      'details',
+      mergeAttributes(HTMLAttributes, { 'data-type': 'toggle', class: 'smart-doc-toggle my-3 rounded-md border border-gray-200 bg-white' }),
+      ['summary', { class: 'smart-doc-toggle-summary cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-800' }, title],
+      ['div', { class: 'smart-doc-toggle-content px-4 pb-3 pt-1' }, 0],
+    ]
+  },
+});
+
+export const CalloutBlock = Node.create({
+  name: 'calloutBlock',
+  group: 'block',
+  content: 'block+',
+  defining: true,
+
+  addAttributes() {
+    return {
+      icon: {
+        default: '!',
+        parseHTML: element => element.getAttribute('data-icon') || '!',
+        renderHTML: attributes => ({ 'data-icon': attributes.icon || '!' }),
+      },
+      tone: {
+        default: 'gray',
+        parseHTML: element => element.getAttribute('data-tone') || 'gray',
+        renderHTML: attributes => ({ 'data-tone': attributes.tone || 'gray' }),
+      },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-type="callout"]' }]
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    const icon = HTMLAttributes['data-icon'] || '!';
+    return [
+      'div',
+      mergeAttributes(HTMLAttributes, { 'data-type': 'callout', class: 'smart-doc-callout my-3 flex gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-gray-800' }),
+      ['div', { class: 'smart-doc-callout-icon mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-white text-xs font-bold text-amber-700' }, icon],
+      ['div', { class: 'smart-doc-callout-content min-w-0 flex-1' }, 0],
+    ]
+  },
+});
+
+export const BookmarkBlock = Node.create({
+  name: 'bookmarkBlock',
+  group: 'block',
+  atom: true,
+
+  addAttributes() {
+    return {
+      url: {
+        default: '',
+        parseHTML: element => element.getAttribute('href') || element.getAttribute('data-url') || '',
+        renderHTML: attributes => ({ href: attributes.url || '#', 'data-url': attributes.url || '' }),
+      },
+      title: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-title') || element.textContent?.trim() || '',
+        renderHTML: attributes => ({ 'data-title': attributes.title || '' }),
+      },
+      description: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-description') || '',
+        renderHTML: attributes => ({ 'data-description': attributes.description || undefined }),
+      },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'a[data-type="bookmark"]' }]
+  },
+
+  renderHTML({ node, HTMLAttributes }) {
+    const url = node.attrs.url || '#';
+    const title = node.attrs.title || url || 'Bookmark';
+    const description = node.attrs.description || url;
+    return [
+      'a',
+      mergeAttributes(HTMLAttributes, {
+        'data-type': 'bookmark',
+        href: url,
+        target: '_blank',
+        rel: 'noopener noreferrer',
+        class: 'smart-doc-bookmark my-3 block rounded-md border border-gray-200 bg-white p-3 text-gray-800 no-underline hover:bg-gray-50',
+      }),
+      ['span', { class: 'block text-sm font-semibold text-gray-900' }, title],
+      ['span', { class: 'mt-1 block truncate text-xs text-gray-500' }, description],
+    ]
+  },
+});
+
+export const EmbedBlock = Node.create({
+  name: 'embedBlock',
+  group: 'block',
+  atom: true,
+
+  addAttributes() {
+    return {
+      url: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-url') || '',
+        renderHTML: attributes => ({ 'data-url': attributes.url || '' }),
+      },
+      title: {
+        default: 'Embed',
+        parseHTML: element => element.getAttribute('data-title') || 'Embed',
+        renderHTML: attributes => ({ 'data-title': attributes.title || 'Embed' }),
+      },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-type="embed"]' }]
+  },
+
+  renderHTML({ node, HTMLAttributes }) {
+    const url = node.attrs.url || '';
+    const title = node.attrs.title || 'Embed';
+    return [
+      'div',
+      mergeAttributes(HTMLAttributes, { 'data-type': 'embed', class: 'smart-doc-embed my-3 overflow-hidden rounded-md border border-gray-200 bg-white' }),
+      ['div', { class: 'border-b border-gray-100 px-3 py-2 text-xs font-semibold text-gray-500' }, title],
+      ['iframe', { src: url, class: 'h-72 w-full bg-gray-50', loading: 'lazy', referrerpolicy: 'no-referrer-when-downgrade', allowfullscreen: 'true' }],
+    ]
+  },
+});
+
+export const MediaBlock = Node.create({
+  name: 'mediaBlock',
+  group: 'block',
+  atom: true,
+
+  addAttributes() {
+    return {
+      url: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-url') || element.getAttribute('href') || '',
+        renderHTML: attributes => ({ 'data-url': attributes.url || '' }),
+      },
+      name: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-name') || element.textContent?.trim() || '',
+        renderHTML: attributes => ({ 'data-name': attributes.name || '' }),
+      },
+      mime: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-mime') || '',
+        renderHTML: attributes => ({ 'data-mime': attributes.mime || '' }),
+      },
+      size: {
+        default: 0,
+        parseHTML: element => Number(element.getAttribute('data-size') || 0),
+        renderHTML: attributes => ({ 'data-size': attributes.size || 0 }),
+      },
+      kind: {
+        default: 'file',
+        parseHTML: element => element.getAttribute('data-kind') || 'file',
+        renderHTML: attributes => ({ 'data-kind': attributes.kind || 'file' }),
+      },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-type="media"]' }]
+  },
+
+  renderHTML({ node, HTMLAttributes }) {
+    const { url, name, mime, kind } = node.attrs;
+    const label = name || url || 'Attachment';
+    const mediaClass = 'smart-doc-media my-3 overflow-hidden rounded-md border border-gray-200 bg-white';
+
+    if (kind === 'video') {
+      return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'media', class: mediaClass }), ['video', { src: url, controls: 'true', class: 'block max-h-[520px] w-full bg-black' }], ['div', { class: 'px-3 py-2 text-xs text-gray-500' }, label]];
+    }
+
+    if (kind === 'audio') {
+      return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'media', class: `${mediaClass} p-3` }), ['div', { class: 'mb-2 text-sm font-medium text-gray-800' }, label], ['audio', { src: url, controls: 'true', class: 'w-full' }]];
+    }
+
+    if (kind === 'pdf') {
+      return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'media', class: mediaClass }), ['div', { class: 'border-b border-gray-100 px-3 py-2 text-sm font-medium text-gray-800' }, label], ['iframe', { src: url, class: 'h-96 w-full bg-gray-50' }]];
+    }
+
+    return [
+      'div',
+      mergeAttributes(HTMLAttributes, { 'data-type': 'media', class: `${mediaClass} p-3` }),
+      ['a', { href: url, target: '_blank', rel: 'noopener noreferrer', class: 'flex items-center justify-between gap-3 text-sm text-gray-800 no-underline' },
+        ['span', { class: 'min-w-0 truncate font-medium' }, label],
+        ['span', { class: 'flex-shrink-0 text-xs text-gray-400' }, mime || 'file'],
+      ],
+    ]
+  },
+});
+
 
 // --- Slash Command Extension ---
 
@@ -396,6 +622,49 @@ export const SlashCommand = Extension.create({
     ];
   },
 });
+
+const getMediaKind = (file: File) => {
+  const mime = file.type || '';
+  const name = file.name || '';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime === 'application/pdf' || /\.pdf$/i.test(name)) return 'pdf';
+  return 'file';
+};
+
+const insertUploadedMedia = ({ editor, range, accept, forcedKind }: any) => {
+  editor.chain().focus().deleteRange(range).run();
+  const uploadFile = editor.storage?.smartDocument?.uploadFile || editor.storage?.smartDocument?.uploadImage;
+  if (typeof uploadFile !== 'function') return;
+
+  const input = document.createElement('input');
+  input.type = 'file';
+  if (accept) input.accept = accept;
+  input.onchange = async () => {
+    if (!input.files?.length) return;
+    const file = input.files[0];
+    const url = await uploadFile(file);
+    if (!url) return;
+
+    editor.chain().focus().insertContent({
+      type: 'mediaBlock',
+      attrs: {
+        url,
+        name: file.name,
+        mime: file.type || '',
+        size: file.size,
+        kind: forcedKind || getMediaKind(file),
+      },
+    }).run();
+  };
+  input.click();
+};
+
+const promptForUrl = (label: string) => {
+  const url = window.prompt(label);
+  if (!url) return '';
+  return url.trim();
+};
 
 export const getSuggestionItems = ({ query }: { query: string }) => {
   return [
@@ -530,6 +799,81 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
                 }
             }).run();
         },
+    },
+    {
+      title: 'Toggle',
+      shortcut: '/toggle',
+      icon: <ChevronRight className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        const title = window.prompt('Toggle title', 'Toggle') || 'Toggle';
+        editor.chain().focus().deleteRange(range).insertContent({
+          type: 'toggleBlock',
+          attrs: { title, open: true },
+          content: [{ type: 'paragraph' }],
+        }).run();
+      },
+    },
+    {
+      title: 'Callout',
+      shortcut: '/callout',
+      icon: <AlertTriangle className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        editor.chain().focus().deleteRange(range).insertContent({
+          type: 'calloutBlock',
+          attrs: { icon: '!', tone: 'yellow' },
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Callout' }] }],
+        }).run();
+      },
+    },
+    {
+      title: 'Bookmark',
+      shortcut: '/bookmark',
+      icon: <Bookmark className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        const url = promptForUrl('Bookmark URL');
+        if (!url) return;
+        editor.chain().focus().deleteRange(range).insertContent({
+          type: 'bookmarkBlock',
+          attrs: { url, title: url, description: url },
+        }).run();
+      },
+    },
+    {
+      title: 'Embed',
+      shortcut: '/embed',
+      icon: <Globe className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        const url = promptForUrl('Embed URL');
+        if (!url) return;
+        editor.chain().focus().deleteRange(range).insertContent({
+          type: 'embedBlock',
+          attrs: { url, title: 'Embed' },
+        }).run();
+      },
+    },
+    {
+      title: 'File',
+      shortcut: '/file',
+      icon: <Paperclip className="w-3 h-3" />,
+      command: ({ editor, range }: any) => insertUploadedMedia({ editor, range }),
+    },
+    {
+      title: 'Video',
+      shortcut: '/video',
+      icon: <Video className="w-3 h-3" />,
+      command: ({ editor, range }: any) => insertUploadedMedia({ editor, range, accept: 'video/*', forcedKind: 'video' }),
+    },
+    {
+      title: 'Audio',
+      shortcut: '/audio',
+      icon: <Music className="w-3 h-3" />,
+      command: ({ editor, range }: any) => insertUploadedMedia({ editor, range, accept: 'audio/*', forcedKind: 'audio' }),
+    },
+    {
+      title: 'PDF',
+      shortcut: '/pdf',
+      icon: <FileText className="w-3 h-3" />,
+      command: ({ editor, range }: any) => insertUploadedMedia({ editor, range, accept: 'application/pdf', forcedKind: 'pdf' }),
     },
   ].filter(item => item.title.toLowerCase().includes(query.toLowerCase()) || item.shortcut.includes(query.toLowerCase()));
 };

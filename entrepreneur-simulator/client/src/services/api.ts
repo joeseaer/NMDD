@@ -3,6 +3,30 @@ import { CURRENT_USER_ID } from '../config/currentUser';
 const API_BASE_URL = '/api';
 export { CURRENT_USER_ID };
 
+const uploadFileRequest = async (file: File, label: string = 'file') => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await fetch(`${API_BASE_URL}/upload`, {
+        method: 'POST',
+        body: formData,
+    });
+
+    if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        const statusHint = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
+        if (!text) throw new Error(`Failed to upload ${label} (${statusHint})`);
+        try {
+            const errorData = JSON.parse(text);
+            throw new Error(errorData.error || errorData.detail || `Failed to upload ${label} (${statusHint})`);
+        } catch {
+            throw new Error(`Failed to upload ${label} (${statusHint}): ${text.substring(0, 160)}`);
+        }
+    }
+
+    return response.json();
+};
+
 export const api = {
     // SOPs
     getSOPs: async (userId: string = CURRENT_USER_ID) => {
@@ -11,28 +35,9 @@ export const api = {
         return response.json();
     },
 
-    uploadImage: async (file: File) => {
-        const formData = new FormData();
-        formData.append('file', file);
-        
-        const response = await fetch(`${API_BASE_URL}/upload`, {
-            method: 'POST',
-            body: formData,
-        });
-        
-        if (!response.ok) {
-            const text = await response.text().catch(() => '');
-            const statusHint = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
-            if (!text) throw new Error(`Failed to upload image (${statusHint})`);
-            try {
-                const errorData = JSON.parse(text);
-                throw new Error(errorData.error || errorData.detail || `Failed to upload image (${statusHint})`);
-            } catch {
-                throw new Error(`Failed to upload image (${statusHint}): ${text.substring(0, 160)}`);
-            }
-        }
-        return response.json();
-    },
+    uploadFile: async (file: File) => uploadFileRequest(file, 'file'),
+
+    uploadImage: async (file: File) => uploadFileRequest(file, 'image'),
 
     createSOP: async (sopData: any) => {
         // Ensure user_id is present

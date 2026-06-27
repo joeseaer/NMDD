@@ -27,7 +27,20 @@ import MarkdownIt from 'markdown-it';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import { api } from '../services/api';
-import { ColumnList, Column, SlashCommand, getSuggestionItems, renderItems, Indent, MindMap } from './TiptapExtensions';
+import {
+    ColumnList,
+    Column,
+    SlashCommand,
+    getSuggestionItems,
+    renderItems,
+    Indent,
+    MindMap,
+    ToggleBlock,
+    CalloutBlock,
+    BookmarkBlock,
+    EmbedBlock,
+    MediaBlock,
+} from './TiptapExtensions';
 
 // --- Parsers ---
 
@@ -49,6 +62,11 @@ const BLOCK_ID_TYPES = [
     'columnList',
     'column',
     'mindMap',
+    'toggleBlock',
+    'calloutBlock',
+    'bookmarkBlock',
+    'embedBlock',
+    'mediaBlock',
 ];
 
 const LIST_CONTAINER_TYPES = new Set(['bulletList', 'orderedList', 'taskList']);
@@ -208,6 +226,8 @@ const getBlockElementScore = (element: HTMLElement) => {
 
     if (element.classList.contains('notion-image-block')) return 110;
     if (dataType === 'mind-map') return 105;
+    if (dataType === 'media' || dataType === 'embed' || dataType === 'bookmark') return 104;
+    if (dataType === 'toggle' || dataType === 'callout') return 98;
     if (tagName === 'table') return 100;
     if (tagName === 'blockquote' || tagName === 'pre') return 95;
     if (tagName === 'li') return 90;
@@ -565,6 +585,24 @@ turndownService.addRule('keepColumns', {
   }
 });
 
+turndownService.addRule('keepSmartDocumentBlocks', {
+  filter: (node) => {
+    const el: any = node as any;
+    const nodeName = String(el.nodeName || el.tagName || '').toLowerCase();
+    const getAttr = (name: string) => (typeof el.getAttribute === 'function' ? el.getAttribute(name) : null);
+    const dataType = getAttr('data-type');
+
+    return (
+      (nodeName === 'details' && dataType === 'toggle') ||
+      (nodeName === 'div' && ['callout', 'embed', 'media'].includes(dataType || '')) ||
+      (nodeName === 'a' && dataType === 'bookmark')
+    );
+  },
+  replacement: (_content, node) => {
+    return `\n\n${(node as HTMLElement).outerHTML}\n\n`;
+  }
+});
+
 const escapeHtmlAttribute = (value: string) => value
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
@@ -665,6 +703,15 @@ const getImageShapeClass = (shape: string) => {
     if (shape === 'circle') return 'rounded-full';
     if (shape === 'square') return 'rounded-none';
     return 'rounded-lg';
+};
+
+const getMediaKindFromFile = (file: File) => {
+    const mime = file.type || '';
+    const name = file.name || '';
+    if (mime.startsWith('video/')) return 'video';
+    if (mime.startsWith('audio/')) return 'audio';
+    if (mime === 'application/pdf' || /\.pdf$/i.test(name)) return 'pdf';
+    return 'file';
 };
 
 const ImageActionButton = ({
@@ -1065,6 +1112,17 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
         }
     }, []);
 
+    const uploadFile = useCallback(async (file: File) => {
+        try {
+            const { url } = await api.uploadFile(file);
+            return url;
+        } catch (error) {
+            console.error('Failed to upload file', error);
+            alert('文件上传失败，请重试');
+            return null;
+        }
+    }, []);
+
     const editor = useEditor({
         extensions: [
             BlockIdentity,
@@ -1171,6 +1229,11 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
             }),
             Indent,
             MindMap,
+            ToggleBlock,
+            CalloutBlock,
+            BookmarkBlock,
+            EmbedBlock,
+            MediaBlock,
             Table.configure({
                 resizable: true,
             }),
@@ -1200,16 +1263,25 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
                 }
 
                 const items = Array.from(event.clipboardData?.items || []);
-                const item = items.find(item => item.type.indexOf('image') === 0);
+                const item = items.find(item => item.kind === 'file');
 
                 if (item) {
                     event.preventDefault();
                     const file = item.getAsFile();
                     if (file) {
-                        uploadImage(file).then(url => {
+                        const upload = file.type.indexOf('image') === 0 ? uploadImage : uploadFile;
+                        upload(file).then(url => {
                             if (url) {
                                 const { schema } = view.state;
-                                const node = schema.nodes.image.create({ src: url, width: '100%', align: 'center' });
+                                const node = file.type.indexOf('image') === 0
+                                    ? schema.nodes.image.create({ src: url, width: '100%', align: 'center' })
+                                    : schema.nodes.mediaBlock.create({
+                                        url,
+                                        name: file.name,
+                                        mime: file.type || '',
+                                        size: file.size,
+                                        kind: getMediaKindFromFile(file),
+                                    });
                                 const transaction = view.state.tr.replaceSelectionWith(node);
                                 view.dispatch(transaction);
                             }
@@ -1222,21 +1294,28 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
             handleDrop: (view, event, _slice, moved) => {
                 if (!moved && event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]) {
                     const file = event.dataTransfer.files[0];
-                    if (file.type.indexOf('image') === 0) {
-                        event.preventDefault();
-                        uploadImage(file).then(url => {
-                            if (url) {
-                                const { schema } = view.state;
-                                const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY });
-                                if (coordinates) {
-                                    const node = schema.nodes.image.create({ src: url, width: '100%', align: 'center' });
-                                    const transaction = view.state.tr.insert(coordinates.pos, node);
-                                    view.dispatch(transaction);
-                                }
+                    event.preventDefault();
+                    const upload = file.type.indexOf('image') === 0 ? uploadImage : uploadFile;
+                    upload(file).then(url => {
+                        if (url) {
+                            const { schema } = view.state;
+                            const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY });
+                            if (coordinates) {
+                                const node = file.type.indexOf('image') === 0
+                                    ? schema.nodes.image.create({ src: url, width: '100%', align: 'center' })
+                                    : schema.nodes.mediaBlock.create({
+                                        url,
+                                        name: file.name,
+                                        mime: file.type || '',
+                                        size: file.size,
+                                        kind: getMediaKindFromFile(file),
+                                    });
+                                const transaction = view.state.tr.insert(coordinates.pos, node);
+                                view.dispatch(transaction);
                             }
-                        });
-                        return true;
-                    }
+                        }
+                    });
+                    return true;
                 }
                 return false;
             }
@@ -1267,13 +1346,17 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
     useEffect(() => {
         if (!editor) return;
         const storage = editor.storage as typeof editor.storage & {
-            smartDocument?: { uploadImage?: (file: File) => Promise<string | null> };
+            smartDocument?: {
+                uploadImage?: (file: File) => Promise<string | null>;
+                uploadFile?: (file: File) => Promise<string | null>;
+            };
         };
         storage.smartDocument = {
             ...(storage.smartDocument || {}),
             uploadImage,
+            uploadFile,
         };
-    }, [editor, uploadImage]);
+    }, [editor, uploadImage, uploadFile]);
 
     useEffect(() => {
         if (!editor) return;
