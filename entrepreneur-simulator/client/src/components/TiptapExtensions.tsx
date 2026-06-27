@@ -875,7 +875,7 @@ export const SyncedBlock = Node.create({
   },
 });
 
-type DatabasePropertyType = 'title' | 'text' | 'number' | 'status' | 'date' | 'checkbox' | 'url' | 'formula' | 'relation' | 'rollup' | 'files';
+type DatabasePropertyType = 'title' | 'text' | 'number' | 'status' | 'select' | 'multi_select' | 'person' | 'date' | 'checkbox' | 'url' | 'formula' | 'relation' | 'rollup' | 'files';
 type DatabaseViewMode = 'table' | 'list' | 'board' | 'calendar' | 'timeline' | 'gallery';
 type DatabaseFilterOperator = 'contains' | 'equals' | 'not_empty' | 'empty';
 type DatabaseRollupFunction = 'count' | 'show' | 'sum' | 'avg' | 'min' | 'max';
@@ -952,6 +952,9 @@ const DATABASE_PROPERTY_TYPES: Array<{ value: DatabasePropertyType; label: strin
   { value: 'text', label: '文本' },
   { value: 'number', label: '数字' },
   { value: 'status', label: '状态' },
+  { value: 'select', label: '单选' },
+  { value: 'multi_select', label: '多选' },
+  { value: 'person', label: '人员' },
   { value: 'date', label: '日期' },
   { value: 'checkbox', label: '勾选' },
   { value: 'url', label: '链接' },
@@ -971,6 +974,8 @@ const DATABASE_VIEW_OPTIONS: Array<{ value: DatabaseViewMode; label: string }> =
 ];
 
 const DEFAULT_STATUS_OPTIONS = ['未开始', '进行中', '完成'];
+const DEFAULT_SELECT_OPTIONS = ['选项 1', '选项 2'];
+const DEFAULT_PERSON_OPTIONS = ['我'];
 const EMPTY_DATABASE_GROUP = '未填写';
 
 const DATABASE_FILTER_OPERATORS: Array<{ value: DatabaseFilterOperator; label: string; needsValue: boolean }> = [
@@ -1057,23 +1062,57 @@ const normalizeFilterOperator = (value: unknown): DatabaseFilterOperator => {
   return DATABASE_FILTER_OPERATORS.some((item) => item.value === value) ? value as DatabaseFilterOperator : 'contains';
 };
 
-const normalizeStatusOptions = (value: unknown) => {
+const isChoiceDatabasePropertyType = (type: DatabasePropertyType) => (
+  type === 'status' || type === 'select' || type === 'multi_select' || type === 'person'
+);
+
+const getDefaultDatabaseOptions = (type: DatabasePropertyType) => {
+  if (type === 'status') return DEFAULT_STATUS_OPTIONS;
+  if (type === 'person') return DEFAULT_PERSON_OPTIONS;
+  if (type === 'select' || type === 'multi_select') return DEFAULT_SELECT_OPTIONS;
+  return [];
+};
+
+const normalizeDatabaseOptions = (value: unknown, type: DatabasePropertyType) => {
+  const fallback = getDefaultDatabaseOptions(type);
   const source = Array.isArray(value)
     ? value
     : typeof value === 'string'
       ? value.split(/[,，\n]/)
       : [];
-
   const seen = new Set<string>();
   const options = source
-    .map((option) => String(option).trim())
+    .map((option) => String(option || '').trim())
     .filter((option) => {
       if (!option || seen.has(option)) return false;
       seen.add(option);
       return true;
     });
 
-  return options.length ? options : DEFAULT_STATUS_OPTIONS;
+  return options.length ? options : fallback;
+};
+
+const normalizeChoiceCellValue = (value: unknown, options: string[], fallback = '') => {
+  const nextValue = String(value || '').trim();
+  if (!nextValue) return fallback;
+  return options.includes(nextValue) ? nextValue : fallback;
+};
+
+const normalizeMultiChoiceCellValue = (value: unknown, options: string[]) => {
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === 'string' && value.trim()
+      ? value.split(/[,，\n]/)
+      : [];
+  const seen = new Set<string>();
+
+  return source
+    .map((item) => String(item || '').trim())
+    .filter((item) => {
+      if (!item || seen.has(item) || !options.includes(item)) return false;
+      seen.add(item);
+      return true;
+    });
 };
 
 const normalizeRelationCellValue = (value: unknown) => {
@@ -1162,9 +1201,15 @@ const normalizeDatabaseCellValue = (property: DatabaseProperty, value: any) => {
   if (property.type === 'files') return normalizeDatabaseFileValue(value);
   if (property.type === 'checkbox') return Boolean(value);
   if (property.type === 'status') {
-    const options = property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS;
-    const nextValue = String(value || '').trim();
-    return options.includes(nextValue) ? nextValue : options[0];
+    const options = normalizeDatabaseOptions(property.options, property.type);
+    return normalizeChoiceCellValue(value, options, options[0] || '');
+  }
+  if (property.type === 'select') {
+    const options = normalizeDatabaseOptions(property.options, property.type);
+    return normalizeChoiceCellValue(value, options);
+  }
+  if (property.type === 'multi_select' || property.type === 'person') {
+    return normalizeMultiChoiceCellValue(value, normalizeDatabaseOptions(property.options, property.type));
   }
   if (value === null || value === undefined) return '';
   return String(value);
@@ -1172,7 +1217,8 @@ const normalizeDatabaseCellValue = (property: DatabaseProperty, value: any) => {
 
 const getDefaultDatabaseCellValue = (property: DatabaseProperty) => {
   if (property.type === 'checkbox') return false;
-  if (property.type === 'status') return property.options?.[0] || DEFAULT_STATUS_OPTIONS[0];
+  if (property.type === 'status') return normalizeDatabaseOptions(property.options, property.type)[0] || '';
+  if (property.type === 'multi_select' || property.type === 'person') return [];
   if (property.type === 'relation') return [];
   if (property.type === 'files') return [];
   return '';
@@ -1633,8 +1679,8 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
   const properties: DatabaseProperty[] = Array.isArray(raw.properties)
     ? raw.properties.map((property: any, index: number) => {
       const type = index === 0 ? 'title' : normalizePropertyType(property?.type);
-      const options = type === 'status'
-        ? normalizeStatusOptions(property?.options)
+      const options = isChoiceDatabasePropertyType(type)
+        ? normalizeDatabaseOptions(property?.options, type)
         : undefined;
       const formula = type === 'formula'
         ? String(property?.formula || '').trim()
@@ -1672,6 +1718,9 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
       return {
         ...property,
         type,
+        options: isChoiceDatabasePropertyType(type)
+          ? normalizeDatabaseOptions(property.options, type)
+          : undefined,
         relationPropertyId: undefined,
         rollupTargetPropertyId: undefined,
         rollupFunction: undefined,
@@ -1753,6 +1802,9 @@ const getCellDisplayValue = (
   }
   if (property.type === 'files') return getDatabaseFilesDisplayValue(row.cells[property.id]);
   if (property.type === 'checkbox') return row.cells[property.id] ? 'true' : '';
+  if (property.type === 'multi_select' || property.type === 'person') {
+    return normalizeMultiChoiceCellValue(row.cells[property.id], normalizeDatabaseOptions(property.options, property.type)).join(', ');
+  }
   return String(row.cells[property.id] || '').trim();
 };
 
@@ -1773,6 +1825,7 @@ const getCellSortValue = (database: SmartDocumentDatabase, row: DatabaseRow, pro
   }
   if (property.type === 'relation') return getRelationDisplayValue(database, row, property).toLowerCase();
   if (property.type === 'files') return getDatabaseFilesDisplayValue(row.cells[property.id]).toLowerCase();
+  if (property.type === 'multi_select' || property.type === 'person') return getCellDisplayValue(database, row, property).toLowerCase();
   const value = row.cells[property.id];
   if (property.type === 'checkbox') return value ? 1 : 0;
   if (property.type === 'number') return Number(value || 0);
@@ -1839,8 +1892,20 @@ const getDatabaseGroups = (database: SmartDocumentDatabase, rows: DatabaseRow[],
     return [{ label: '全部', rows }];
   }
 
-  const labels = property.type === 'status'
-    ? [...(property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS)]
+  if (property.type === 'multi_select' || property.type === 'person') {
+    const options = normalizeDatabaseOptions(property.options, property.type);
+    const emptyRows = rows.filter((row) => normalizeMultiChoiceCellValue(row.cells[property.id], options).length === 0);
+    return [
+      ...options.map((label) => ({
+        label,
+        rows: rows.filter((row) => normalizeMultiChoiceCellValue(row.cells[property.id], options).includes(label)),
+      })),
+      ...(emptyRows.length ? [{ label: EMPTY_DATABASE_GROUP, rows: emptyRows }] : []),
+    ];
+  }
+
+  const labels = isChoiceDatabasePropertyType(property.type)
+    ? [...normalizeDatabaseOptions(property.options, property.type)]
     : property.type === 'checkbox'
       ? ['未勾选', '已勾选']
       : [];
@@ -2187,7 +2252,9 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
     ? encodeJsonAttribute(node.attrs.blockComments)
     : undefined;
   const titleProperty = database.properties.find((property) => property.type === 'title') || database.properties[0];
-  const boardProperty = database.properties.find((property) => property.type === 'status') || database.properties.find((property) => property.type === 'text');
+  const boardProperty = database.properties.find((property) => property.type === 'status')
+    || database.properties.find((property) => property.type === 'select')
+    || database.properties.find((property) => property.type === 'text');
   const dateProperty = database.properties.find((property) => property.type === 'date') || null;
   const urlProperty = database.properties.find((property) => property.type === 'url') || null;
   const galleryMetaProperties = database.properties.filter((property) => property.id !== titleProperty.id && property.type !== 'url').slice(0, 3);
@@ -2201,7 +2268,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
     ? database.properties.find((property) => property.id === database.groupBy) || null
     : null;
   const boardGroupProperty = groupProperty || boardProperty || titleProperty || null;
-  const statusProperties = database.properties.filter((property) => property.type === 'status');
+  const choiceProperties = database.properties.filter((property) => isChoiceDatabasePropertyType(property.type));
   const relationProperties = database.properties.filter((property) => property.type === 'relation');
   const uploadDatabaseFile = editor?.storage?.smartDocument?.uploadFile || editor?.storage?.smartDocument?.uploadImage;
   const activeView = database.views.find((view) => view.id === database.activeViewId) || database.views[0];
@@ -2327,10 +2394,10 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
     updateActiveView({ filters: database.filters.filter((filter) => filter.id !== filterId) });
   };
 
-  const updateStatusOptions = (propertyId: string, value: string) => {
+  const updateChoiceOptions = (propertyId: string, value: string) => {
     const properties = database.properties.map((property) => (
-      property.id === propertyId && property.type === 'status'
-        ? { ...property, options: normalizeStatusOptions(value) }
+      property.id === propertyId && isChoiceDatabasePropertyType(property.type)
+        ? { ...property, options: normalizeDatabaseOptions(value, property.type) }
         : property
     ));
 
@@ -2383,7 +2450,9 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
         ...property,
         ...patch,
         type: nextType,
-        options: nextType === 'status' ? (property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS) : undefined,
+        options: isChoiceDatabasePropertyType(nextType)
+          ? normalizeDatabaseOptions(patch.options ?? property.options, nextType)
+          : undefined,
         formula: nextType === 'formula' ? String(patch.formula ?? property.formula ?? '') : undefined,
         relationPropertyId: nextType === 'rollup' ? (nextRelationPropertyId || relationFallback) : undefined,
         rollupTargetPropertyId: nextType === 'rollup' ? (nextTargetPropertyId || targetFallback) : undefined,
@@ -2507,12 +2576,71 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
       return <input type="checkbox" checked={Boolean(rawValue)} onChange={(event) => updateCell(row.id, property.id, event.target.checked)} className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-400" />;
     }
 
-    if (property.type === 'status') {
-      const options = property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS;
+    if (property.type === 'status' || property.type === 'select') {
+      const options = normalizeDatabaseOptions(property.options, property.type);
+      const isStatus = property.type === 'status';
       return (
-        <select value={String(rawValue || options[0] || '')} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass}>
+        <select value={String(rawValue || (isStatus ? options[0] : '') || '')} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass}>
+          {!isStatus && <option value="">未选择</option>}
           {options.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
+      );
+    }
+
+    if (property.type === 'multi_select' || property.type === 'person') {
+      const options = normalizeDatabaseOptions(property.options, property.type);
+      const values = normalizeMultiChoiceCellValue(rawValue, options);
+      const availableOptions = options.filter((option) => !values.includes(option));
+      const removeChoice = (choice: string) => {
+        updateCell(row.id, property.id, values.filter((item) => item !== choice));
+      };
+      const isPerson = property.type === 'person';
+
+      return (
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-h-7 flex-wrap items-center gap-1 rounded border border-transparent px-1 py-0.5 hover:border-gray-200">
+            {values.length === 0 && <span className="px-1 text-xs text-gray-400">{isPerson ? '选择人员' : '选择标签'}</span>}
+            {values.map((choice) => (
+              <button
+                key={choice}
+                type="button"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  removeChoice(choice);
+                }}
+                className={`flex max-w-40 items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+                  isPerson
+                    ? 'border-blue-100 bg-blue-50 text-blue-700 hover:border-red-200 hover:bg-red-50 hover:text-red-600'
+                    : 'border-gray-200 bg-gray-50 text-gray-600 hover:border-red-200 hover:bg-red-50 hover:text-red-600'
+                }`}
+                title={isPerson ? '点击移除人员' : '点击移除选项'}
+              >
+                {isPerson && (
+                  <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-[9px] font-semibold text-blue-700">
+                    {choice.slice(0, 1).toUpperCase()}
+                  </span>
+                )}
+                <span className="truncate">{choice}</span>
+                <X className="h-3 w-3 flex-shrink-0" />
+              </button>
+            ))}
+          </div>
+          {availableOptions.length > 0 && (
+            <select
+              value=""
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                if (!nextValue) return;
+                updateCell(row.id, property.id, [...values, nextValue]);
+              }}
+              className="h-7 w-full rounded border border-gray-200 bg-white px-2 text-xs text-gray-600 outline-none focus:border-gray-400"
+            >
+              <option value="">{isPerson ? '添加人员...' : '添加选项...'}</option>
+              {availableOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          )}
+        </div>
       );
     }
 
@@ -2718,7 +2846,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
         {filteredOutCount > 0 && <span className="text-[11px] text-gray-400">已隐藏 {filteredOutCount} 条</span>}
       </div>
 
-      {(database.filters.length > 0 || statusProperties.length > 0) && (
+      {(database.filters.length > 0 || choiceProperties.length > 0) && (
         <div className="flex flex-wrap items-center gap-2">
           {database.filters.map((filter) => (
             <button
@@ -2731,12 +2859,12 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
               <Trash2 className="h-3 w-3" />
             </button>
           ))}
-          {statusProperties.map((property) => (
+          {choiceProperties.map((property) => (
             <label key={property.id} className="flex min-w-0 items-center gap-1 text-[11px] text-gray-500">
               <span className="max-w-20 truncate">{property.name}</span>
               <input
-                value={(property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS).join(', ')}
-                onChange={(event) => updateStatusOptions(property.id, event.target.value)}
+                value={normalizeDatabaseOptions(property.options, property.type).join(', ')}
+                onChange={(event) => updateChoiceOptions(property.id, event.target.value)}
                 className="h-7 w-44 rounded border border-gray-200 bg-white px-2 text-xs text-gray-700 outline-none focus:border-gray-400"
               />
             </label>
