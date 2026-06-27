@@ -53,6 +53,26 @@
   margin: 0;
 }
 
+.ProseMirror .smart-doc-column-list {
+  align-items: stretch;
+}
+
+.ProseMirror .smart-doc-column {
+  width: 100%;
+}
+
+@media (min-width: 768px) {
+  .ProseMirror .smart-doc-column {
+    flex: 0 0 var(--smart-column-width, 1fr);
+    max-width: var(--smart-column-width, none);
+  }
+
+  .ProseMirror .smart-doc-column:not([data-width]) {
+    flex: 1 1 0;
+    max-width: none;
+  }
+}
+
 .tableWrapper {
   overflow-x: auto;
 }

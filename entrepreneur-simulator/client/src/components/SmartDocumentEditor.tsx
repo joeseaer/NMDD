@@ -166,6 +166,10 @@ type BlockHandleInfo = {
     parentDepth: number;
     parentStart: number;
     parentType: string;
+    parentId: string | null;
+    grandParentStart: number | null;
+    grandParentType: string | null;
+    grandParentId: string | null;
     index: number;
     canMoveUp: boolean;
     canMoveDown: boolean;
@@ -188,6 +192,16 @@ type DragBlockState = {
     };
 };
 
+type ColumnResizeHandleInfo = {
+    id: string;
+    columnListId: string;
+    leftColumnId: string;
+    rightColumnId: string;
+    top: number;
+    left: number;
+    height: number;
+};
+
 const getBlockElementScore = (element: HTMLElement) => {
     const tagName = element.tagName.toLowerCase();
     const dataType = element.getAttribute('data-type') || '';
@@ -202,7 +216,7 @@ const getBlockElementScore = (element: HTMLElement) => {
     if (tagName === 'p') return 60;
     if (tagName === 'ul' || tagName === 'ol') return 50;
     if (dataType === 'column-list') return 30;
-    if (dataType === 'column') return 20;
+    if (dataType === 'column') return 55;
 
     return 10;
 };
@@ -218,7 +232,15 @@ const findBestBlockElement = (target: EventTarget | null, root: HTMLElement) => 
     }
 
     if (!candidates.length) return null;
-    return candidates.sort((a, b) => getBlockElementScore(b) - getBlockElementScore(a))[0];
+
+    const best = candidates.sort((a, b) => getBlockElementScore(b) - getBlockElementScore(a))[0];
+    if (best.getAttribute('data-type') === 'column') {
+        const childBlocks = Array.from(best.children)
+            .filter((child): child is HTMLElement => child instanceof HTMLElement && Boolean(child.getAttribute('data-block-id')));
+        return childBlocks[childBlocks.length - 1] || best;
+    }
+
+    return best;
 };
 
 const findBlockById = (editor: any, id: string): { node: ProseMirrorNode; pos: number } | null => {
@@ -240,12 +262,18 @@ const getBlockContext = (editor: any, pos: number) => {
     const parentDepth = $before.depth;
     const parent = $before.node(parentDepth);
     const index = $before.index(parentDepth);
+    const grandParentDepth = parentDepth > 0 ? parentDepth - 1 : null;
+    const grandParent = grandParentDepth !== null ? $before.node(grandParentDepth) : null;
 
     return {
         parent,
         parentDepth,
         parentStart: $before.start(parentDepth),
         parentPos: parentDepth > 0 ? $before.before(parentDepth) : 0,
+        grandParent,
+        grandParentDepth,
+        grandParentStart: grandParentDepth !== null ? $before.start(grandParentDepth) : null,
+        grandParentPos: grandParentDepth !== null && grandParentDepth > 0 ? $before.before(grandParentDepth) : 0,
         index,
     };
 };
@@ -282,6 +310,10 @@ const getBlockInfoById = (editor: any, id: string, shell: HTMLElement): BlockHan
         parentDepth: context.parentDepth,
         parentStart: context.parentStart,
         parentType: context.parent.type.name,
+        parentId: context.parent.attrs?.blockId || null,
+        grandParentStart: context.grandParentStart,
+        grandParentType: context.grandParent?.type.name || null,
+        grandParentId: context.grandParent?.attrs?.blockId || null,
         index: context.index,
         canMoveUp: context.index > 0,
         canMoveDown: context.index < context.parent.childCount - 1,
@@ -310,6 +342,78 @@ const getBlockInfoFromPoint = (editor: any, x: number, y: number, shell: HTMLEle
     const id = element?.getAttribute('data-block-id');
     if (!id) return null;
     return getBlockInfoById(editor, id, shell);
+};
+
+const COLUMN_MIN_WIDTH_PERCENT = 18;
+
+const clampColumnWidth = (value: number) => {
+    return Math.max(COLUMN_MIN_WIDTH_PERCENT, Math.min(100, Math.round(value * 100) / 100));
+};
+
+const formatColumnWidth = (value: number) => `${Math.round(value * 100) / 100}%`;
+
+const parseColumnWidthPercent = (value: unknown, fallback: number) => {
+    if (typeof value !== 'string') return fallback;
+    const parsed = parseFloat(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return clampColumnWidth(parsed);
+};
+
+const getColumnResizeHandles = (editor: any, shell: HTMLElement | null, pointerY?: number): ColumnResizeHandleInfo[] => {
+    if (!editor || !shell) return [];
+
+    const shellRect = shell.getBoundingClientRect();
+    const lists = Array.from((editor.view.dom as HTMLElement).querySelectorAll('[data-type="column-list"][data-block-id]')) as HTMLElement[];
+    const activeList = lists.find((list) => {
+        const rect = list.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        if (pointerY === undefined) return true;
+        return pointerY >= rect.top - 12 && pointerY <= rect.bottom + 12;
+    });
+
+    if (!activeList) return [];
+
+    const columnElements = Array.from(activeList.children)
+        .filter((child): child is HTMLElement => child instanceof HTMLElement && child.getAttribute('data-type') === 'column' && Boolean(child.getAttribute('data-block-id')));
+
+    if (columnElements.length < 2) return [];
+
+    const listId = activeList.getAttribute('data-block-id') || '';
+    const listRect = activeList.getBoundingClientRect();
+
+    return columnElements.slice(0, -1).map((column, index) => {
+        const leftRect = column.getBoundingClientRect();
+        const rightColumn = columnElements[index + 1];
+        const leftColumnId = column.getAttribute('data-block-id') || '';
+        const rightColumnId = rightColumn.getAttribute('data-block-id') || '';
+
+        return {
+            id: `${listId}-${leftColumnId}-${rightColumnId}`,
+            columnListId: listId,
+            leftColumnId,
+            rightColumnId,
+            top: listRect.top - shellRect.top,
+            left: leftRect.right - shellRect.left - 5,
+            height: listRect.height,
+        };
+    });
+};
+
+const getColumnWidthPercent = (node: ProseMirrorNode, element: HTMLElement | null, parentWidth: number, fallback: number) => {
+    const attrWidth = parseColumnWidthPercent(node.attrs?.width, Number.NaN);
+    if (Number.isFinite(attrWidth)) return attrWidth;
+
+    if (element && parentWidth > 0) {
+        const rectWidth = element.getBoundingClientRect().width;
+        if (rectWidth > 0) return clampColumnWidth((rectWidth / parentWidth) * 100);
+    }
+
+    return fallback;
+};
+
+const getColumnElementById = (editor: any, columnId: string) => {
+    const element = (editor.view.dom as HTMLElement).querySelector(`[data-type="column"][data-block-id="${columnId}"]`);
+    return element instanceof HTMLElement ? element : null;
 };
 
 const cloneBlockWithFreshIds = (editor: any, node: ProseMirrorNode) => {
@@ -368,8 +472,31 @@ const copyTextToClipboard = async (text: string) => {
     return copied;
 };
 
-const sameParent = (source: BlockHandleInfo, target: BlockHandleInfo) => {
-    return source.parentDepth === target.parentDepth && source.parentStart === target.parentStart;
+const canMoveBlockToTarget = (editor: any, sourceBlock: BlockHandleInfo, targetBlock: BlockHandleInfo, placement: 'before' | 'after') => {
+    if (!editor || sourceBlock.id === targetBlock.id) return false;
+
+    const source = findBlockById(editor, sourceBlock.id);
+    const target = findBlockById(editor, targetBlock.id);
+    if (!source || !target) return false;
+
+    const rawInsertPos = placement === 'before' ? target.pos : target.pos + target.node.nodeSize;
+    if (rawInsertPos > source.pos && rawInsertPos < source.pos + source.node.nodeSize) return false;
+
+    const targetContext = getBlockContext(editor, target.pos);
+    const insertIndex = placement === 'before' ? targetContext.index : targetContext.index + 1;
+    return targetContext.parent.canReplaceWith(insertIndex, insertIndex, source.node.type, source.node.marks);
+};
+
+const deleteSourceForMove = (editor: any, tr: any, source: { node: ProseMirrorNode; pos: number; context: ReturnType<typeof getBlockContext> }) => {
+    const { node, pos, context } = source;
+
+    if (context.parent.type.name !== 'doc' && context.parent.childCount <= 1) {
+        const emptyParagraph = editor.state.schema.nodes.paragraph.create({ blockId: createBlockId() });
+        tr.replaceWith(pos, pos + node.nodeSize, emptyParagraph);
+        return;
+    }
+
+    tr.delete(pos, pos + node.nodeSize);
 };
 
 const defaultFence = mdParser.renderer.rules.fence;
@@ -922,6 +1049,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
     const [hoveredBlock, setHoveredBlock] = useState<BlockHandleInfo | null>(null);
     const [blockMenuOpen, setBlockMenuOpen] = useState(false);
     const [dragBlock, setDragBlock] = useState<DragBlockState | null>(null);
+    const [columnResizeHandles, setColumnResizeHandles] = useState<ColumnResizeHandleInfo[]>([]);
     const shellRef = React.useRef<HTMLDivElement | null>(null);
     const mmSigRef = React.useRef<string>('');
     const externalSigRef = React.useRef<string>(getContentSignature(contentJson, content));
@@ -1220,7 +1348,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
 
         const sourceInfo = getBlockInfoById(editor, sourceBlock.id, shellRef.current as HTMLElement);
         const targetInfo = getBlockInfoById(editor, targetBlock.id, shellRef.current as HTMLElement);
-        if (!sourceInfo || !targetInfo || !sameParent(sourceInfo, targetInfo)) return;
+        if (!sourceInfo || !targetInfo || !canMoveBlockToTarget(editor, sourceInfo, targetInfo, placement)) return;
 
         const rawInsertPos = placement === 'before'
             ? target.pos
@@ -1229,7 +1357,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
         if (rawInsertPos >= source.pos && rawInsertPos <= source.pos + source.node.nodeSize) return;
 
         const tr = editor.state.tr;
-        tr.delete(source.pos, source.pos + source.node.nodeSize);
+        deleteSourceForMove(editor, tr, source);
         tr.insert(tr.mapping.map(rawInsertPos), source.node);
         editor.view.dispatch(tr.scrollIntoView());
         closeBlockMenu();
@@ -1334,6 +1462,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
 
     const handleEditorMouseMove = useCallback((event: React.MouseEvent) => {
         if (!editor) return;
+        setColumnResizeHandles(getColumnResizeHandles(editor, shellRef.current, event.clientY));
         const nextBlock = getBlockInfoFromEvent(editor, event, shellRef.current);
         if (!nextBlock) return;
 
@@ -1351,7 +1480,78 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
 
     const handleEditorMouseLeave = useCallback(() => {
         if (!blockMenuOpen && !dragBlock) setHoveredBlock(null);
+        setColumnResizeHandles([]);
     }, [blockMenuOpen, dragBlock]);
+
+    const applyColumnWidths = useCallback((leftColumnId: string, rightColumnId: string, leftWidth: number, rightWidth: number, addToHistory = false) => {
+        if (!editor) return;
+
+        const left = findBlockById(editor, leftColumnId);
+        const right = findBlockById(editor, rightColumnId);
+        if (!left || !right) return;
+
+        const tr = editor.state.tr;
+        tr.setNodeMarkup(left.pos, undefined, {
+            ...left.node.attrs,
+            width: formatColumnWidth(leftWidth),
+        }, left.node.marks);
+        tr.setNodeMarkup(right.pos, undefined, {
+            ...right.node.attrs,
+            width: formatColumnWidth(rightWidth),
+        }, right.node.marks);
+
+        if (!addToHistory) tr.setMeta('addToHistory', false);
+        editor.view.dispatch(tr);
+        window.requestAnimationFrame(() => {
+            setColumnResizeHandles(getColumnResizeHandles(editor, shellRef.current));
+        });
+    }, [editor]);
+
+    const handleColumnResizeStart = useCallback((event: React.MouseEvent, handle: ColumnResizeHandleInfo) => {
+        if (!editor || !shellRef.current) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const left = findBlockById(editor, handle.leftColumnId);
+        const right = findBlockById(editor, handle.rightColumnId);
+        const listElement = (editor.view.dom as HTMLElement).querySelector(`[data-type="column-list"][data-block-id="${handle.columnListId}"]`);
+        if (!left || !right || !(listElement instanceof HTMLElement)) return;
+
+        const leftElement = getColumnElementById(editor, handle.leftColumnId);
+        const rightElement = getColumnElementById(editor, handle.rightColumnId);
+        const listWidth = listElement.getBoundingClientRect().width || 1;
+        const leftStart = getColumnWidthPercent(left.node, leftElement, listWidth, 50);
+        const rightStart = getColumnWidthPercent(right.node, rightElement, listWidth, 50);
+        const widthTotal = Math.max(COLUMN_MIN_WIDTH_PERCENT * 2, leftStart + rightStart);
+        const startX = event.clientX;
+        const previousCursor = document.body.style.cursor;
+
+        document.body.style.cursor = 'col-resize';
+
+        const resizeTo = (clientX: number, addToHistory = false) => {
+            const deltaPercent = ((clientX - startX) / listWidth) * 100;
+            const nextLeft = Math.max(COLUMN_MIN_WIDTH_PERCENT, Math.min(widthTotal - COLUMN_MIN_WIDTH_PERCENT, leftStart + deltaPercent));
+            const nextRight = widthTotal - nextLeft;
+            applyColumnWidths(handle.leftColumnId, handle.rightColumnId, nextLeft, nextRight, addToHistory);
+        };
+
+        const handleMouseMove = (moveEvent: MouseEvent) => {
+            moveEvent.preventDefault();
+            resizeTo(moveEvent.clientX);
+        };
+
+        const handleMouseUp = (upEvent: MouseEvent) => {
+            upEvent.preventDefault();
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            document.body.style.cursor = previousCursor;
+            resizeTo(upEvent.clientX, true);
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    }, [applyColumnWidths, editor]);
 
     const handleBlockDragStart = useCallback((event: React.MouseEvent, block: BlockHandleInfo) => {
         if (!editor || !shellRef.current) return;
@@ -1377,7 +1577,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
 
             const shellTop = shellRef.current?.getBoundingClientRect().top || 0;
             const placement = clientY < target.top + shellTop + target.height / 2 ? 'before' : 'after';
-            const allowed = sameParent(source, target);
+            const allowed = canMoveBlockToTarget(editor, source, target, placement);
 
             currentDrag = {
                 source,
@@ -1424,7 +1624,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
         const placement = event.clientY < target.top + shellRef.current.getBoundingClientRect().top + target.height / 2
             ? 'before'
             : 'after';
-        const allowed = sameParent(dragBlock.source, target);
+        const allowed = canMoveBlockToTarget(editor, dragBlock.source, target, placement);
 
         event.preventDefault();
         event.dataTransfer.dropEffect = allowed ? 'move' : 'none';
@@ -1495,6 +1695,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
                 onDragStart={handleBlockDragStart}
             />
             <BlockDropIndicator dragBlock={dragBlock} />
+            <ColumnResizeLayer handles={columnResizeHandles} onResizeStart={handleColumnResizeStart} />
             {/* Outline / Table of Contents (Left Side) */}
             {showTOC && (
                 <div className="hidden xl:flex flex-col w-64 sticky top-0 h-full border-r border-gray-100 bg-gray-50/30 flex-shrink-0 transition-all duration-300">
@@ -1668,6 +1869,38 @@ const BlockDropIndicator = ({ dragBlock }: { dragBlock: DragBlockState | null })
                 width: drop.width,
             }}
         />
+    );
+};
+
+const ColumnResizeLayer = ({
+    handles,
+    onResizeStart,
+}: {
+    handles: ColumnResizeHandleInfo[];
+    onResizeStart: (event: React.MouseEvent, handle: ColumnResizeHandleInfo) => void;
+}) => {
+    if (!handles.length) return null;
+
+    return (
+        <>
+            {handles.map((handle) => (
+                <button
+                    key={handle.id}
+                    type="button"
+                    title="调整列宽"
+                    className="absolute z-40 w-2 rounded-full bg-transparent transition-colors hover:bg-gray-300/70"
+                    style={{
+                        top: handle.top,
+                        left: handle.left,
+                        height: handle.height,
+                        cursor: 'col-resize',
+                    }}
+                    onMouseDown={(event) => onResizeStart(event, handle)}
+                >
+                    <span className="mx-auto block h-full w-px bg-gray-300/70" />
+                </button>
+            ))}
+        </>
     );
 };
 

@@ -154,15 +154,17 @@ export const ColumnList = Node.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'column-list', class: 'flex gap-4 my-4' }), 0]
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'column-list', class: 'smart-doc-column-list flex flex-col md:flex-row gap-4 my-4' }), 0]
   },
 
   addCommands() {
     return {
       setColumns: (cols: number) => ({ commands }: any) => {
         // Create columns based on the number requested
+        const width = `${Math.round((100 / cols) * 100) / 100}%`;
         const columns = Array.from({ length: cols }).map(() => ({
           type: 'column',
+          attrs: { width },
           content: [{ type: 'paragraph' }]
         }));
 
@@ -186,7 +188,7 @@ export const ColumnList = Node.create({
           tr.delete(start, end); // Delete the "/2 " text
           
           // Insert 2 columns
-          const columns = Array.from({ length: 2 }).map(() => schema.nodes.column.create(null, [
+          const columns = Array.from({ length: 2 }).map(() => schema.nodes.column.create({ width: '50%' }, [
              schema.nodes.paragraph.create()
           ]));
           
@@ -204,7 +206,7 @@ export const ColumnList = Node.create({
           tr.delete(start, end); // Delete the "/3 " text
           
           // Insert 3 columns
-          const columns = Array.from({ length: 3 }).map(() => schema.nodes.column.create(null, [
+          const columns = Array.from({ length: 3 }).map(() => schema.nodes.column.create({ width: '33.33%' }, [
              schema.nodes.paragraph.create()
           ]));
           
@@ -221,6 +223,27 @@ export const Column = Node.create({
   content: 'block+', // Must contain blocks (paragraphs, etc.)
   isolating: true,
 
+  addAttributes() {
+    return {
+      width: {
+        default: null,
+        parseHTML: element => element.getAttribute('data-width') || null,
+        renderHTML: attributes => {
+          const width = typeof attributes.width === 'string' && attributes.width.trim()
+            ? attributes.width.trim()
+            : null;
+
+          if (!width) return {};
+
+          return {
+            'data-width': width,
+            style: `--smart-column-width: ${width};`,
+          };
+        },
+      },
+    }
+  },
+
   parseHTML() {
     return [
       {
@@ -230,7 +253,7 @@ export const Column = Node.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'column', class: 'flex-1 min-w-0 border border-dashed border-gray-200 p-2 rounded-lg' }), 0]
+    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'column', class: 'smart-doc-column min-w-0 border border-dashed border-gray-200 p-2 rounded-lg' }), 0]
   },
 });
 
