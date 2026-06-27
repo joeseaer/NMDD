@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Bold, Italic, Type, Strikethrough, Quote, ListOrdered, List, CheckSquare, 
   Code, PanelLeft, Columns, Table as TableIcon, Image as ImageIcon, X, Network,
-  Link as LinkIcon, Unlink
+  Link as LinkIcon, Unlink, AlignLeft, AlignCenter, AlignRight, Captions,
+  ImagePlus, Download, ExternalLink, Maximize2, Trash2, Copy
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -95,6 +96,42 @@ turndownService.addRule('keepColumns', {
   }
 });
 
+const escapeHtmlAttribute = (value: string) => value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+turndownService.addRule('keepSmartImages', {
+  filter: (node) => {
+    const el: any = node as any;
+    const nodeName = String(el.nodeName || el.tagName || '').toLowerCase();
+    if (nodeName !== 'img' || typeof el.getAttribute !== 'function') return false;
+    return Boolean(
+      el.getAttribute('data-width') ||
+      el.getAttribute('data-align') ||
+      el.getAttribute('data-caption')
+    );
+  },
+  replacement: (_content, node) => {
+    const el = node as HTMLImageElement;
+    const width = normalizeImageWidth(el.getAttribute('data-width') || el.getAttribute('width') || el.style.width || '100%');
+    const align = el.getAttribute('data-align') || 'center';
+    const caption = el.getAttribute('data-caption') || '';
+    const attrs = [
+      `src="${escapeHtmlAttribute(el.getAttribute('src') || '')}"`,
+      `alt="${escapeHtmlAttribute(el.getAttribute('alt') || '')}"`,
+      el.getAttribute('title') ? `title="${escapeHtmlAttribute(el.getAttribute('title') || '')}"` : '',
+      `data-width="${escapeHtmlAttribute(width)}"`,
+      `data-align="${escapeHtmlAttribute(align)}"`,
+      caption ? `data-caption="${escapeHtmlAttribute(caption)}"` : '',
+      `style="width: ${escapeHtmlAttribute(width)}; max-width: 100%; height: auto;"`,
+    ].filter(Boolean);
+
+    return `\n\n<img ${attrs.join(' ')} />\n\n`;
+  }
+});
+
 // Custom rule to keep mind map structure as HTML
 turndownService.addRule('keepMindMap', {
   filter: (node) => {
@@ -119,76 +156,286 @@ turndownService.addRule('keepMindMap', {
 
 // --- Custom Node Views ---
 const ResizableImageComponent = (props: any) => {
-    const { node, updateAttributes, selected } = props;
-    const [width, setWidth] = useState(node.attrs.width || '100%');
+    return <NotionImageComponent {...props} />;
+
+};
+
+const IMAGE_MIN_WIDTH_PERCENT = 20;
+const IMAGE_MAX_WIDTH_PERCENT = 100;
+
+const clampImageWidth = (value: number) => {
+    return Math.max(IMAGE_MIN_WIDTH_PERCENT, Math.min(IMAGE_MAX_WIDTH_PERCENT, Math.round(value)));
+};
+
+const normalizeImageWidth = (value: unknown) => {
+    if (typeof value !== 'string' || !value.trim()) return '100%';
+    const trimmed = value.trim();
+    if (trimmed.endsWith('%')) return `${clampImageWidth(parseFloat(trimmed))}%`;
+    return trimmed;
+};
+
+const getImageAlignmentStyle = (align: string) => {
+    if (align === 'left') return { marginLeft: 0, marginRight: 'auto' };
+    if (align === 'right') return { marginLeft: 'auto', marginRight: 0 };
+    return { marginLeft: 'auto', marginRight: 'auto' };
+};
+
+const ImageActionButton = ({
+    children,
+    title,
+    onClick,
+    active,
+    danger,
+}: {
+    children: React.ReactNode;
+    title: string;
+    onClick: () => void;
+    active?: boolean;
+    danger?: boolean;
+}) => (
+    <button
+        type="button"
+        title={title}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onClick();
+        }}
+        className={`h-7 min-w-7 rounded px-1.5 flex items-center justify-center text-xs font-semibold transition-colors ${
+            active
+                ? 'bg-gray-900 text-white'
+                : danger
+                    ? 'text-red-600 hover:bg-red-50'
+                    : 'text-gray-600 hover:bg-gray-100'
+        }`}
+    >
+        {children}
+    </button>
+);
+
+const NotionImageComponent = (props: any) => {
+    const { node, updateAttributes, selected, deleteNode, editor } = props;
+    const wrapperRef = React.useRef<HTMLDivElement | null>(null);
+    const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+    const [width, setWidth] = useState(normalizeImageWidth(node.attrs.width));
     const [resizing, setResizing] = useState(false);
-    
-    // Simple drag resize handler
-    const handleMouseDown = (e: React.MouseEvent) => {
-        e.preventDefault();
+    const [showCaption, setShowCaption] = useState(Boolean(node.attrs.caption));
+    const [previewOpen, setPreviewOpen] = useState(false);
+
+    const src = node.attrs.src || '';
+    const align = node.attrs.align || 'center';
+    const caption = node.attrs.caption || '';
+    const alt = node.attrs.alt || '';
+
+    useEffect(() => {
+        setWidth(normalizeImageWidth(node.attrs.width));
+        setShowCaption(Boolean(node.attrs.caption));
+    }, [node.attrs.width, node.attrs.caption]);
+
+    const commitWidth = useCallback((nextWidth: string) => {
+        const normalized = normalizeImageWidth(nextWidth);
+        setWidth(normalized);
+        updateAttributes({ width: normalized });
+    }, [updateAttributes]);
+
+    const handleResizeMouseDown = (event: React.MouseEvent, side: 'left' | 'right') => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const wrapper = wrapperRef.current;
+        const parent = wrapper?.parentElement;
+        if (!wrapper || !parent) return;
+
         setResizing(true);
-        
-        const startX = e.clientX;
-        const startWidth = node.attrs.width ? parseInt(node.attrs.width) : (e.target as HTMLElement).parentElement?.offsetWidth || 300;
-        
-        const onMouseMove = (e: MouseEvent) => {
-            const currentX = e.clientX;
-            const diffX = currentX - startX;
-            const newWidth = Math.max(100, startWidth + diffX);
-            setWidth(`${newWidth}px`);
+        const startX = event.clientX;
+        const startWidth = wrapper.getBoundingClientRect().width;
+        const parentWidth = parent.getBoundingClientRect().width || startWidth;
+        let draftWidth = width;
+
+        const onMouseMove = (moveEvent: MouseEvent) => {
+            const delta = side === 'right' ? moveEvent.clientX - startX : startX - moveEvent.clientX;
+            const nextPercent = clampImageWidth(((startWidth + delta) / parentWidth) * 100);
+            draftWidth = `${nextPercent}%`;
+            setWidth(draftWidth);
         };
-        
-        const onMouseUp = (e: MouseEvent) => {
+
+        const onMouseUp = () => {
             document.removeEventListener('mousemove', onMouseMove);
             document.removeEventListener('mouseup', onMouseUp);
             setResizing(false);
-            // Commit change
-            const currentX = e.clientX;
-            const diffX = currentX - startX;
-            const newWidth = Math.max(100, startWidth + diffX);
-            updateAttributes({ width: `${newWidth}px` });
+            updateAttributes({ width: draftWidth });
         };
-        
+
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
     };
 
+    const replaceImage = async (file: File) => {
+        const uploadImage = editor?.storage?.smartDocument?.uploadImage;
+        if (typeof uploadImage !== 'function') return;
+        const url = await uploadImage(file);
+        if (url) updateAttributes({ src: url });
+    };
+
+    const promptAltText = () => {
+        const nextAlt = window.prompt('图片描述 / Alt text', alt);
+        if (nextAlt === null) return;
+        updateAttributes({ alt: nextAlt.trim() });
+    };
+
+    const copyImageLink = async () => {
+        try {
+            await navigator.clipboard.writeText(src);
+        } catch {
+            window.prompt('复制图片链接', src);
+        }
+    };
+
+    const downloadImage = () => {
+        const link = document.createElement('a');
+        link.href = src;
+        link.download = (alt || caption || 'image').replace(/[\\/:*?"<>|]+/g, '-');
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+        link.click();
+    };
+
+    const toolbarVisible = selected || resizing;
+
     return (
-        <NodeViewWrapper className="image-resizer-wrapper inline-block relative group" style={{ width: width, maxWidth: '100%' }}>
-            <div className={`relative ${selected ? 'ring-2 ring-primary rounded-lg' : ''}`}>
-                <img 
-                    src={node.attrs.src} 
-                    alt={node.attrs.alt}
-                    className="rounded-lg w-full h-auto"
+        <NodeViewWrapper
+            className="notion-image-block group relative block my-4 max-w-full"
+            style={{
+                width,
+                maxWidth: '100%',
+                ...getImageAlignmentStyle(align),
+            }}
+            ref={wrapperRef}
+        >
+            <div className={`relative rounded-lg ${selected ? 'ring-2 ring-primary/80 ring-offset-2' : ''}`}>
+                <img
+                    src={src}
+                    alt={alt || caption}
+                    title={node.attrs.title || alt || caption}
+                    className="block w-full h-auto rounded-lg border border-gray-100 bg-gray-50 shadow-sm"
+                    draggable={false}
                 />
-                {/* Drag Handle */}
-                <div 
-                    className={`absolute bottom-2 right-2 w-4 h-4 bg-white border border-gray-300 rounded shadow-sm cursor-nwse-resize flex items-center justify-center transition-opacity ${selected || resizing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}
-                    onMouseDown={handleMouseDown}
+
+                <div
+                    className={`absolute left-0 top-1/2 h-16 w-1.5 -translate-x-2 -translate-y-1/2 cursor-ew-resize rounded-full bg-gray-900 transition-opacity ${
+                        toolbarVisible ? 'opacity-90' : 'opacity-0 group-hover:opacity-80'
+                    }`}
+                    onMouseDown={(event) => handleResizeMouseDown(event, 'left')}
+                    title="拖拽调整宽度"
+                />
+                <div
+                    className={`absolute right-0 top-1/2 h-16 w-1.5 translate-x-2 -translate-y-1/2 cursor-ew-resize rounded-full bg-gray-900 transition-opacity ${
+                        toolbarVisible ? 'opacity-90' : 'opacity-0 group-hover:opacity-80'
+                    }`}
+                    onMouseDown={(event) => handleResizeMouseDown(event, 'right')}
+                    title="拖拽调整宽度"
+                />
+
+                <div
+                    className={`absolute right-2 top-2 z-10 flex max-w-[min(680px,calc(100vw-3rem))] items-center gap-1 overflow-x-auto rounded-md border border-gray-200 bg-white/95 p-1 shadow-lg backdrop-blur transition-opacity ${
+                        toolbarVisible ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+                    }`}
+                    contentEditable={false}
                 >
-                    <div className="w-2 h-2 border-r border-b border-gray-400"></div>
+                    <ImageActionButton title="左对齐" active={align === 'left'} onClick={() => updateAttributes({ align: 'left' })}>
+                        <AlignLeft className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="居中" active={align === 'center'} onClick={() => updateAttributes({ align: 'center' })}>
+                        <AlignCenter className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="右对齐" active={align === 'right'} onClick={() => updateAttributes({ align: 'right' })}>
+                        <AlignRight className="h-4 w-4" />
+                    </ImageActionButton>
+                    {[50, 75, 100].map((percent) => (
+                        <ImageActionButton
+                            key={percent}
+                            title={`${percent}% 宽度`}
+                            active={width === `${percent}%`}
+                            onClick={() => commitWidth(`${percent}%`)}
+                        >
+                            {percent}
+                        </ImageActionButton>
+                    ))}
+                    <ImageActionButton title="添加说明" active={showCaption || Boolean(caption)} onClick={() => setShowCaption(true)}>
+                        <Captions className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="替换图片" onClick={() => fileInputRef.current?.click()}>
+                        <ImagePlus className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="Alt 文本" active={Boolean(alt)} onClick={promptAltText}>
+                        ALT
+                    </ImageActionButton>
+                    <ImageActionButton title="复制图片链接" onClick={copyImageLink}>
+                        <Copy className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="查看原图" onClick={() => window.open(src, '_blank', 'noopener,noreferrer')}>
+                        <ExternalLink className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="全屏预览" onClick={() => setPreviewOpen(true)}>
+                        <Maximize2 className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="下载" onClick={downloadImage}>
+                        <Download className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="删除" danger onClick={() => deleteNode?.()}>
+                        <Trash2 className="h-4 w-4" />
+                    </ImageActionButton>
                 </div>
-                
-                {/* Bubble Menu for Alignment (Simplified version) */}
-                {selected && (
-                    <div className="absolute top-2 right-2 bg-white rounded shadow-lg border border-gray-100 p-1 flex space-x-1">
-                        <button 
-                            className="p-1 hover:bg-gray-100 rounded"
-                            onClick={() => updateAttributes({ width: '100%' })}
-                            title="全宽"
-                        >
-                            <span className="text-xs font-bold px-1">100%</span>
-                        </button>
-                        <button 
-                            className="p-1 hover:bg-gray-100 rounded"
-                            onClick={() => updateAttributes({ width: '50%' })}
-                            title="半宽"
-                        >
-                            <span className="text-xs font-bold px-1">50%</span>
-                        </button>
-                    </div>
-                )}
+
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) replaceImage(file);
+                        event.target.value = '';
+                    }}
+                />
             </div>
+
+            {(showCaption || caption) && (
+                <input
+                    contentEditable={false}
+                    value={caption}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onChange={(event) => updateAttributes({ caption: event.target.value })}
+                    placeholder="添加图片说明"
+                    className="mt-2 w-full border-none bg-transparent px-1 text-center text-xs text-gray-500 outline-none placeholder:text-gray-300 focus:ring-0"
+                />
+            )}
+
+            {previewOpen && (
+                <div
+                    className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-8"
+                    contentEditable={false}
+                    onMouseDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                    }}
+                    onClick={() => setPreviewOpen(false)}
+                >
+                    <button
+                        type="button"
+                        title="关闭"
+                        className="absolute right-5 top-5 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+                        onClick={() => setPreviewOpen(false)}
+                    >
+                        <X className="h-5 w-5" />
+                    </button>
+                    <div className="max-h-full max-w-6xl" onClick={(event) => event.stopPropagation()}>
+                        <img src={src} alt={alt || caption} className="max-h-[82vh] max-w-full rounded-lg object-contain" />
+                        {caption && <div className="mt-3 text-center text-sm text-white/80">{caption}</div>}
+                    </div>
+                </div>
+            )}
         </NodeViewWrapper>
     );
 };
@@ -296,8 +543,32 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
                         ...this.parent?.(),
                         width: {
                             default: '100%',
+                            parseHTML: element => element.getAttribute('data-width') || element.getAttribute('width') || element.style.width || '100%',
                             renderHTML: attributes => ({
-                                width: attributes.width,
+                                width: normalizeImageWidth(attributes.width),
+                                'data-width': normalizeImageWidth(attributes.width),
+                                style: `width: ${normalizeImageWidth(attributes.width)}; max-width: 100%; height: auto;`,
+                            }),
+                        },
+                        align: {
+                            default: 'center',
+                            parseHTML: element => element.getAttribute('data-align') || 'center',
+                            renderHTML: attributes => ({
+                                'data-align': attributes.align || 'center',
+                            }),
+                        },
+                        caption: {
+                            default: '',
+                            parseHTML: element => element.getAttribute('data-caption') || '',
+                            renderHTML: attributes => ({
+                                'data-caption': attributes.caption || undefined,
+                            }),
+                        },
+                        title: {
+                            default: '',
+                            parseHTML: element => element.getAttribute('title') || '',
+                            renderHTML: attributes => ({
+                                title: attributes.title || undefined,
                             }),
                         },
                     }
@@ -368,7 +639,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
                         uploadImage(file).then(url => {
                             if (url) {
                                 const { schema } = view.state;
-                                const node = schema.nodes.image.create({ src: url });
+                                const node = schema.nodes.image.create({ src: url, width: '100%', align: 'center' });
                                 const transaction = view.state.tr.replaceSelectionWith(node);
                                 view.dispatch(transaction);
                             }
@@ -388,7 +659,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
                                 const { schema } = view.state;
                                 const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY });
                                 if (coordinates) {
-                                    const node = schema.nodes.image.create({ src: url });
+                                    const node = schema.nodes.image.create({ src: url, width: '100%', align: 'center' });
                                     const transaction = view.state.tr.insert(coordinates.pos, node);
                                     view.dispatch(transaction);
                                 }
@@ -465,7 +736,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
                 const file = input.files[0];
                 const url = await uploadImage(file);
                 if (url) {
-                    editor?.chain().focus().setImage({ src: url }).run();
+                    editor?.chain().focus().setImage({ src: url, width: '100%', align: 'center' } as any).run();
                 }
             }
         };

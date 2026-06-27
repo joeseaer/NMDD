@@ -471,7 +471,7 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
             input.onchange = async () => {
                 if (!input.files?.length) return;
                 const url = await uploadImage(input.files[0]);
-                if (url) editor.chain().focus().setImage({ src: url }).run();
+                if (url) editor.chain().focus().setImage({ src: url, width: '100%', align: 'center' }).run();
             };
             input.click();
         },
