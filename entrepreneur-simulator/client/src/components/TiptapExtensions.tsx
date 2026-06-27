@@ -698,7 +698,7 @@ export const SyncedBlock = Node.create({
 });
 
 type DatabasePropertyType = 'title' | 'text' | 'number' | 'status' | 'date' | 'checkbox' | 'url';
-type DatabaseViewMode = 'table' | 'list' | 'board' | 'calendar' | 'gallery';
+type DatabaseViewMode = 'table' | 'list' | 'board' | 'calendar' | 'timeline' | 'gallery';
 type DatabaseFilterOperator = 'contains' | 'equals' | 'not_empty' | 'empty';
 
 type DatabaseProperty = {
@@ -753,6 +753,7 @@ const DATABASE_VIEW_OPTIONS: Array<{ value: DatabaseViewMode; label: string }> =
   { value: 'list', label: '列表' },
   { value: 'board', label: '看板' },
   { value: 'calendar', label: '日历' },
+  { value: 'timeline', label: '时间轴' },
   { value: 'gallery', label: '画廊' },
 ];
 
@@ -914,7 +915,7 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
     }).filter((row: DatabaseRow) => row.id);
   const normalizedRows = rows.length ? rows : [createDatabaseRow(normalizedProperties, '新条目')];
 
-  const view: DatabaseViewMode = raw.view === 'list' || raw.view === 'board' || raw.view === 'calendar' || raw.view === 'gallery'
+  const view: DatabaseViewMode = raw.view === 'list' || raw.view === 'board' || raw.view === 'calendar' || raw.view === 'timeline' || raw.view === 'gallery'
     ? raw.view
     : 'table';
   const sort = raw.sort && normalizedProperties.some((property: DatabaseProperty) => property.id === raw.sort.propertyId)
@@ -1139,7 +1140,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
   }, [database.properties, filterDraft.propertyId, propertySignature]);
 
   useEffect(() => {
-    if (database.view !== 'calendar' || !dateProperty || !visibleDateKeys.length) return;
+    if ((database.view !== 'calendar' && database.view !== 'timeline') || !dateProperty || !visibleDateKeys.length) return;
 
     const hasCurrentMonthRows = visibleDateKeys.some((dateKey) => {
       const date = parseDatabaseDateKey(dateKey);
@@ -1661,6 +1662,145 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     );
   };
 
+  const renderTimelineView = () => {
+    if (!dateProperty) {
+      return (
+        <div className="flex min-h-32 flex-col items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center">
+          <CalendarDays className="mb-2 h-5 w-5 text-gray-400" />
+          <div className="text-sm font-medium text-gray-600">需要日期属性</div>
+          <div className="mt-1 text-xs text-gray-400">添加或保留一个日期列后，时间轴视图会按日期展示条目。</div>
+        </div>
+      );
+    }
+
+    const year = calendarMonth.getFullYear();
+    const month = calendarMonth.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const dayNumbers = Array.from({ length: daysInMonth }, (_, index) => index + 1);
+    const timelineGridStyle = { gridTemplateColumns: `repeat(${daysInMonth}, minmax(56px, 1fr))` };
+    const currentMonthRows = rows.filter((row) => {
+      const date = parseDatabaseDateKey(getDatabaseDateKey(row, dateProperty));
+      return date && date.getFullYear() === year && date.getMonth() === month;
+    });
+    const unscheduledRows = rows.filter((row) => !getDatabaseDateKey(row, dateProperty));
+    const sortTimelineRows = (groupRows: DatabaseRow[]) => [...groupRows].sort((left, right) => (
+      getDatabaseDateKey(left, dateProperty).localeCompare(getDatabaseDateKey(right, dateProperty)) ||
+      getDatabaseRowTitle(left, titleProperty).localeCompare(getDatabaseRowTitle(right, titleProperty))
+    ));
+
+    const renderTimelineLane = (row: DatabaseRow) => {
+      const dateKey = getDatabaseDateKey(row, dateProperty);
+      const date = parseDatabaseDateKey(dateKey);
+      const dayNumber = Math.max(1, Math.min(daysInMonth, date?.getDate() || 1));
+      const endColumn = Math.min(daysInMonth + 1, dayNumber + 7);
+      const startColumn = Math.max(1, Math.min(dayNumber, endColumn - 6));
+
+      return (
+        <div key={row.id} className="relative min-w-[900px] overflow-hidden rounded border border-gray-100 bg-white">
+          <div className="grid min-h-16" style={timelineGridStyle}>
+            {dayNumbers.map((day) => (
+              <div key={day} className="border-r border-gray-100 bg-gray-50/40 last:border-r-0" />
+            ))}
+          </div>
+          <div className="absolute inset-0 grid items-center px-1" style={timelineGridStyle}>
+            <div
+              className="group flex min-w-[360px] items-center gap-1 rounded border border-gray-200 bg-white px-2 py-1.5 shadow-sm"
+              style={{ gridColumn: `${startColumn} / ${endColumn}` }}
+            >
+              <div className="h-2 w-2 flex-shrink-0 rounded-full bg-gray-900" />
+              <input
+                value={getDatabaseRowTitle(row, titleProperty)}
+                onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)}
+                className="min-w-0 flex-1 border-none bg-transparent px-0 text-xs font-semibold text-gray-800 outline-none focus:ring-0"
+              />
+              <input
+                type="date"
+                value={dateKey}
+                onInput={(event) => updateCell(row.id, dateProperty.id, (event.target as HTMLInputElement).value)}
+                onChange={(event) => updateCell(row.id, dateProperty.id, event.target.value)}
+                className="h-7 w-32 rounded border border-gray-100 bg-gray-50 px-1.5 text-[11px] text-gray-500 outline-none focus:border-gray-400 focus:bg-white"
+              />
+              {renderOpenRowButton(row)}
+              <button type="button" onClick={() => deleteRow(row.id)} className="flex h-7 w-7 items-center justify-center rounded text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const timelineGroups = groupProperty
+      ? getDatabaseGroups(currentMonthRows, groupProperty).filter((group) => group.rows.length > 0)
+      : [{ label: '', rows: currentMonthRows }];
+
+    return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+            <CalendarDays className="h-4 w-4 text-gray-500" />
+            {formatDatabaseMonth(calendarMonth)}
+          </div>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => setCalendarMonth(shiftDatabaseMonth(calendarMonth, -1))} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">上月</button>
+            <button type="button" onClick={() => setCalendarMonth(new Date())} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">今天</button>
+            <button type="button" onClick={() => setCalendarMonth(shiftDatabaseMonth(calendarMonth, 1))} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">下月</button>
+          </div>
+        </div>
+
+        <div className="overflow-x-auto rounded border border-gray-100 bg-gray-50/60">
+          <div className="grid min-w-[900px] border-b border-gray-100 text-[10px] font-medium text-gray-400" style={timelineGridStyle}>
+            {dayNumbers.map((day) => (
+              <div key={day} className="border-r border-gray-100 px-1.5 py-1 last:border-r-0">
+                {day === 1 || day === daysInMonth || day % 5 === 0 ? day : ''}
+              </div>
+            ))}
+          </div>
+          <div className="space-y-2 p-2">
+            {currentMonthRows.length === 0 ? (
+              <div className="flex min-h-20 items-center justify-center rounded border border-dashed border-gray-200 bg-white px-4 text-xs text-gray-400">
+                本月暂无条目
+              </div>
+            ) : (
+              timelineGroups.map((group) => (
+                <div key={group.label || 'all'} className="space-y-2">
+                  {group.label && (
+                    <div className="px-1 text-xs font-semibold text-gray-500">
+                      {group.label} <span className="font-normal text-gray-400">{group.rows.length}</span>
+                    </div>
+                  )}
+                  {sortTimelineRows(group.rows).map(renderTimelineLane)}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {unscheduledRows.length > 0 && (
+          <div className="rounded border border-gray-100 bg-gray-50 px-3 py-2">
+            <div className="mb-2 text-xs font-semibold text-gray-500">未排期 {unscheduledRows.length}</div>
+            <div className="flex flex-wrap gap-2">
+              {unscheduledRows.map((row) => (
+                <div key={row.id} className="flex min-w-40 items-center gap-1 rounded border border-gray-200 bg-white px-2">
+                  <input
+                    value={getDatabaseRowTitle(row, titleProperty)}
+                    onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)}
+                    className="h-7 min-w-0 flex-1 border-none bg-transparent px-0 text-xs font-medium text-gray-700 outline-none focus:ring-0"
+                  />
+                  {renderOpenRowButton(row)}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button type="button" onClick={addRow} className="flex items-center gap-1 rounded px-2 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100">
+          <Plus className="h-3.5 w-3.5" /> 新建
+        </button>
+      </div>
+    );
+  };
+
   const renderGalleryCard = (row: DatabaseRow) => {
     const urlValue = getDatabasePropertyPreview(row, urlProperty);
 
@@ -1814,9 +1954,11 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
             ? renderBoardView()
             : database.view === 'calendar'
               ? renderCalendarView()
-              : database.view === 'gallery'
-                ? renderGalleryView()
-                : renderTableView()}
+              : database.view === 'timeline'
+                ? renderTimelineView()
+                : database.view === 'gallery'
+                  ? renderGalleryView()
+                  : renderTableView()}
       </div>
     </NodeViewWrapper>
   );
