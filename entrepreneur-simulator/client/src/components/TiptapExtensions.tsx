@@ -12,7 +12,7 @@ import {
   Heading1, Heading2, Heading3, List, ListOrdered, CheckSquare, 
   Quote, Minus, Code, Layout, Image as ImageIcon,
   Type, Network, ChevronRight, AlertTriangle, Bookmark, Globe,
-  Paperclip, Video, Music, FileText, Sigma, RefreshCw, CalendarDays,
+  Paperclip, Video, Music, FileText, Sigma, RefreshCw, CalendarDays, X,
   Database, Plus, Trash2
 } from 'lucide-react';
 import { MindMapComponent } from './MindMapExtension';
@@ -711,6 +711,10 @@ type DatabaseProperty = {
 type DatabaseRow = {
   id: string;
   cells: Record<string, any>;
+  page: {
+    content: string;
+    updatedAt?: string;
+  };
 };
 
 type DatabaseFilter = {
@@ -785,6 +789,9 @@ const createDefaultDatabase = (): SmartDocumentDatabase => {
           [statusPropertyId]: '未开始',
           [datePropertyId]: '',
         },
+        page: {
+          content: '',
+        },
       },
     ],
     filters: [],
@@ -846,6 +853,14 @@ const createDatabaseCells = (properties: DatabaseProperty[], existingCells: Reco
   ]));
 };
 
+const normalizeDatabaseRowPage = (value: unknown): DatabaseRow['page'] => {
+  const raw: any = value && typeof value === 'object' ? value : {};
+  return {
+    content: String(raw.content || ''),
+    updatedAt: raw.updatedAt ? String(raw.updatedAt) : undefined,
+  };
+};
+
 const createDatabaseRow = (properties: DatabaseProperty[], title: string = ''): DatabaseRow => {
   const titleProperty = properties.find((property) => property.type === 'title') || properties[0];
   const cells = createDatabaseCells(properties);
@@ -855,6 +870,7 @@ const createDatabaseRow = (properties: DatabaseProperty[], title: string = ''): 
   return {
     id: createSmartDocumentId('row'),
     cells,
+    page: normalizeDatabaseRowPage(null),
   };
 };
 
@@ -893,6 +909,7 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
       return {
         id: String(row?.id || createSmartDocumentId('row')),
         cells: createDatabaseCells(normalizedProperties, existingCells),
+        page: normalizeDatabaseRowPage(row?.page),
       };
     }).filter((row: DatabaseRow) => row.id);
   const normalizedRows = rows.length ? rows : [createDatabaseRow(normalizedProperties, '新条目')];
@@ -1108,7 +1125,9 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
       .find(Boolean);
     return parseDatabaseDateKey(firstDateKey || '') || new Date();
   });
+  const [openRowId, setOpenRowId] = useState<string | null>(null);
   const propertySignature = database.properties.map((property) => property.id).join('|');
+  const openRow = openRowId ? database.rows.find((row) => row.id === openRowId) || null : null;
 
   useEffect(() => {
     if (!filterDraft.propertyId || !database.properties.some((property) => property.id === filterDraft.propertyId)) {
@@ -1133,6 +1152,12 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
       setCalendarMonth(new Date(firstVisibleDate.getFullYear(), firstVisibleDate.getMonth(), 1));
     }
   }, [calendarMonth, database.view, dateProperty, visibleDateKeys, visibleDateSignature]);
+
+  useEffect(() => {
+    if (openRowId && !database.rows.some((row) => row.id === openRowId)) {
+      setOpenRowId(null);
+    }
+  }, [database.rows, openRowId]);
 
   const commit = (nextDatabase: SmartDocumentDatabase) => {
     updateAttributes({ database: normalizeDatabase(nextDatabase) });
@@ -1250,15 +1275,34 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
   const addRow = () => {
     const rowId = createSmartDocumentId('row');
     const cells = createDatabaseCells(database.properties);
-    commit({ ...database, rows: [...database.rows, { id: rowId, cells }] });
+    commit({ ...database, rows: [...database.rows, { id: rowId, cells, page: normalizeDatabaseRowPage(null) }] });
   };
 
-  const deleteRow = (rowId: string) => commit({ ...database, rows: database.rows.filter((row) => row.id !== rowId) });
+  const deleteRow = (rowId: string) => {
+    if (openRowId === rowId) setOpenRowId(null);
+    commit({ ...database, rows: database.rows.filter((row) => row.id !== rowId) });
+  };
 
   const updateCell = (rowId: string, propertyId: string, value: any) => {
     commit({
       ...database,
       rows: database.rows.map((row) => row.id === rowId ? { ...row, cells: { ...row.cells, [propertyId]: value } } : row),
+    });
+  };
+
+  const updateRowPageContent = (rowId: string, content: string) => {
+    commit({
+      ...database,
+      rows: database.rows.map((row) => row.id === rowId
+        ? {
+          ...row,
+          page: {
+            ...normalizeDatabaseRowPage(row.page),
+            content,
+            updatedAt: new Date().toISOString(),
+          },
+        }
+        : row),
     });
   };
 
@@ -1366,6 +1410,21 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     </div>
   );
 
+  const renderOpenRowButton = (row: DatabaseRow) => (
+    <button
+      type="button"
+      title="打开详情"
+      onClick={() => setOpenRowId(row.id)}
+      className={`flex h-7 w-7 items-center justify-center rounded ${
+        openRowId === row.id
+          ? 'bg-gray-900 text-white'
+          : 'text-gray-300 hover:bg-gray-100 hover:text-gray-600'
+      }`}
+    >
+      <FileText className="h-3.5 w-3.5" />
+    </button>
+  );
+
   const renderTableRow = (row: DatabaseRow) => (
     <tr key={row.id} className="group">
       {database.properties.map((property) => (
@@ -1374,9 +1433,12 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
         </td>
       ))}
       <td className="border-b border-gray-100 px-2 py-1">
-        <button type="button" onClick={() => deleteRow(row.id)} className="flex h-7 w-7 items-center justify-center rounded text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          {renderOpenRowButton(row)}
+          <button type="button" onClick={() => deleteRow(row.id)} className="flex h-7 w-7 items-center justify-center rounded text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </td>
     </tr>
   );
@@ -1437,9 +1499,12 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     <div key={row.id} className="group px-3 py-2">
       <div className="flex items-center justify-between gap-2">
         <input value={String(row.cells[titleProperty.id] || '')} onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)} className="min-w-0 flex-1 border-none bg-transparent px-0 text-sm font-medium text-gray-900 outline-none focus:ring-0" />
-        <button type="button" onClick={() => deleteRow(row.id)} className="rounded p-1 text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          {renderOpenRowButton(row)}
+          <button type="button" onClick={() => deleteRow(row.id)} className="rounded p-1 text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
       <div className="mt-2 grid gap-2 sm:grid-cols-2">
         {database.properties.filter((property) => property.id !== titleProperty.id).map((property) => (
@@ -1482,8 +1547,11 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
             </div>
             <div className="space-y-2 p-2">
               {group.rows.map((row) => (
-                <div key={row.id} className="rounded border border-gray-200 bg-white p-2 shadow-sm">
-                  <input value={String(row.cells[titleProperty.id] || '')} onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)} className="w-full border-none bg-transparent px-0 text-sm font-medium text-gray-900 outline-none focus:ring-0" />
+                <div key={row.id} className="group rounded border border-gray-200 bg-white p-2 shadow-sm">
+                  <div className="flex items-start gap-2">
+                    <input value={String(row.cells[titleProperty.id] || '')} onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)} className="min-w-0 flex-1 border-none bg-transparent px-0 text-sm font-medium text-gray-900 outline-none focus:ring-0" />
+                    {renderOpenRowButton(row)}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1545,12 +1613,21 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
                 </div>
                 <div className="space-y-1">
                   {dayRows.slice(0, 3).map((row) => (
-                    <input
-                      key={row.id}
-                      value={getDatabaseRowTitle(row, titleProperty)}
-                      onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)}
-                      className="h-6 w-full min-w-0 rounded border border-gray-100 bg-gray-50 px-1.5 text-[11px] font-medium text-gray-700 outline-none focus:border-gray-400 focus:bg-white"
-                    />
+                    <div key={row.id} className="group flex items-center gap-1">
+                      <input
+                        value={getDatabaseRowTitle(row, titleProperty)}
+                        onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)}
+                        className="h-6 min-w-0 flex-1 rounded border border-gray-100 bg-gray-50 px-1.5 text-[11px] font-medium text-gray-700 outline-none focus:border-gray-400 focus:bg-white"
+                      />
+                      <button
+                        type="button"
+                        title="打开详情"
+                        onClick={() => setOpenRowId(row.id)}
+                        className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-gray-300 opacity-0 hover:bg-gray-100 hover:text-gray-600 group-hover:opacity-100"
+                      >
+                        <FileText className="h-3 w-3" />
+                      </button>
+                    </div>
                   ))}
                   {dayRows.length > 3 && <div className="px-1 text-[10px] text-gray-400">+{dayRows.length - 3}</div>}
                 </div>
@@ -1564,12 +1641,14 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
             <div className="mb-2 text-xs font-semibold text-gray-500">未排期 {unscheduledRows.length}</div>
             <div className="flex flex-wrap gap-2">
               {unscheduledRows.map((row) => (
-                <input
-                  key={row.id}
-                  value={getDatabaseRowTitle(row, titleProperty)}
-                  onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)}
-                  className="h-7 min-w-40 rounded border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-none focus:border-gray-400"
-                />
+                <div key={row.id} className="flex min-w-40 items-center gap-1 rounded border border-gray-200 bg-white px-2">
+                  <input
+                    value={getDatabaseRowTitle(row, titleProperty)}
+                    onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)}
+                    className="h-7 min-w-0 flex-1 border-none bg-transparent px-0 text-xs font-medium text-gray-700 outline-none focus:ring-0"
+                  />
+                  {renderOpenRowButton(row)}
+                </div>
               ))}
             </div>
           </div>
@@ -1602,9 +1681,12 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
             onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)}
             className="min-w-0 flex-1 border-none bg-transparent px-0 text-sm font-semibold text-gray-900 outline-none focus:ring-0"
           />
-          <button type="button" onClick={() => deleteRow(row.id)} className="rounded p-1 text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {renderOpenRowButton(row)}
+            <button type="button" onClick={() => deleteRow(row.id)} className="rounded p-1 text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
         <div className="mt-2 space-y-1">
           {galleryMetaProperties.map((property) => (
@@ -1642,6 +1724,62 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     </div>
   );
 
+  const renderRowDetailPanel = () => {
+    if (!openRow) return null;
+
+    const rowPage = normalizeDatabaseRowPage(openRow.page);
+
+    return (
+      <div className="border-b border-gray-100 bg-white px-3 py-3" contentEditable={false}>
+        <div className="rounded-md border border-gray-200 bg-gray-50/50">
+          <div className="flex items-center justify-between gap-3 border-b border-gray-100 px-3 py-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-gray-200 bg-white text-gray-500">
+                <FileText className="h-3.5 w-3.5" />
+              </span>
+              <input
+                value={getDatabaseRowTitle(openRow, titleProperty)}
+                onChange={(event) => updateCell(openRow.id, titleProperty.id, event.target.value)}
+                className="min-w-0 flex-1 border-none bg-transparent px-0 text-sm font-semibold text-gray-900 outline-none focus:ring-0"
+              />
+            </div>
+            <button
+              type="button"
+              title="关闭"
+              onClick={() => setOpenRowId(null)}
+              className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="grid gap-2 border-b border-gray-100 px-3 py-3 sm:grid-cols-2">
+            {database.properties.filter((property) => property.id !== titleProperty.id).map((property) => (
+              <label key={property.id} className="flex min-w-0 items-center gap-2 text-xs text-gray-500">
+                <span className="w-20 flex-shrink-0 truncate">{property.name}</span>
+                <span className="min-w-0 flex-1">{renderCellInput(openRow, property)}</span>
+              </label>
+            ))}
+          </div>
+
+          <div className="px-3 py-3">
+            <textarea
+              value={rowPage.content}
+              onChange={(event) => updateRowPageContent(openRow.id, event.target.value)}
+              placeholder="添加详情..."
+              className="min-h-32 w-full resize-y rounded border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-gray-700 outline-none placeholder:text-gray-300 focus:border-gray-400 focus:ring-2 focus:ring-gray-100"
+            />
+            {rowPage.updatedAt && (
+              <div className="mt-1 text-[11px] text-gray-400">
+                更新于 {new Date(rowPage.updatedAt).toLocaleString('zh-CN')}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <NodeViewWrapper
       className={`smart-doc-database my-4 overflow-hidden rounded-md border bg-white transition-colors ${
@@ -1668,6 +1806,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
         </div>
       </div>
       {renderDatabaseControls()}
+      {renderRowDetailPanel()}
       <div className="p-3">
         {database.view === 'list'
           ? renderListView()
