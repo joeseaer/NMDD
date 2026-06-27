@@ -12,7 +12,7 @@ import {
   Heading1, Heading2, Heading3, List, ListOrdered, CheckSquare, 
   Quote, Minus, Code, Layout, Image as ImageIcon,
   Type, Network, ChevronRight, AlertTriangle, Bookmark, Globe,
-  Paperclip, Video, Music, FileText, Sigma, RefreshCw,
+  Paperclip, Video, Music, FileText, Sigma, RefreshCw, CalendarDays,
   Database, Plus, Trash2
 } from 'lucide-react';
 import { MindMapComponent } from './MindMapExtension';
@@ -698,7 +698,7 @@ export const SyncedBlock = Node.create({
 });
 
 type DatabasePropertyType = 'title' | 'text' | 'number' | 'status' | 'date' | 'checkbox' | 'url';
-type DatabaseViewMode = 'table' | 'list' | 'board';
+type DatabaseViewMode = 'table' | 'list' | 'board' | 'calendar' | 'gallery';
 type DatabaseFilterOperator = 'contains' | 'equals' | 'not_empty' | 'empty';
 
 type DatabaseProperty = {
@@ -742,6 +742,14 @@ const DATABASE_PROPERTY_TYPES: Array<{ value: DatabasePropertyType; label: strin
   { value: 'date', label: '日期' },
   { value: 'checkbox', label: '勾选' },
   { value: 'url', label: '链接' },
+];
+
+const DATABASE_VIEW_OPTIONS: Array<{ value: DatabaseViewMode; label: string }> = [
+  { value: 'table', label: '表格' },
+  { value: 'list', label: '列表' },
+  { value: 'board', label: '看板' },
+  { value: 'calendar', label: '日历' },
+  { value: 'gallery', label: '画廊' },
 ];
 
 const DEFAULT_STATUS_OPTIONS = ['未开始', '进行中', '完成'];
@@ -889,7 +897,9 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
     }).filter((row: DatabaseRow) => row.id);
   const normalizedRows = rows.length ? rows : [createDatabaseRow(normalizedProperties, '新条目')];
 
-  const view: DatabaseViewMode = raw.view === 'list' || raw.view === 'board' ? raw.view : 'table';
+  const view: DatabaseViewMode = raw.view === 'list' || raw.view === 'board' || raw.view === 'calendar' || raw.view === 'gallery'
+    ? raw.view
+    : 'table';
   const sort = raw.sort && normalizedProperties.some((property: DatabaseProperty) => property.id === raw.sort.propertyId)
     ? {
       propertyId: String(raw.sort.propertyId),
@@ -1013,6 +1023,59 @@ const getDatabaseGroups = (rows: DatabaseRow[], property: DatabaseProperty | nul
   }));
 };
 
+const getDatabaseDateKey = (row: DatabaseRow, property?: DatabaseProperty | null) => {
+  if (!property) return '';
+  const rawValue = String(row.cells[property.id] || '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(rawValue) ? rawValue : '';
+};
+
+const parseDatabaseDateKey = (dateKey: string) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  const day = Number(match[3]);
+  const date = new Date(year, month, day);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const toDatabaseDateKey = (date: Date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const formatDatabaseMonth = (date: Date) => {
+  return `${date.getFullYear()}年${date.getMonth() + 1}月`;
+};
+
+const shiftDatabaseMonth = (date: Date, offset: number) => {
+  return new Date(date.getFullYear(), date.getMonth() + offset, 1);
+};
+
+const getDatabaseCalendarDays = (month: Date) => {
+  const firstDay = new Date(month.getFullYear(), month.getMonth(), 1);
+  const start = new Date(firstDay);
+  start.setDate(firstDay.getDate() - firstDay.getDay());
+
+  return Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    return date;
+  });
+};
+
+const getDatabaseRowTitle = (row: DatabaseRow, property: DatabaseProperty) => {
+  return String(row.cells[property.id] || '').trim() || '未命名';
+};
+
+const getDatabasePropertyPreview = (row: DatabaseRow, property?: DatabaseProperty | null) => {
+  if (!property) return '';
+  if (property.type === 'checkbox') return row.cells[property.id] ? '已勾选' : '未勾选';
+  return String(row.cells[property.id] || '').trim();
+};
+
 const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
   const database = normalizeDatabase(node.attrs.database);
   const commentsAttr = Array.isArray(node.attrs.blockComments) && node.attrs.blockComments.length
@@ -1020,7 +1083,14 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     : undefined;
   const titleProperty = database.properties.find((property) => property.type === 'title') || database.properties[0];
   const boardProperty = database.properties.find((property) => property.type === 'status') || database.properties.find((property) => property.type === 'text');
+  const dateProperty = database.properties.find((property) => property.type === 'date') || null;
+  const urlProperty = database.properties.find((property) => property.type === 'url') || null;
+  const galleryMetaProperties = database.properties.filter((property) => property.id !== titleProperty.id && property.type !== 'url').slice(0, 3);
   const rows = getVisibleDatabaseRows(database);
+  const visibleDateKeys = dateProperty
+    ? rows.map((row) => getDatabaseDateKey(row, dateProperty)).filter(Boolean)
+    : [];
+  const visibleDateSignature = visibleDateKeys.join('|');
   const filteredOutCount = Math.max(0, database.rows.length - getFilteredDatabaseRows(database).length);
   const groupProperty = database.groupBy
     ? database.properties.find((property) => property.id === database.groupBy) || null
@@ -1032,6 +1102,12 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     operator: 'contains',
     value: '',
   });
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const firstDateKey = database.rows
+      .map((row) => getDatabaseDateKey(row, dateProperty))
+      .find(Boolean);
+    return parseDatabaseDateKey(firstDateKey || '') || new Date();
+  });
   const propertySignature = database.properties.map((property) => property.id).join('|');
 
   useEffect(() => {
@@ -1042,6 +1118,21 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
       }));
     }
   }, [database.properties, filterDraft.propertyId, propertySignature]);
+
+  useEffect(() => {
+    if (database.view !== 'calendar' || !dateProperty || !visibleDateKeys.length) return;
+
+    const hasCurrentMonthRows = visibleDateKeys.some((dateKey) => {
+      const date = parseDatabaseDateKey(dateKey);
+      return date && date.getFullYear() === calendarMonth.getFullYear() && date.getMonth() === calendarMonth.getMonth();
+    });
+    if (hasCurrentMonthRows) return;
+
+    const firstVisibleDate = parseDatabaseDateKey(visibleDateKeys[0]);
+    if (firstVisibleDate) {
+      setCalendarMonth(new Date(firstVisibleDate.getFullYear(), firstVisibleDate.getMonth(), 1));
+    }
+  }, [calendarMonth, database.view, dateProperty, visibleDateKeys, visibleDateSignature]);
 
   const commit = (nextDatabase: SmartDocumentDatabase) => {
     updateAttributes({ database: normalizeDatabase(nextDatabase) });
@@ -1188,9 +1279,9 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
       );
     }
 
-    if (property.type === 'date') return <input type="date" value={String(rawValue || '')} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
-    if (property.type === 'number') return <input type="number" value={String(rawValue || '')} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
-    if (property.type === 'url') return <input type="url" value={String(rawValue || '')} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} placeholder="https://" />;
+    if (property.type === 'date') return <input type="date" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
+    if (property.type === 'number') return <input type="number" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
+    if (property.type === 'url') return <input type="url" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} placeholder="https://" />;
 
     return <input type="text" value={String(rawValue || '')} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={`${inputClass} ${property.type === 'title' ? 'font-medium text-gray-900' : ''}`} />;
   };
@@ -1402,6 +1493,155 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     );
   };
 
+  const renderCalendarView = () => {
+    if (!dateProperty) {
+      return (
+        <div className="flex min-h-32 flex-col items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50 px-4 py-6 text-center">
+          <CalendarDays className="mb-2 h-5 w-5 text-gray-400" />
+          <div className="text-sm font-medium text-gray-600">需要日期属性</div>
+          <div className="mt-1 text-xs text-gray-400">添加或保留一个日期列后，日历视图会按日期排列条目。</div>
+        </div>
+      );
+    }
+
+    const todayKey = toDatabaseDateKey(new Date());
+    const calendarDays = getDatabaseCalendarDays(calendarMonth);
+    const rowsByDate = rows.reduce<Record<string, DatabaseRow[]>>((acc, row) => {
+      const dateKey = getDatabaseDateKey(row, dateProperty);
+      if (!dateKey) return acc;
+      acc[dateKey] = [...(acc[dateKey] || []), row];
+      return acc;
+    }, {});
+    const unscheduledRows = rows.filter((row) => !getDatabaseDateKey(row, dateProperty));
+
+    return (
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+            <CalendarDays className="h-4 w-4 text-gray-500" />
+            {formatDatabaseMonth(calendarMonth)}
+          </div>
+          <div className="flex items-center gap-1">
+            <button type="button" onClick={() => setCalendarMonth(shiftDatabaseMonth(calendarMonth, -1))} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">上月</button>
+            <button type="button" onClick={() => setCalendarMonth(new Date())} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">今天</button>
+            <button type="button" onClick={() => setCalendarMonth(shiftDatabaseMonth(calendarMonth, 1))} className="rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-600 hover:bg-gray-50">下月</button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-7 overflow-hidden rounded border border-gray-100 text-xs">
+          {['日', '一', '二', '三', '四', '五', '六'].map((day) => (
+            <div key={day} className="border-b border-r border-gray-100 bg-gray-50 px-2 py-1 text-center font-semibold text-gray-500 last:border-r-0">{day}</div>
+          ))}
+          {calendarDays.map((day) => {
+            const dateKey = toDatabaseDateKey(day);
+            const dayRows = rowsByDate[dateKey] || [];
+            const outsideMonth = day.getMonth() !== calendarMonth.getMonth();
+            const isToday = dateKey === todayKey;
+
+            return (
+              <div key={dateKey} className={`min-h-24 border-b border-r border-gray-100 p-1.5 last:border-r-0 ${outsideMonth ? 'bg-gray-50/70 text-gray-300' : 'bg-white text-gray-700'}`}>
+                <div className={`mb-1 flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-medium ${isToday ? 'bg-gray-900 text-white' : ''}`}>
+                  {day.getDate()}
+                </div>
+                <div className="space-y-1">
+                  {dayRows.slice(0, 3).map((row) => (
+                    <input
+                      key={row.id}
+                      value={getDatabaseRowTitle(row, titleProperty)}
+                      onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)}
+                      className="h-6 w-full min-w-0 rounded border border-gray-100 bg-gray-50 px-1.5 text-[11px] font-medium text-gray-700 outline-none focus:border-gray-400 focus:bg-white"
+                    />
+                  ))}
+                  {dayRows.length > 3 && <div className="px-1 text-[10px] text-gray-400">+{dayRows.length - 3}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {unscheduledRows.length > 0 && (
+          <div className="rounded border border-gray-100 bg-gray-50 px-3 py-2">
+            <div className="mb-2 text-xs font-semibold text-gray-500">未排期 {unscheduledRows.length}</div>
+            <div className="flex flex-wrap gap-2">
+              {unscheduledRows.map((row) => (
+                <input
+                  key={row.id}
+                  value={getDatabaseRowTitle(row, titleProperty)}
+                  onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)}
+                  className="h-7 min-w-40 rounded border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-none focus:border-gray-400"
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        <button type="button" onClick={addRow} className="flex items-center gap-1 rounded px-2 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100">
+          <Plus className="h-3.5 w-3.5" /> 新建
+        </button>
+      </div>
+    );
+  };
+
+  const renderGalleryCard = (row: DatabaseRow) => {
+    const urlValue = getDatabasePropertyPreview(row, urlProperty);
+
+    return (
+      <div key={row.id} className="group min-w-0 rounded border border-gray-200 bg-white p-3 shadow-sm transition-colors hover:border-gray-300">
+        <div className="mb-3 flex h-24 items-center justify-center rounded bg-gray-50 text-xs font-medium text-gray-400">
+          {urlValue ? (
+            <a href={urlValue} target="_blank" rel="noopener noreferrer" className="max-w-full truncate px-3 text-gray-500 no-underline hover:text-primary">
+              {urlValue}
+            </a>
+          ) : (
+            <span>无封面</span>
+          )}
+        </div>
+        <div className="flex items-start gap-2">
+          <input
+            value={getDatabaseRowTitle(row, titleProperty)}
+            onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)}
+            className="min-w-0 flex-1 border-none bg-transparent px-0 text-sm font-semibold text-gray-900 outline-none focus:ring-0"
+          />
+          <button type="button" onClick={() => deleteRow(row.id)} className="rounded p-1 text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
+        <div className="mt-2 space-y-1">
+          {galleryMetaProperties.map((property) => (
+            <label key={property.id} className="flex min-w-0 items-center gap-2 text-xs text-gray-500">
+              <span className="w-14 flex-shrink-0 truncate">{property.name}</span>
+              <span className="min-w-0 flex-1">{renderCellInput(row, property)}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderGalleryGrid = (groupRows: DatabaseRow[]) => (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {groupRows.map(renderGalleryCard)}
+    </div>
+  );
+
+  const renderGalleryView = () => (
+    <div className="space-y-3">
+      {groupProperty
+        ? getDatabaseGroups(rows, groupProperty).map((group) => (
+          <div key={group.label} className="space-y-2">
+            <div className="text-xs font-semibold text-gray-500">
+              {group.label} <span className="font-normal text-gray-400">{group.rows.length}</span>
+            </div>
+            {renderGalleryGrid(group.rows)}
+          </div>
+        ))
+        : renderGalleryGrid(rows)}
+      <button type="button" onClick={addRow} className="flex items-center gap-1 rounded px-2 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100">
+        <Plus className="h-3.5 w-3.5" /> 新建
+      </button>
+    </div>
+  );
+
   return (
     <NodeViewWrapper
       className={`smart-doc-database my-4 overflow-hidden rounded-md border bg-white transition-colors ${
@@ -1420,16 +1660,24 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
           <input value={database.title} onChange={(event) => updateTitle(event.target.value)} className="min-w-0 flex-1 border-none bg-transparent px-0 text-sm font-semibold text-gray-900 outline-none focus:ring-0" />
         </div>
         <div className="flex flex-wrap items-center gap-1">
-          {(['table', 'list', 'board'] as DatabaseViewMode[]).map((view) => (
-            <button key={view} type="button" onClick={() => updateView(view)} className={`rounded px-2 py-1 text-xs font-medium ${database.view === view ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
-              {view === 'table' ? '表格' : view === 'list' ? '列表' : '看板'}
+          {DATABASE_VIEW_OPTIONS.map((view) => (
+            <button key={view.value} type="button" onClick={() => updateView(view.value)} className={`rounded px-2 py-1 text-xs font-medium ${database.view === view.value ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-100'}`}>
+              {view.label}
             </button>
           ))}
         </div>
       </div>
       {renderDatabaseControls()}
       <div className="p-3">
-        {database.view === 'list' ? renderListView() : database.view === 'board' ? renderBoardView() : renderTableView()}
+        {database.view === 'list'
+          ? renderListView()
+          : database.view === 'board'
+            ? renderBoardView()
+            : database.view === 'calendar'
+              ? renderCalendarView()
+              : database.view === 'gallery'
+                ? renderGalleryView()
+                : renderTableView()}
       </div>
     </NodeViewWrapper>
   );
