@@ -572,6 +572,174 @@ const createSmartDocumentId = (prefix: string) => {
   return `${prefix}_${Date.now().toString(36)}_${randomPart}`;
 };
 
+const createTemplateButtonContent = (attrs: any) => {
+  const templateContent = Array.isArray(attrs?.templateContent) ? stripTemplateRuntimeAttrs(attrs.templateContent) : [];
+  if (templateContent.length) return templateContent;
+
+  const title = String(attrs?.templateTitle || '新模板条目').trim() || '新模板条目';
+  const body = String(attrs?.templateBody || '').replace(/\r\n/g, '\n');
+  const content: any[] = [
+    {
+      type: 'heading',
+      attrs: { level: 3 },
+      content: [{ type: 'text', text: title }],
+    },
+  ];
+
+  if (body.length) {
+    content.push(...body.split('\n').map((line) => {
+      const text = line.trim();
+      return text
+        ? {
+          type: 'paragraph',
+          content: [{ type: 'text', text }],
+        }
+        : { type: 'paragraph' };
+    }));
+  } else {
+    content.push({ type: 'paragraph' });
+  }
+
+  return content;
+};
+
+const stripTemplateRuntimeAttrs = (value: any): any => {
+  if (Array.isArray(value)) return value.map(stripTemplateRuntimeAttrs);
+  if (!value || typeof value !== 'object') return value;
+
+  const next: any = { ...value };
+  if (next.attrs && typeof next.attrs === 'object') {
+    const { blockId, blockComments, ...restAttrs } = next.attrs;
+    next.attrs = restAttrs;
+  }
+  if (Array.isArray(next.content)) next.content = next.content.map(stripTemplateRuntimeAttrs);
+  return next;
+};
+
+const normalizeTemplateButtonAttrs = (attrs: any) => ({
+  label: String(attrs?.label || '新建模板').trim() || '新建模板',
+  templateTitle: String(attrs?.templateTitle || '新模板条目'),
+  templateBody: String(attrs?.templateBody || ''),
+  templateContent: Array.isArray(attrs?.templateContent) ? stripTemplateRuntimeAttrs(attrs.templateContent) : null,
+});
+
+const TemplateButtonView = ({ node, updateAttributes, editor, getPos, selected }: any) => {
+  const attrs = normalizeTemplateButtonAttrs(node.attrs);
+
+  const insertTemplate = () => {
+    if (!editor || typeof getPos !== 'function') return;
+    const insertAt = getPos() + node.nodeSize;
+    editor.chain().focus().insertContentAt(insertAt, createTemplateButtonContent(attrs)).run();
+  };
+
+  return (
+    <NodeViewWrapper
+      className={`smart-doc-template-button my-3 rounded-md border bg-white transition-colors ${
+        selected ? 'border-gray-400 shadow-sm' : 'border-gray-200 hover:border-gray-300'
+      }`}
+      data-type="template-button"
+      data-label={attrs.label}
+      data-template-title={attrs.templateTitle}
+      data-template-body={attrs.templateBody}
+      data-template-content={attrs.templateContent ? encodeJsonAttribute(attrs.templateContent) : undefined}
+      data-block-id={node.attrs.blockId || undefined}
+      data-comments={Array.isArray(node.attrs.blockComments) && node.attrs.blockComments.length ? encodeJsonAttribute(node.attrs.blockComments) : undefined}
+      id={blockDomId(node.attrs.blockId)}
+      contentEditable={false}
+    >
+      <div className="flex flex-col gap-3 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={insertTemplate}
+            className="inline-flex h-8 items-center gap-1.5 rounded border border-gray-200 bg-gray-900 px-3 text-xs font-semibold text-white hover:bg-gray-700"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            {attrs.label}
+          </button>
+          <input
+            value={attrs.label}
+            onChange={(event) => updateAttributes({ label: event.target.value })}
+            className="h-8 min-w-44 flex-1 rounded border border-gray-200 bg-white px-2 text-xs font-medium text-gray-700 outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-100"
+            aria-label="按钮文字"
+          />
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+          <input
+            value={attrs.templateTitle}
+            onChange={(event) => updateAttributes({ templateTitle: event.target.value })}
+            className="h-8 min-w-0 rounded border border-gray-200 bg-gray-50 px-2 text-xs font-medium text-gray-700 outline-none focus:border-gray-400 focus:bg-white"
+            aria-label="模板标题"
+          />
+          <textarea
+            value={attrs.templateBody}
+            onChange={(event) => updateAttributes({ templateBody: event.target.value })}
+            placeholder="模板正文"
+            className="min-h-16 resize-y rounded border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs leading-5 text-gray-700 outline-none placeholder:text-gray-300 focus:border-gray-400 focus:bg-white"
+            aria-label="模板正文"
+          />
+        </div>
+      </div>
+    </NodeViewWrapper>
+  );
+};
+
+export const TemplateButtonBlock = Node.create({
+  name: 'templateButtonBlock',
+  group: 'block',
+  atom: true,
+  defining: true,
+
+  addAttributes() {
+    return {
+      label: {
+        default: '新建模板',
+        parseHTML: element => element.getAttribute('data-label') || '新建模板',
+        renderHTML: attributes => ({ 'data-label': attributes.label || '新建模板' }),
+      },
+      templateTitle: {
+        default: '新模板条目',
+        parseHTML: element => element.getAttribute('data-template-title') || '新模板条目',
+        renderHTML: attributes => ({ 'data-template-title': attributes.templateTitle || '新模板条目' }),
+      },
+      templateBody: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-template-body') || '',
+        renderHTML: attributes => ({ 'data-template-body': attributes.templateBody || undefined }),
+      },
+      templateContent: {
+        default: null,
+        parseHTML: element => decodeJsonAttribute(element.getAttribute('data-template-content')),
+        renderHTML: attributes => ({ 'data-template-content': attributes.templateContent ? encodeJsonAttribute(stripTemplateRuntimeAttrs(attributes.templateContent)) : undefined }),
+      },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'div[data-type="template-button"]' }]
+  },
+
+  renderHTML({ node, HTMLAttributes }) {
+    const attrs = normalizeTemplateButtonAttrs(node.attrs);
+    return [
+      'div',
+      mergeAttributes(HTMLAttributes, {
+        'data-type': 'template-button',
+        'data-label': attrs.label,
+        'data-template-title': attrs.templateTitle,
+        'data-template-body': attrs.templateBody || undefined,
+        'data-template-content': attrs.templateContent ? encodeJsonAttribute(attrs.templateContent) : undefined,
+        class: 'smart-doc-template-button my-3 rounded-md border border-gray-200 bg-white p-3',
+      }),
+      ['button', { type: 'button', class: 'rounded bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white' }, attrs.label],
+    ]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(TemplateButtonView)
+  },
+});
+
 const createSyncedBlockId = () => {
   return createSmartDocumentId('sync');
 };
@@ -2641,6 +2809,21 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
           type: 'syncedBlock',
           attrs: { syncId: createSyncedBlockId() },
           content: [{ type: 'paragraph' }],
+        }).run();
+      },
+    },
+    {
+      title: '模板按钮',
+      shortcut: '/template',
+      icon: <Plus className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        editor.chain().focus().deleteRange(range).insertContent({
+          type: 'templateButtonBlock',
+          attrs: {
+            label: '新建模板',
+            templateTitle: '新模板条目',
+            templateBody: '补充说明',
+          },
         }).run();
       },
     },

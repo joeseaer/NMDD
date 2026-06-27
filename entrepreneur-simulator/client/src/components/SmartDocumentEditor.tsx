@@ -41,6 +41,7 @@ import {
     BookmarkBlock,
     EmbedBlock,
     MediaBlock,
+    TemplateButtonBlock,
     SyncedBlock,
     PageLinkBlock,
     EquationBlock,
@@ -72,6 +73,7 @@ const BLOCK_ID_TYPES = [
     'bookmarkBlock',
     'embedBlock',
     'mediaBlock',
+    'templateButtonBlock',
     'syncedBlock',
     'pageLinkBlock',
     'equationBlock',
@@ -297,7 +299,7 @@ const getBlockElementScore = (element: HTMLElement) => {
     if (element.classList.contains('notion-image-block')) return 110;
     if (dataType === 'mind-map') return 105;
     if (dataType === 'database') return 105;
-    if (dataType === 'media' || dataType === 'embed' || dataType === 'bookmark') return 104;
+    if (dataType === 'media' || dataType === 'embed' || dataType === 'bookmark' || dataType === 'template-button') return 104;
     if (dataType === 'toggle' || dataType === 'callout') return 98;
     if (tagName === 'table') return 100;
     if (tagName === 'blockquote' || tagName === 'pre') return 95;
@@ -667,7 +669,7 @@ turndownService.addRule('keepSmartDocumentBlocks', {
 
     return (
       (nodeName === 'details' && dataType === 'toggle') ||
-      (nodeName === 'div' && ['callout', 'embed', 'media', 'equation', 'synced-block', 'database'].includes(dataType || '')) ||
+      (nodeName === 'div' && ['callout', 'embed', 'media', 'template-button', 'equation', 'synced-block', 'database'].includes(dataType || '')) ||
       (nodeName === 'a' && ['bookmark', 'page-link'].includes(dataType || ''))
     );
   },
@@ -1565,6 +1567,7 @@ export const SmartDocumentEditor = ({
                     return ReactNodeViewRenderer(NotionMediaComponent);
                 },
             }),
+            TemplateButtonBlock,
             SyncedBlock,
             PageLinkBlock,
             EquationBlock,
