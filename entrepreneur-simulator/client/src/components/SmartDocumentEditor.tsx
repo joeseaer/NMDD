@@ -4,7 +4,8 @@ import {
   Code, PanelLeft, Columns, Table as TableIcon, Image as ImageIcon, X, Network,
   Link as LinkIcon, Unlink, AlignLeft, AlignCenter, AlignRight, Captions,
   ImagePlus, Download, ExternalLink, Maximize2, Trash2, Copy, GripVertical,
-  MoreHorizontal, ArrowUp, ArrowDown, Heading1, Heading2, Heading3, MessageSquare
+  MoreHorizontal, ArrowUp, ArrowDown, Heading1, Heading2, Heading3, MessageSquare,
+  Paperclip, Video, Music, FileText, RefreshCw
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -786,6 +787,61 @@ const getMediaKindFromFile = (file: File) => {
     return 'file';
 };
 
+const normalizeMediaKind = (value: unknown) => {
+    const kind = typeof value === 'string' ? value : '';
+    return ['video', 'audio', 'pdf', 'file'].includes(kind) ? kind : 'file';
+};
+
+const formatMediaSize = (value: unknown) => {
+    const size = Number(value || 0);
+    if (!Number.isFinite(size) || size <= 0) return '';
+
+    const units = ['B', 'KB', 'MB', 'GB'];
+    let current = size;
+    let unitIndex = 0;
+    while (current >= 1024 && unitIndex < units.length - 1) {
+        current /= 1024;
+        unitIndex += 1;
+    }
+
+    const precision = current >= 10 || unitIndex === 0 ? 0 : 1;
+    return `${current.toFixed(precision)} ${units[unitIndex]}`;
+};
+
+const getMediaDisplayName = (name: string, url: string, kind: string) => {
+    if (name?.trim()) return name;
+    if (url) {
+        try {
+            const pathname = new URL(url, window.location.origin).pathname;
+            const last = decodeURIComponent(pathname.split('/').filter(Boolean).pop() || '');
+            if (last) return last;
+        } catch {}
+    }
+    if (kind === 'video') return '未命名视频';
+    if (kind === 'audio') return '未命名音频';
+    if (kind === 'pdf') return '未命名 PDF';
+    return '未命名文件';
+};
+
+const getMediaKindLabel = (kind: string) => {
+    if (kind === 'video') return '视频';
+    if (kind === 'audio') return '音频';
+    if (kind === 'pdf') return 'PDF';
+    return '文件';
+};
+
+const getMediaAccept = (kind: string) => {
+    if (kind === 'video') return 'video/*';
+    if (kind === 'audio') return 'audio/*';
+    if (kind === 'pdf') return 'application/pdf';
+    return undefined;
+};
+
+const safeDownloadName = (value: string) => {
+    const normalized = value.trim().replace(/[\\/:*?"<>|]+/g, '-');
+    return normalized || 'attachment';
+};
+
 const ImageActionButton = ({
     children,
     title,
@@ -1119,6 +1175,166 @@ const NotionImageComponent = (props: any) => {
     );
 };
 
+const NotionMediaComponent = (props: any) => {
+    const { node, updateAttributes, selected, deleteNode, editor } = props;
+    const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+
+    const url = node.attrs.url || '';
+    const kind = normalizeMediaKind(node.attrs.kind);
+    const name = node.attrs.name || '';
+    const mime = node.attrs.mime || '';
+    const size = node.attrs.size || 0;
+    const displayName = getMediaDisplayName(name, url, kind);
+    const sizeLabel = formatMediaSize(size);
+    const meta = [getMediaKindLabel(kind), mime, sizeLabel].filter(Boolean).join(' · ');
+
+    const replaceMedia = async (file: File) => {
+        const uploadFile = editor?.storage?.smartDocument?.uploadFile || editor?.storage?.smartDocument?.uploadImage;
+        if (typeof uploadFile !== 'function') return;
+
+        const nextUrl = await uploadFile(file);
+        if (!nextUrl) return;
+
+        updateAttributes({
+            url: nextUrl,
+            name: file.name,
+            mime: file.type || '',
+            size: file.size,
+            kind: kind === 'file' ? getMediaKindFromFile(file) : kind,
+        });
+    };
+
+    const copyMediaLink = async () => {
+        if (!url) return;
+        try {
+            await navigator.clipboard.writeText(url);
+        } catch {
+            window.prompt('复制文件链接', url);
+        }
+    };
+
+    const downloadMedia = () => {
+        if (!url) return;
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = safeDownloadName(displayName);
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+        link.click();
+    };
+
+    const renderIcon = () => {
+        if (kind === 'video') return <Video className="h-4 w-4" />;
+        if (kind === 'audio') return <Music className="h-4 w-4" />;
+        if (kind === 'pdf') return <FileText className="h-4 w-4" />;
+        return <Paperclip className="h-4 w-4" />;
+    };
+
+    const renderPreview = () => {
+        if (kind === 'video') {
+            return (
+                <video
+                    src={url}
+                    controls
+                    className="block max-h-[520px] w-full bg-black"
+                    contentEditable={false}
+                />
+            );
+        }
+
+        if (kind === 'audio') {
+            return (
+                <div className="border-t border-gray-100 px-3 py-3">
+                    <audio src={url} controls className="w-full" contentEditable={false} />
+                </div>
+            );
+        }
+
+        if (kind === 'pdf') {
+            return (
+                <iframe
+                    src={url}
+                    title={displayName}
+                    className="h-96 w-full border-t border-gray-100 bg-gray-50"
+                    contentEditable={false}
+                />
+            );
+        }
+
+        return null;
+    };
+
+    return (
+        <NodeViewWrapper
+            className={`smart-doc-media group relative my-3 overflow-hidden rounded-md border bg-white transition-colors ${
+                selected ? 'border-gray-400 ring-2 ring-gray-200' : 'border-gray-200 hover:border-gray-300'
+            }`}
+            data-type="media"
+            data-kind={kind}
+            data-url={url}
+            data-name={name}
+            data-mime={mime}
+            data-size={size || 0}
+            id={blockDomId(node.attrs.blockId)}
+            data-block-id={node.attrs.blockId || undefined}
+            data-comments={
+                normalizeBlockComments(node.attrs.blockComments).length
+                    ? encodeURIComponent(JSON.stringify(normalizeBlockComments(node.attrs.blockComments)))
+                    : undefined
+            }
+        >
+            <div className="flex items-start gap-3 px-3 py-3" contentEditable={false}>
+                <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border border-gray-200 bg-gray-50 text-gray-500">
+                    {renderIcon()}
+                </div>
+                <div className="min-w-0 flex-1">
+                    <input
+                        value={displayName}
+                        onMouseDown={(event) => event.stopPropagation()}
+                        onChange={(event) => updateAttributes({ name: event.target.value })}
+                        className="h-7 w-full border-none bg-transparent px-0 text-sm font-medium text-gray-900 outline-none focus:ring-0"
+                        aria-label="媒体名称"
+                    />
+                    <div className="truncate text-xs text-gray-400">{meta || url}</div>
+                </div>
+                <div className={`flex flex-shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white/95 p-1 shadow-sm transition-opacity ${
+                    selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+                }`}>
+                    <ImageActionButton title="替换文件" onClick={() => fileInputRef.current?.click()}>
+                        <RefreshCw className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="复制链接" onClick={copyMediaLink}>
+                        <Copy className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="打开原文件" onClick={() => url && window.open(url, '_blank', 'noopener,noreferrer')}>
+                        <ExternalLink className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="下载" onClick={downloadMedia}>
+                        <Download className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="删除" danger onClick={() => deleteNode?.()}>
+                        <Trash2 className="h-4 w-4" />
+                    </ImageActionButton>
+                </div>
+            </div>
+
+            {renderPreview()}
+
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept={getMediaAccept(kind)}
+                className="hidden"
+                onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) replaceMedia(file);
+                    event.target.value = '';
+                }}
+            />
+        </NodeViewWrapper>
+    );
+};
+
 export type SmartDocumentValue = {
     markdown: string;
     json: JSONContent;
@@ -1344,7 +1560,11 @@ export const SmartDocumentEditor = ({
             CalloutBlock,
             BookmarkBlock,
             EmbedBlock,
-            MediaBlock,
+            MediaBlock.extend({
+                addNodeView() {
+                    return ReactNodeViewRenderer(NotionMediaComponent);
+                },
+            }),
             SyncedBlock,
             PageLinkBlock,
             EquationBlock,
