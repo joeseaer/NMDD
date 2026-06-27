@@ -875,9 +875,10 @@ export const SyncedBlock = Node.create({
   },
 });
 
-type DatabasePropertyType = 'title' | 'text' | 'number' | 'status' | 'date' | 'checkbox' | 'url' | 'formula';
+type DatabasePropertyType = 'title' | 'text' | 'number' | 'status' | 'date' | 'checkbox' | 'url' | 'formula' | 'relation' | 'rollup';
 type DatabaseViewMode = 'table' | 'list' | 'board' | 'calendar' | 'timeline' | 'gallery';
 type DatabaseFilterOperator = 'contains' | 'equals' | 'not_empty' | 'empty';
+type DatabaseRollupFunction = 'count' | 'show' | 'sum' | 'avg' | 'min' | 'max';
 
 type DatabaseProperty = {
   id: string;
@@ -885,6 +886,9 @@ type DatabaseProperty = {
   type: DatabasePropertyType;
   options?: string[];
   formula?: string;
+  relationPropertyId?: string;
+  rollupTargetPropertyId?: string;
+  rollupFunction?: DatabaseRollupFunction;
 };
 
 type DatabaseRow = {
@@ -942,6 +946,8 @@ const DATABASE_PROPERTY_TYPES: Array<{ value: DatabasePropertyType; label: strin
   { value: 'checkbox', label: '勾选' },
   { value: 'url', label: '链接' },
   { value: 'formula', label: '公式' },
+  { value: 'relation', label: '关系' },
+  { value: 'rollup', label: '汇总' },
 ];
 
 const DATABASE_VIEW_OPTIONS: Array<{ value: DatabaseViewMode; label: string }> = [
@@ -961,6 +967,15 @@ const DATABASE_FILTER_OPERATORS: Array<{ value: DatabaseFilterOperator; label: s
   { value: 'equals', label: '等于', needsValue: true },
   { value: 'not_empty', label: '非空', needsValue: false },
   { value: 'empty', label: '为空', needsValue: false },
+];
+
+const DATABASE_ROLLUP_FUNCTIONS: Array<{ value: DatabaseRollupFunction; label: string }> = [
+  { value: 'count', label: '计数' },
+  { value: 'show', label: '显示原值' },
+  { value: 'sum', label: '求和' },
+  { value: 'avg', label: '平均值' },
+  { value: 'min', label: '最小值' },
+  { value: 'max', label: '最大值' },
 ];
 
 const getDatabaseViewModeLabel = (mode: DatabaseViewMode) => {
@@ -1023,6 +1038,10 @@ const normalizePropertyType = (value: unknown): DatabasePropertyType => {
   return DATABASE_PROPERTY_TYPES.some((item) => item.value === value) ? value as DatabasePropertyType : 'text';
 };
 
+const normalizeDatabaseRollupFunction = (value: unknown): DatabaseRollupFunction => {
+  return DATABASE_ROLLUP_FUNCTIONS.some((item) => item.value === value) ? value as DatabaseRollupFunction : 'count';
+};
+
 const normalizeFilterOperator = (value: unknown): DatabaseFilterOperator => {
   return DATABASE_FILTER_OPERATORS.some((item) => item.value === value) ? value as DatabaseFilterOperator : 'contains';
 };
@@ -1046,8 +1065,26 @@ const normalizeStatusOptions = (value: unknown) => {
   return options.length ? options : DEFAULT_STATUS_OPTIONS;
 };
 
+const normalizeRelationCellValue = (value: unknown) => {
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[,，\n]/)
+      : [];
+  const seen = new Set<string>();
+
+  return source
+    .map((item) => String(item || '').trim())
+    .filter((item) => {
+      if (!item || seen.has(item)) return false;
+      seen.add(item);
+      return true;
+    });
+};
+
 const normalizeDatabaseCellValue = (property: DatabaseProperty, value: any) => {
-  if (property.type === 'formula') return '';
+  if (property.type === 'formula' || property.type === 'rollup') return '';
+  if (property.type === 'relation') return normalizeRelationCellValue(value);
   if (property.type === 'checkbox') return Boolean(value);
   if (property.type === 'status') {
     const options = property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS;
@@ -1061,6 +1098,7 @@ const normalizeDatabaseCellValue = (property: DatabaseProperty, value: any) => {
 const getDefaultDatabaseCellValue = (property: DatabaseProperty) => {
   if (property.type === 'checkbox') return false;
   if (property.type === 'status') return property.options?.[0] || DEFAULT_STATUS_OPTIONS[0];
+  if (property.type === 'relation') return [];
   return '';
 };
 
@@ -1193,6 +1231,74 @@ const formatDatabaseFormulaValue = (value: DatabaseFormulaResult['value']) => {
   return String(value);
 };
 
+const getDatabaseTitleProperty = (database: SmartDocumentDatabase) => {
+  return database.properties.find((property) => property.type === 'title') || database.properties[0] || null;
+};
+
+const getDatabaseRowTitleValue = (database: SmartDocumentDatabase, row: DatabaseRow | null | undefined) => {
+  if (!row) return '';
+  const titleProperty = getDatabaseTitleProperty(database);
+  return titleProperty ? String(row.cells[titleProperty.id] || '').trim() || '未命名' : '未命名';
+};
+
+const getRelationCellRowIds = (database: SmartDocumentDatabase, row: DatabaseRow, property: DatabaseProperty) => {
+  if (property.type !== 'relation') return [];
+  const rowIds = new Set(database.rows.map((item) => item.id));
+  return normalizeRelationCellValue(row.cells[property.id]).filter((rowId) => rowId !== row.id && rowIds.has(rowId));
+};
+
+const getRelationRows = (database: SmartDocumentDatabase, row: DatabaseRow, property: DatabaseProperty) => {
+  const relatedIds = getRelationCellRowIds(database, row, property);
+  return relatedIds
+    .map((rowId) => database.rows.find((item) => item.id === rowId) || null)
+    .filter(Boolean) as DatabaseRow[];
+};
+
+const getRelationDisplayValue = (database: SmartDocumentDatabase, row: DatabaseRow, property: DatabaseProperty) => {
+  return getRelationRows(database, row, property)
+    .map((relatedRow) => getDatabaseRowTitleValue(database, relatedRow))
+    .filter(Boolean)
+    .join(', ');
+};
+
+const evaluateDatabaseRollup = (
+  database: SmartDocumentDatabase,
+  row: DatabaseRow,
+  property: DatabaseProperty,
+  seen: Set<string> = new Set(),
+): DatabaseFormulaResult => {
+  const seenKey = `${row.id}:${property.id}`;
+  if (seen.has(seenKey)) return { value: null, error: '循环汇总' };
+
+  const relationProperty = database.properties.find((item) => (
+    item.id === property.relationPropertyId && item.type === 'relation'
+  ));
+  if (!relationProperty) return { value: '', error: '缺少关系属性' };
+
+  const relatedRows = getRelationRows(database, row, relationProperty);
+  const rollupFunction = normalizeDatabaseRollupFunction(property.rollupFunction);
+  if (rollupFunction === 'count') return { value: relatedRows.length };
+
+  const targetProperty = database.properties.find((item) => item.id === property.rollupTargetPropertyId);
+  if (!targetProperty) return { value: '', error: '缺少目标属性' };
+
+  const nextSeen = new Set([...seen, seenKey]);
+  const values = relatedRows.map((relatedRow) => getCellDisplayValue(database, relatedRow, targetProperty, nextSeen));
+  if (rollupFunction === 'show') return { value: values.filter(Boolean).join(', ') };
+
+  const numericValues = values
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+
+  if (!numericValues.length) return { value: '' };
+  if (rollupFunction === 'sum') return { value: numericValues.reduce((total, value) => total + value, 0) };
+  if (rollupFunction === 'avg') return { value: numericValues.reduce((total, value) => total + value, 0) / numericValues.length };
+  if (rollupFunction === 'min') return { value: Math.min(...numericValues) };
+  if (rollupFunction === 'max') return { value: Math.max(...numericValues) };
+
+  return { value: '' };
+};
+
 const evaluateDatabaseFormula = (
   database: SmartDocumentDatabase,
   row: DatabaseRow,
@@ -1215,6 +1321,8 @@ const evaluateDatabaseFormula = (
     if (target.type === 'formula') {
       return evaluateDatabaseFormula(database, row, target, new Set([...seen, property.id]));
     }
+    if (target.type === 'rollup') return evaluateDatabaseRollup(database, row, target);
+    if (target.type === 'relation') return { value: getRelationDisplayValue(database, row, target) };
     if (target.type === 'checkbox') return { value: Boolean(row.cells[target.id]) };
     return { value: row.cells[target.id] ?? '' };
   };
@@ -1446,7 +1554,7 @@ const normalizeDatabaseViews = (raw: any, properties: DatabaseProperty[], proper
 const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
   const raw: any = value && typeof value === 'object' ? value : {};
   const fallback = createDefaultDatabase();
-  const properties = Array.isArray(raw.properties)
+  const properties: DatabaseProperty[] = Array.isArray(raw.properties)
     ? raw.properties.map((property: any, index: number) => {
       const type = index === 0 ? 'title' : normalizePropertyType(property?.type);
       const options = type === 'status'
@@ -1455,6 +1563,15 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
       const formula = type === 'formula'
         ? String(property?.formula || '').trim()
         : undefined;
+      const relationPropertyId = type === 'rollup'
+        ? String(property?.relationPropertyId || property?.relation_property_id || '').trim()
+        : undefined;
+      const rollupTargetPropertyId = type === 'rollup'
+        ? String(property?.rollupTargetPropertyId || property?.rollup_target_property_id || '').trim()
+        : undefined;
+      const rollupFunction = type === 'rollup'
+        ? normalizeDatabaseRollupFunction(property?.rollupFunction || property?.rollup_function)
+        : undefined;
 
       return {
         id: String(property?.id || createSmartDocumentId('prop')),
@@ -1462,6 +1579,9 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
         type,
         options,
         formula,
+        relationPropertyId,
+        rollupTargetPropertyId,
+        rollupFunction,
       };
     }).filter((property: DatabaseProperty) => property.id)
     : fallback.properties;
@@ -1470,10 +1590,34 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
     properties.unshift({ id: createSmartDocumentId('prop'), name: '名称', type: 'title' });
   }
 
-  const normalizedProperties = properties.map((property: DatabaseProperty, index: number) => ({
-    ...property,
-    type: index === 0 ? 'title' as DatabasePropertyType : property.type,
-  }));
+  const normalizedProperties: DatabaseProperty[] = properties.map((property: DatabaseProperty, index: number): DatabaseProperty => {
+    const type = index === 0 ? 'title' as DatabasePropertyType : property.type;
+    if (type !== 'rollup') {
+      return {
+        ...property,
+        type,
+        relationPropertyId: undefined,
+        rollupTargetPropertyId: undefined,
+        rollupFunction: undefined,
+      };
+    }
+
+    const relationProperty = properties.find((item: DatabaseProperty) => item.id === property.relationPropertyId && item.type === 'relation')
+      || properties.find((item: DatabaseProperty) => item.type === 'relation');
+    const targetProperty = properties.find((item: DatabaseProperty) => item.id === property.rollupTargetPropertyId && item.id !== property.id)
+      || properties.find((item: DatabaseProperty) => item.type === 'title')
+      || properties.find((item: DatabaseProperty) => item.id !== property.id);
+
+    return {
+      ...property,
+      type,
+      options: undefined,
+      formula: undefined,
+      relationPropertyId: relationProperty?.id,
+      rollupTargetPropertyId: targetProperty?.id,
+      rollupFunction: normalizeDatabaseRollupFunction(property.rollupFunction),
+    };
+  });
 
   const sourceRows = Array.isArray(raw.rows) && raw.rows.length ? raw.rows : fallback.rows;
   const rows = sourceRows
@@ -1485,7 +1629,17 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
         page: normalizeDatabaseRowPage(row?.page),
       };
     }).filter((row: DatabaseRow) => row.id);
-  const normalizedRows = rows.length ? rows : [createDatabaseRow(normalizedProperties, '新条目')];
+  const normalizedRows: DatabaseRow[] = rows.length ? rows : [createDatabaseRow(normalizedProperties, '新条目')];
+  const rowIds = new Set<string>(normalizedRows.map((row: DatabaseRow) => row.id));
+  const normalizedRowsWithRelations: DatabaseRow[] = normalizedRows.map((row: DatabaseRow) => ({
+    ...row,
+    cells: Object.fromEntries(normalizedProperties.map((property: DatabaseProperty) => [
+      property.id,
+      property.type === 'relation'
+        ? normalizeRelationCellValue(row.cells[property.id]).filter((rowId) => rowId !== row.id && rowIds.has(rowId))
+        : row.cells[property.id],
+    ])),
+  }));
 
   const propertyIds = new Set<string>(normalizedProperties.map((property: DatabaseProperty) => property.id));
   const views = normalizeDatabaseViews(raw, normalizedProperties, propertyIds);
@@ -1499,16 +1653,26 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
     views,
     activeViewId: activeView.id,
     properties: normalizedProperties,
-    rows: normalizedRows,
+    rows: normalizedRowsWithRelations,
     filters: activeView.filters,
     groupBy: activeView.groupBy,
     sort: activeView.sort,
   };
 };
 
-const getCellDisplayValue = (database: SmartDocumentDatabase, row: DatabaseRow, property: DatabaseProperty) => {
+const getCellDisplayValue = (
+  database: SmartDocumentDatabase,
+  row: DatabaseRow,
+  property: DatabaseProperty,
+  seen: Set<string> = new Set(),
+) => {
   if (property.type === 'formula') {
     const result = evaluateDatabaseFormula(database, row, property);
+    return result.error ? `#${result.error}` : formatDatabaseFormulaValue(result.value);
+  }
+  if (property.type === 'relation') return getRelationDisplayValue(database, row, property);
+  if (property.type === 'rollup') {
+    const result = evaluateDatabaseRollup(database, row, property, seen);
     return result.error ? `#${result.error}` : formatDatabaseFormulaValue(result.value);
   }
   if (property.type === 'checkbox') return row.cells[property.id] ? 'true' : '';
@@ -1523,6 +1687,14 @@ const getCellSortValue = (database: SmartDocumentDatabase, row: DatabaseRow, pro
     if (typeof result.value === 'boolean') return result.value ? 1 : 0;
     return String(result.value || '').toLowerCase();
   }
+  if (property.type === 'rollup') {
+    const result = evaluateDatabaseRollup(database, row, property);
+    if (result.error) return `#${result.error}`.toLowerCase();
+    if (typeof result.value === 'number') return result.value;
+    if (typeof result.value === 'boolean') return result.value ? 1 : 0;
+    return String(result.value || '').toLowerCase();
+  }
+  if (property.type === 'relation') return getRelationDisplayValue(database, row, property).toLowerCase();
   const value = row.cells[property.id];
   if (property.type === 'checkbox') return value ? 1 : 0;
   if (property.type === 'number') return Number(value || 0);
@@ -1952,6 +2124,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
     : null;
   const boardGroupProperty = groupProperty || boardProperty || titleProperty || null;
   const statusProperties = database.properties.filter((property) => property.type === 'status');
+  const relationProperties = database.properties.filter((property) => property.type === 'relation');
   const activeView = database.views.find((view) => view.id === database.activeViewId) || database.views[0];
   const [filterDraft, setFilterDraft] = useState<Pick<DatabaseFilter, 'propertyId' | 'operator' | 'value'>>({
     propertyId: database.properties[0]?.id || '',
@@ -2121,12 +2294,23 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
     const properties = database.properties.map((property, index) => {
       if (property.id !== propertyId) return property;
       const nextType = index === 0 ? 'title' : (patch.type ? normalizePropertyType(patch.type) : property.type);
+      const nextRelationPropertyId = String(patch.relationPropertyId ?? property.relationPropertyId ?? '');
+      const relationFallback = database.properties.find((item) => item.type === 'relation' && item.id !== propertyId)?.id;
+      const nextTargetPropertyId = String(patch.rollupTargetPropertyId ?? property.rollupTargetPropertyId ?? '');
+      const targetFallback = database.properties.find((item) => item.type === 'title' && item.id !== propertyId)?.id
+        || database.properties.find((item) => item.id !== propertyId)?.id;
+
       return {
         ...property,
         ...patch,
         type: nextType,
         options: nextType === 'status' ? (property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS) : undefined,
         formula: nextType === 'formula' ? String(patch.formula ?? property.formula ?? '') : undefined,
+        relationPropertyId: nextType === 'rollup' ? (nextRelationPropertyId || relationFallback) : undefined,
+        rollupTargetPropertyId: nextType === 'rollup' ? (nextTargetPropertyId || targetFallback) : undefined,
+        rollupFunction: nextType === 'rollup'
+          ? normalizeDatabaseRollupFunction(patch.rollupFunction ?? property.rollupFunction)
+          : undefined,
       };
     });
     commit({
@@ -2166,7 +2350,18 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
 
   const deleteRow = (rowId: string) => {
     if (openRowId === rowId) setOpenRowId(null);
-    commit({ ...database, rows: database.rows.filter((row) => row.id !== rowId) });
+    const rows = database.rows
+      .filter((row) => row.id !== rowId)
+      .map((row) => ({
+        ...row,
+        cells: Object.fromEntries(database.properties.map((property) => [
+          property.id,
+          property.type === 'relation'
+            ? normalizeRelationCellValue(row.cells[property.id]).filter((relatedId) => relatedId !== rowId)
+            : row.cells[property.id],
+        ])),
+      }));
+    commit({ ...database, rows });
   };
 
   const updateCell = (rowId: string, propertyId: string, value: any) => {
@@ -2212,6 +2407,57 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
     if (property.type === 'date') return <input type="date" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
     if (property.type === 'number') return <input type="number" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
     if (property.type === 'url') return <input type="url" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} placeholder="https://" />;
+    if (property.type === 'relation') {
+      const relationIds = getRelationCellRowIds(database, row, property);
+      const availableRows = database.rows.filter((item) => item.id !== row.id && !relationIds.includes(item.id));
+      const removeRelation = (relatedId: string) => {
+        updateCell(row.id, property.id, relationIds.filter((item) => item !== relatedId));
+      };
+
+      return (
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-h-7 flex-wrap items-center gap-1 rounded border border-transparent px-1 py-0.5 hover:border-gray-200">
+            {relationIds.length === 0 && <span className="px-1 text-xs text-gray-400">选择关联条目</span>}
+            {relationIds.map((relatedId) => {
+              const relatedRow = database.rows.find((item) => item.id === relatedId);
+              if (!relatedRow) return null;
+              return (
+                <button
+                  key={relatedId}
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    removeRelation(relatedId);
+                  }}
+                  className="flex max-w-36 items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-600 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                  title="点击移除关联"
+                >
+                  <span className="truncate">{getDatabaseRowTitleValue(database, relatedRow)}</span>
+                  <X className="h-3 w-3 flex-shrink-0" />
+                </button>
+              );
+            })}
+          </div>
+          {availableRows.length > 0 && (
+            <select
+              value=""
+              onChange={(event) => {
+                const nextId = event.target.value;
+                if (!nextId) return;
+                updateCell(row.id, property.id, [...relationIds, nextId]);
+              }}
+              className="h-7 w-full rounded border border-gray-200 bg-white px-2 text-xs text-gray-600 outline-none focus:border-gray-400"
+            >
+              <option value="">添加关联...</option>
+              {availableRows.map((relatedRow) => (
+                <option key={relatedRow.id} value={relatedRow.id}>{getDatabaseRowTitleValue(database, relatedRow)}</option>
+              ))}
+            </select>
+          )}
+        </div>
+      );
+    }
     if (property.type === 'formula') {
       const result = evaluateDatabaseFormula(database, row, property);
       const formulaText = String(property.formula || '').trim();
@@ -2228,6 +2474,26 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
           }`}
         >
           <span className="truncate">{formulaText ? displayValue : '设置公式'}</span>
+        </div>
+      );
+    }
+    if (property.type === 'rollup') {
+      const result = evaluateDatabaseRollup(database, row, property);
+      const displayValue = result.error ? `#${result.error}` : formatDatabaseFormulaValue(result.value);
+      const isConfigured = Boolean(property.relationPropertyId && property.rollupTargetPropertyId);
+
+      return (
+        <div
+          title={isConfigured ? displayValue || '无汇总值' : '未设置汇总'}
+          className={`flex h-8 min-w-0 items-center rounded px-2 text-xs ${
+            result.error
+              ? 'bg-red-50 text-red-600'
+              : isConfigured
+                ? 'bg-gray-50 font-medium text-gray-700'
+                : 'bg-gray-50 text-gray-400'
+          }`}
+        >
+          <span className="truncate">{isConfigured ? displayValue : '设置汇总'}</span>
         </div>
       );
     }
@@ -2378,8 +2644,53 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
                       onChange={(event) => updateProperty(property.id, { formula: event.target.value })}
                       placeholder="{数字} * 2"
                       className="min-w-0 flex-1 border-none bg-transparent px-0 text-[11px] text-gray-700 outline-none placeholder:text-gray-300 focus:ring-0"
-                    />
-                  </label>
+                      />
+                    </label>
+                )}
+                {property.type === 'relation' && (
+                  <div className="mt-1 rounded border border-gray-100 bg-white px-1.5 py-1 text-[10px] font-normal text-gray-400">
+                    关联当前数据库条目
+                  </div>
+                )}
+                {property.type === 'rollup' && (
+                  <div className="mt-1 space-y-1 rounded border border-gray-200 bg-white px-1.5 py-1">
+                    {relationProperties.length === 0 ? (
+                      <div className="text-[10px] font-normal text-gray-400">先添加一个关系属性</div>
+                    ) : (
+                      <>
+                        <select
+                          value={property.relationPropertyId || relationProperties[0]?.id || ''}
+                          onChange={(event) => updateProperty(property.id, { relationPropertyId: event.target.value })}
+                          className="h-6 w-full rounded border border-gray-100 bg-gray-50 px-1 text-[10px] font-normal text-gray-600 outline-none focus:border-gray-300"
+                          title="关系属性"
+                        >
+                          {relationProperties.map((relationProperty) => (
+                            <option key={relationProperty.id} value={relationProperty.id}>{relationProperty.name}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={property.rollupTargetPropertyId || titleProperty.id}
+                          onChange={(event) => updateProperty(property.id, { rollupTargetPropertyId: event.target.value })}
+                          className="h-6 w-full rounded border border-gray-100 bg-gray-50 px-1 text-[10px] font-normal text-gray-600 outline-none focus:border-gray-300"
+                          title="目标属性"
+                        >
+                          {database.properties.filter((item) => item.id !== property.id).map((targetProperty) => (
+                            <option key={targetProperty.id} value={targetProperty.id}>{targetProperty.name}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={normalizeDatabaseRollupFunction(property.rollupFunction)}
+                          onChange={(event) => updateProperty(property.id, { rollupFunction: event.target.value as DatabaseRollupFunction })}
+                          className="h-6 w-full rounded border border-gray-100 bg-gray-50 px-1 text-[10px] font-normal text-gray-600 outline-none focus:border-gray-300"
+                          title="汇总方式"
+                        >
+                          {DATABASE_ROLLUP_FUNCTIONS.map((rollupFunction) => (
+                            <option key={rollupFunction.value} value={rollupFunction.value}>{rollupFunction.label}</option>
+                          ))}
+                        </select>
+                      </>
+                    )}
+                  </div>
                 )}
               </th>
             ))}
