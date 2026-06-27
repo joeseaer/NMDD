@@ -699,6 +699,7 @@ export const SyncedBlock = Node.create({
 
 type DatabasePropertyType = 'title' | 'text' | 'number' | 'status' | 'date' | 'checkbox' | 'url';
 type DatabaseViewMode = 'table' | 'list' | 'board';
+type DatabaseFilterOperator = 'contains' | 'equals' | 'not_empty' | 'empty';
 
 type DatabaseProperty = {
   id: string;
@@ -712,12 +713,21 @@ type DatabaseRow = {
   cells: Record<string, any>;
 };
 
+type DatabaseFilter = {
+  id: string;
+  propertyId: string;
+  operator: DatabaseFilterOperator;
+  value: string;
+};
+
 type SmartDocumentDatabase = {
   id: string;
   title: string;
   view: DatabaseViewMode;
   properties: DatabaseProperty[];
   rows: DatabaseRow[];
+  filters: DatabaseFilter[];
+  groupBy: string | null;
   sort?: {
     propertyId: string;
     direction: 'asc' | 'desc';
@@ -735,6 +745,14 @@ const DATABASE_PROPERTY_TYPES: Array<{ value: DatabasePropertyType; label: strin
 ];
 
 const DEFAULT_STATUS_OPTIONS = ['未开始', '进行中', '完成'];
+const EMPTY_DATABASE_GROUP = '未填写';
+
+const DATABASE_FILTER_OPERATORS: Array<{ value: DatabaseFilterOperator; label: string; needsValue: boolean }> = [
+  { value: 'contains', label: '包含', needsValue: true },
+  { value: 'equals', label: '等于', needsValue: true },
+  { value: 'not_empty', label: '非空', needsValue: false },
+  { value: 'empty', label: '为空', needsValue: false },
+];
 
 const createDefaultDatabase = (): SmartDocumentDatabase => {
   const titlePropertyId = createSmartDocumentId('prop');
@@ -761,12 +779,48 @@ const createDefaultDatabase = (): SmartDocumentDatabase => {
         },
       },
     ],
+    filters: [],
+    groupBy: null,
     sort: null,
   };
 };
 
 const normalizePropertyType = (value: unknown): DatabasePropertyType => {
   return DATABASE_PROPERTY_TYPES.some((item) => item.value === value) ? value as DatabasePropertyType : 'text';
+};
+
+const normalizeFilterOperator = (value: unknown): DatabaseFilterOperator => {
+  return DATABASE_FILTER_OPERATORS.some((item) => item.value === value) ? value as DatabaseFilterOperator : 'contains';
+};
+
+const normalizeStatusOptions = (value: unknown) => {
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(/[,，\n]/)
+      : [];
+
+  const seen = new Set<string>();
+  const options = source
+    .map((option) => String(option).trim())
+    .filter((option) => {
+      if (!option || seen.has(option)) return false;
+      seen.add(option);
+      return true;
+    });
+
+  return options.length ? options : DEFAULT_STATUS_OPTIONS;
+};
+
+const normalizeDatabaseCellValue = (property: DatabaseProperty, value: any) => {
+  if (property.type === 'checkbox') return Boolean(value);
+  if (property.type === 'status') {
+    const options = property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS;
+    const nextValue = String(value || '').trim();
+    return options.includes(nextValue) ? nextValue : options[0];
+  }
+  if (value === null || value === undefined) return '';
+  return String(value);
 };
 
 const getDefaultDatabaseCellValue = (property: DatabaseProperty) => {
@@ -779,7 +833,7 @@ const createDatabaseCells = (properties: DatabaseProperty[], existingCells: Reco
   return Object.fromEntries(properties.map((property) => [
     property.id,
     Object.prototype.hasOwnProperty.call(existingCells, property.id)
-      ? existingCells[property.id]
+      ? normalizeDatabaseCellValue(property, existingCells[property.id])
       : getDefaultDatabaseCellValue(property),
   ]));
 };
@@ -802,11 +856,8 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
   const properties = Array.isArray(raw.properties)
     ? raw.properties.map((property: any, index: number) => {
       const type = index === 0 ? 'title' : normalizePropertyType(property?.type);
-      const rawOptions = Array.isArray(property?.options)
-        ? property.options.map((option: any) => String(option)).filter(Boolean)
-        : [];
       const options = type === 'status'
-        ? (rawOptions.length ? rawOptions : DEFAULT_STATUS_OPTIONS)
+        ? normalizeStatusOptions(property?.options)
         : undefined;
 
       return {
@@ -845,6 +896,24 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
       direction: raw.sort.direction === 'desc' ? 'desc' as const : 'asc' as const,
     }
     : null;
+  const propertyIds = new Set(normalizedProperties.map((property: DatabaseProperty) => property.id));
+  const filters = Array.isArray(raw.filters)
+    ? raw.filters.map((filter: any) => {
+      const propertyId = String(filter?.propertyId || '');
+      if (!propertyIds.has(propertyId)) return null;
+
+      return {
+        id: String(filter?.id || createSmartDocumentId('filter')),
+        propertyId,
+        operator: normalizeFilterOperator(filter?.operator),
+        value: String(filter?.value || ''),
+      };
+    }).filter(Boolean) as DatabaseFilter[]
+    : [];
+  const rawGroupBy = String(raw.groupBy || '');
+  const groupBy = propertyIds.has(rawGroupBy)
+    ? rawGroupBy
+    : null;
 
   return {
     id: String(raw.id || fallback.id),
@@ -852,6 +921,8 @@ const normalizeDatabase = (value: unknown): SmartDocumentDatabase => {
     view,
     properties: normalizedProperties,
     rows: normalizedRows,
+    filters,
+    groupBy,
     sort,
   };
 };
@@ -861,6 +932,39 @@ const getCellSortValue = (row: DatabaseRow, property: DatabaseProperty) => {
   if (property.type === 'checkbox') return value ? 1 : 0;
   if (property.type === 'number') return Number(value || 0);
   return String(value || '').toLowerCase();
+};
+
+const getCellTextValue = (row: DatabaseRow, property: DatabaseProperty) => {
+  const value = row.cells[property.id];
+  if (property.type === 'checkbox') return value ? 'true' : '';
+  return String(value || '').trim();
+};
+
+const filterNeedsValue = (operator: DatabaseFilterOperator) => {
+  return DATABASE_FILTER_OPERATORS.find((item) => item.value === operator)?.needsValue ?? true;
+};
+
+const rowMatchesFilter = (row: DatabaseRow, property: DatabaseProperty, filter: DatabaseFilter) => {
+  const cellValue = getCellTextValue(row, property);
+  const filterValue = String(filter.value || '').trim();
+
+  if (filter.operator === 'not_empty') return Boolean(cellValue);
+  if (filter.operator === 'empty') return !cellValue;
+  if (filter.operator === 'equals') return cellValue.toLowerCase() === filterValue.toLowerCase();
+  return cellValue.toLowerCase().includes(filterValue.toLowerCase());
+};
+
+const getFilteredDatabaseRows = (database: SmartDocumentDatabase) => {
+  if (!database.filters.length) return database.rows;
+
+  return database.rows.filter((row) => (
+    database.filters.every((filter) => {
+      const property = database.properties.find((item) => item.id === filter.propertyId);
+      if (!property) return true;
+      if (filterNeedsValue(filter.operator) && !String(filter.value || '').trim()) return true;
+      return rowMatchesFilter(row, property, filter);
+    })
+  ));
 };
 
 const getSortedDatabaseRows = (database: SmartDocumentDatabase) => {
@@ -878,6 +982,37 @@ const getSortedDatabaseRows = (database: SmartDocumentDatabase) => {
   });
 };
 
+const getVisibleDatabaseRows = (database: SmartDocumentDatabase) => {
+  return getSortedDatabaseRows({ ...database, rows: getFilteredDatabaseRows(database) });
+};
+
+const getDatabaseGroupLabel = (row: DatabaseRow, property: DatabaseProperty) => {
+  if (property.type === 'checkbox') return row.cells[property.id] ? '已勾选' : '未勾选';
+  return getCellTextValue(row, property) || EMPTY_DATABASE_GROUP;
+};
+
+const getDatabaseGroups = (rows: DatabaseRow[], property: DatabaseProperty | null) => {
+  if (!property) {
+    return [{ label: '全部', rows }];
+  }
+
+  const labels = property.type === 'status'
+    ? [...(property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS)]
+    : property.type === 'checkbox'
+      ? ['未勾选', '已勾选']
+      : [];
+
+  for (const row of rows) {
+    const label = getDatabaseGroupLabel(row, property);
+    if (!labels.includes(label)) labels.push(label);
+  }
+
+  return labels.map((label) => ({
+    label,
+    rows: rows.filter((row) => getDatabaseGroupLabel(row, property) === label),
+  }));
+};
+
 const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
   const database = normalizeDatabase(node.attrs.database);
   const commentsAttr = Array.isArray(node.attrs.blockComments) && node.attrs.blockComments.length
@@ -885,7 +1020,28 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     : undefined;
   const titleProperty = database.properties.find((property) => property.type === 'title') || database.properties[0];
   const boardProperty = database.properties.find((property) => property.type === 'status') || database.properties.find((property) => property.type === 'text');
-  const rows = getSortedDatabaseRows(database);
+  const rows = getVisibleDatabaseRows(database);
+  const filteredOutCount = Math.max(0, database.rows.length - getFilteredDatabaseRows(database).length);
+  const groupProperty = database.groupBy
+    ? database.properties.find((property) => property.id === database.groupBy) || null
+    : null;
+  const boardGroupProperty = groupProperty || boardProperty || titleProperty || null;
+  const statusProperties = database.properties.filter((property) => property.type === 'status');
+  const [filterDraft, setFilterDraft] = useState<Pick<DatabaseFilter, 'propertyId' | 'operator' | 'value'>>({
+    propertyId: database.properties[0]?.id || '',
+    operator: 'contains',
+    value: '',
+  });
+  const propertySignature = database.properties.map((property) => property.id).join('|');
+
+  useEffect(() => {
+    if (!filterDraft.propertyId || !database.properties.some((property) => property.id === filterDraft.propertyId)) {
+      setFilterDraft((current) => ({
+        ...current,
+        propertyId: database.properties[0]?.id || '',
+      }));
+    }
+  }, [database.properties, filterDraft.propertyId, propertySignature]);
 
   const commit = (nextDatabase: SmartDocumentDatabase) => {
     updateAttributes({ database: normalizeDatabase(nextDatabase) });
@@ -893,6 +1049,55 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
 
   const updateTitle = (title: string) => commit({ ...database, title });
   const updateView = (view: DatabaseViewMode) => commit({ ...database, view });
+  const updateGroupBy = (propertyId: string) => {
+    commit({ ...database, groupBy: propertyId || null });
+  };
+
+  const addFilter = () => {
+    const property = database.properties.find((item) => item.id === filterDraft.propertyId);
+    if (!property) return;
+    const operator = normalizeFilterOperator(filterDraft.operator);
+    const value = filterNeedsValue(operator) ? filterDraft.value.trim() : '';
+    if (filterNeedsValue(operator) && !value) return;
+
+    commit({
+      ...database,
+      filters: [
+        ...database.filters,
+        {
+          id: createSmartDocumentId('filter'),
+          propertyId: property.id,
+          operator,
+          value,
+        },
+      ],
+    });
+    setFilterDraft((current) => ({ ...current, value: '' }));
+  };
+
+  const deleteFilter = (filterId: string) => {
+    commit({ ...database, filters: database.filters.filter((filter) => filter.id !== filterId) });
+  };
+
+  const updateStatusOptions = (propertyId: string, value: string) => {
+    const properties = database.properties.map((property) => (
+      property.id === propertyId && property.type === 'status'
+        ? { ...property, options: normalizeStatusOptions(value) }
+        : property
+    ));
+
+    commit({
+      ...database,
+      properties,
+      rows: database.rows.map((row) => ({ ...row, cells: createDatabaseCells(properties, row.cells) })),
+    });
+  };
+
+  const formatFilterLabel = (filter: DatabaseFilter) => {
+    const property = database.properties.find((item) => item.id === filter.propertyId);
+    const operator = DATABASE_FILTER_OPERATORS.find((item) => item.value === filter.operator);
+    return `${property?.name || '属性'} ${operator?.label || '包含'}${filterNeedsValue(filter.operator) ? ` ${filter.value}` : ''}`;
+  };
 
   const updateSort = (propertyId: string) => {
     const current = database.sort;
@@ -927,7 +1132,11 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
         options: nextType === 'status' ? (property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS) : undefined,
       };
     });
-    commit({ ...database, properties });
+    commit({
+      ...database,
+      properties,
+      rows: database.rows.map((row) => ({ ...row, cells: createDatabaseCells(properties, row.cells) })),
+    });
   };
 
   const deleteProperty = (propertyId: string) => {
@@ -941,6 +1150,8 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
         const { [propertyId]: _removed, ...cells } = row.cells;
         return { ...row, cells };
       }),
+      filters: database.filters.filter((filter) => filter.propertyId !== propertyId),
+      groupBy: database.groupBy === propertyId ? null : database.groupBy,
       sort: database.sort?.propertyId === propertyId ? null : database.sort,
     });
   };
@@ -984,6 +1195,101 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     return <input type="text" value={String(rawValue || '')} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={`${inputClass} ${property.type === 'title' ? 'font-medium text-gray-900' : ''}`} />;
   };
 
+  const renderDatabaseControls = () => (
+    <div className="space-y-2 border-b border-gray-100 bg-gray-50/40 px-3 py-2" contentEditable={false}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-semibold text-gray-500">筛选</span>
+        <select
+          value={filterDraft.propertyId}
+          onChange={(event) => setFilterDraft((current) => ({ ...current, propertyId: event.target.value }))}
+          className="h-7 max-w-32 rounded border border-gray-200 bg-white px-2 text-xs text-gray-600 outline-none focus:border-gray-400"
+        >
+          {database.properties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}
+        </select>
+        <select
+          value={filterDraft.operator}
+          onChange={(event) => setFilterDraft((current) => ({ ...current, operator: event.target.value as DatabaseFilterOperator }))}
+          className="h-7 rounded border border-gray-200 bg-white px-2 text-xs text-gray-600 outline-none focus:border-gray-400"
+        >
+          {DATABASE_FILTER_OPERATORS.map((operator) => <option key={operator.value} value={operator.value}>{operator.label}</option>)}
+        </select>
+        {filterNeedsValue(filterDraft.operator) && (
+          <input
+            value={filterDraft.value}
+            onChange={(event) => setFilterDraft((current) => ({ ...current, value: event.target.value }))}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                addFilter();
+              }
+            }}
+            className="h-7 w-36 rounded border border-gray-200 bg-white px-2 text-xs text-gray-700 outline-none focus:border-gray-400"
+          />
+        )}
+        <button
+          type="button"
+          onClick={addFilter}
+          disabled={filterNeedsValue(filterDraft.operator) && !filterDraft.value.trim()}
+          className="flex h-7 items-center gap-1 rounded border border-gray-200 bg-white px-2 text-xs font-medium text-gray-600 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Plus className="h-3.5 w-3.5" /> 添加
+        </button>
+
+        <span className="ml-0 text-[11px] font-semibold text-gray-500 sm:ml-3">分组</span>
+        <select
+          value={database.groupBy || ''}
+          onChange={(event) => updateGroupBy(event.target.value)}
+          className="h-7 max-w-36 rounded border border-gray-200 bg-white px-2 text-xs text-gray-600 outline-none focus:border-gray-400"
+        >
+          <option value="">无分组</option>
+          {database.properties.map((property) => <option key={property.id} value={property.id}>{property.name}</option>)}
+        </select>
+        {filteredOutCount > 0 && <span className="text-[11px] text-gray-400">已隐藏 {filteredOutCount} 条</span>}
+      </div>
+
+      {(database.filters.length > 0 || statusProperties.length > 0) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {database.filters.map((filter) => (
+            <button
+              key={filter.id}
+              type="button"
+              onClick={() => deleteFilter(filter.id)}
+              className="flex h-7 items-center gap-1 rounded-full border border-gray-200 bg-white px-2 text-[11px] text-gray-600 hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+            >
+              {formatFilterLabel(filter)}
+              <Trash2 className="h-3 w-3" />
+            </button>
+          ))}
+          {statusProperties.map((property) => (
+            <label key={property.id} className="flex min-w-0 items-center gap-1 text-[11px] text-gray-500">
+              <span className="max-w-20 truncate">{property.name}</span>
+              <input
+                value={(property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS).join(', ')}
+                onChange={(event) => updateStatusOptions(property.id, event.target.value)}
+                className="h-7 w-44 rounded border border-gray-200 bg-white px-2 text-xs text-gray-700 outline-none focus:border-gray-400"
+              />
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderTableRow = (row: DatabaseRow) => (
+    <tr key={row.id} className="group">
+      {database.properties.map((property) => (
+        <td key={property.id} className="border-b border-r border-gray-100 px-2 py-1 align-middle last:border-r-0">
+          {renderCellInput(row, property)}
+        </td>
+      ))}
+      <td className="border-b border-gray-100 px-2 py-1">
+        <button type="button" onClick={() => deleteRow(row.id)} className="flex h-7 w-7 items-center justify-center rounded text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </td>
+    </tr>
+  );
+
   const renderTableView = () => (
     <div className="overflow-x-auto">
       <table className="min-w-full border-separate border-spacing-0 text-left">
@@ -1015,22 +1321,20 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
             </th>
           </tr>
         </thead>
-        <tbody>
-          {rows.map((row) => (
-            <tr key={row.id} className="group">
-              {database.properties.map((property) => (
-                <td key={property.id} className="border-b border-r border-gray-100 px-2 py-1 align-middle last:border-r-0">
-                  {renderCellInput(row, property)}
+        {groupProperty ? (
+          getDatabaseGroups(rows, groupProperty).map((group) => (
+            <tbody key={group.label}>
+              <tr>
+                <td colSpan={database.properties.length + 1} className="border-b border-gray-100 bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
+                  {group.label} <span className="font-normal text-gray-400">{group.rows.length}</span>
                 </td>
-              ))}
-              <td className="border-b border-gray-100 px-2 py-1">
-                <button type="button" onClick={() => deleteRow(row.id)} className="flex h-7 w-7 items-center justify-center rounded text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
+              </tr>
+              {group.rows.map(renderTableRow)}
+            </tbody>
+          ))
+        ) : (
+          <tbody>{rows.map(renderTableRow)}</tbody>
+        )}
       </table>
       <button type="button" onClick={addRow} className="mt-2 flex items-center gap-1 rounded px-2 py-1.5 text-xs font-medium text-gray-500 hover:bg-gray-100">
         <Plus className="h-3.5 w-3.5" /> 新建
@@ -1038,26 +1342,37 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     </div>
   );
 
+  const renderListRow = (row: DatabaseRow) => (
+    <div key={row.id} className="group px-3 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <input value={String(row.cells[titleProperty.id] || '')} onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)} className="min-w-0 flex-1 border-none bg-transparent px-0 text-sm font-medium text-gray-900 outline-none focus:ring-0" />
+        <button type="button" onClick={() => deleteRow(row.id)} className="rounded p-1 text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {database.properties.filter((property) => property.id !== titleProperty.id).map((property) => (
+          <label key={property.id} className="flex min-w-0 items-center gap-2 text-xs text-gray-500">
+            <span className="w-16 flex-shrink-0 truncate">{property.name}</span>
+            <span className="min-w-0 flex-1">{renderCellInput(row, property)}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+
   const renderListView = () => (
     <div className="divide-y divide-gray-100 rounded border border-gray-100">
-      {rows.map((row) => (
-        <div key={row.id} className="group px-3 py-2">
-          <div className="flex items-center justify-between gap-2">
-            <input value={String(row.cells[titleProperty.id] || '')} onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)} className="min-w-0 flex-1 border-none bg-transparent px-0 text-sm font-medium text-gray-900 outline-none focus:ring-0" />
-            <button type="button" onClick={() => deleteRow(row.id)} className="rounded p-1 text-gray-300 opacity-0 hover:bg-red-50 hover:text-red-500 group-hover:opacity-100">
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
+      {groupProperty
+        ? getDatabaseGroups(rows, groupProperty).map((group) => (
+          <div key={group.label}>
+            <div className="bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">
+              {group.label} <span className="font-normal text-gray-400">{group.rows.length}</span>
+            </div>
+            {group.rows.map(renderListRow)}
           </div>
-          <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {database.properties.filter((property) => property.id !== titleProperty.id).map((property) => (
-              <label key={property.id} className="flex min-w-0 items-center gap-2 text-xs text-gray-500">
-                <span className="w-16 flex-shrink-0 truncate">{property.name}</span>
-                <span className="min-w-0 flex-1">{renderCellInput(row, property)}</span>
-              </label>
-            ))}
-          </div>
-        </div>
-      ))}
+        ))
+        : rows.map(renderListRow)}
       <button type="button" onClick={addRow} className="flex w-full items-center gap-1 px-3 py-2 text-xs font-medium text-gray-500 hover:bg-gray-50">
         <Plus className="h-3.5 w-3.5" /> 新建
       </button>
@@ -1065,17 +1380,17 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
   );
 
   const renderBoardView = () => {
-    const groups = boardProperty?.options?.length ? boardProperty.options : DEFAULT_STATUS_OPTIONS;
-    const groupedRows = groups.map((group) => rows.filter((row) => String(row.cells[boardProperty?.id || ''] || groups[0]) === group));
-    const uncategorizedRows = rows.filter((row) => boardProperty && !groups.includes(String(row.cells[boardProperty.id] || '')));
+    const groups = getDatabaseGroups(rows, boardGroupProperty);
 
     return (
       <div className="grid gap-3 md:grid-cols-3">
-        {[...groups, ...(uncategorizedRows.length ? ['未分类'] : [])].map((group, index) => (
-          <div key={group} className="min-w-0 rounded border border-gray-100 bg-gray-50/60">
-            <div className="border-b border-gray-100 px-3 py-2 text-xs font-semibold text-gray-600">{group}</div>
+        {groups.map((group) => (
+          <div key={group.label} className="min-w-0 rounded border border-gray-100 bg-gray-50/60">
+            <div className="border-b border-gray-100 px-3 py-2 text-xs font-semibold text-gray-600">
+              {group.label} <span className="font-normal text-gray-400">{group.rows.length}</span>
+            </div>
             <div className="space-y-2 p-2">
-              {(index < groupedRows.length ? groupedRows[index] : uncategorizedRows).map((row) => (
+              {group.rows.map((row) => (
                 <div key={row.id} className="rounded border border-gray-200 bg-white p-2 shadow-sm">
                   <input value={String(row.cells[titleProperty.id] || '')} onChange={(event) => updateCell(row.id, titleProperty.id, event.target.value)} className="w-full border-none bg-transparent px-0 text-sm font-medium text-gray-900 outline-none focus:ring-0" />
                 </div>
@@ -1112,6 +1427,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
           ))}
         </div>
       </div>
+      {renderDatabaseControls()}
       <div className="p-3">
         {database.view === 'list' ? renderListView() : database.view === 'board' ? renderBoardView() : renderTableView()}
       </div>
