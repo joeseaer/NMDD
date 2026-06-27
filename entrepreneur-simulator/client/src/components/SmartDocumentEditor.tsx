@@ -4,7 +4,7 @@ import {
   Code, PanelLeft, Columns, Table as TableIcon, Image as ImageIcon, X, Network,
   Link as LinkIcon, Unlink, AlignLeft, AlignCenter, AlignRight, Captions,
   ImagePlus, Download, ExternalLink, Maximize2, Trash2, Copy, GripVertical,
-  MoreHorizontal, ArrowUp, ArrowDown, Heading1, Heading2, Heading3
+  MoreHorizontal, ArrowUp, ArrowDown, Heading1, Heading2, Heading3, MessageSquare
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -26,7 +26,7 @@ import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import MarkdownIt from 'markdown-it';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
-import { api } from '../services/api';
+import { api, CURRENT_USER_ID } from '../services/api';
 import {
     ColumnList,
     Column,
@@ -78,6 +78,54 @@ const createBlockId = () => {
     return `blk_${Date.now().toString(36)}_${randomPart}`;
 };
 
+type BlockComment = {
+    id: string;
+    text: string;
+    author: string;
+    createdAt: string;
+    resolved?: boolean;
+};
+
+const createCommentId = () => {
+    const randomPart = Math.random().toString(36).slice(2, 9);
+    return `cmt_${Date.now().toString(36)}_${randomPart}`;
+};
+
+const formatCommentAuthor = (author: string) => {
+    return author === CURRENT_USER_ID ? '我' : author;
+};
+
+const normalizeBlockComments = (value: unknown): BlockComment[] => {
+    if (!Array.isArray(value)) return [];
+
+    return value
+        .map((item: any) => ({
+            id: String(item?.id || createCommentId()),
+            text: String(item?.text || '').trim(),
+            author: String(item?.author || CURRENT_USER_ID),
+            createdAt: String(item?.createdAt || new Date().toISOString()),
+            resolved: Boolean(item?.resolved),
+        }))
+        .filter((item) => item.text);
+};
+
+const parseBlockCommentsAttribute = (value: string | null) => {
+    if (!value) return [];
+
+    const candidates = [value];
+    try {
+        candidates.push(decodeURIComponent(value));
+    } catch {}
+
+    for (const candidate of candidates) {
+        try {
+            return normalizeBlockComments(JSON.parse(candidate));
+        } catch {}
+    }
+
+    return [];
+};
+
 const isBlockIdentityNode = (node: ProseMirrorNode) => {
     return BLOCK_ID_TYPES.includes(node.type.name);
 };
@@ -102,6 +150,18 @@ const BlockIdentity = Extension.create({
                             return {
                                 id: blockDomId(id),
                                 'data-block-id': id,
+                            };
+                        },
+                    },
+                    blockComments: {
+                        default: [],
+                        parseHTML: (element) => parseBlockCommentsAttribute(element.getAttribute('data-comments')),
+                        renderHTML: (attributes) => {
+                            const comments = normalizeBlockComments(attributes.blockComments);
+                            if (!comments.length) return {};
+
+                            return {
+                                'data-comments': encodeURIComponent(JSON.stringify(comments)),
                             };
                         },
                     },
@@ -192,6 +252,7 @@ type BlockHandleInfo = {
     canMoveUp: boolean;
     canMoveDown: boolean;
     canTurnIntoText: boolean;
+    commentCount: number;
     top: number;
     left: number;
     width: number;
@@ -338,6 +399,7 @@ const getBlockInfoById = (editor: any, id: string, shell: HTMLElement): BlockHan
         canMoveUp: context.index > 0,
         canMoveDown: context.index < context.parent.childCount - 1,
         canTurnIntoText: TEXT_TURN_TYPES.has(found.node.type.name),
+        commentCount: normalizeBlockComments(found.node.attrs.blockComments).filter((comment) => !comment.resolved).length,
         top: rect.top - shellRect.top,
         left: Math.max(8, rect.left - shellRect.left - 44),
         width: rect.width,
@@ -442,6 +504,7 @@ const cloneBlockWithFreshIds = (editor: any, node: ProseMirrorNode) => {
     const refresh = (value: any) => {
         if (!value || typeof value !== 'object') return;
         if (value.attrs?.blockId) value.attrs.blockId = createBlockId();
+        if (value.attrs?.blockComments) delete value.attrs.blockComments;
         if (Array.isArray(value.content)) value.content.forEach(refresh);
     };
 
@@ -853,6 +916,11 @@ const NotionImageComponent = (props: any) => {
             className="notion-image-block group relative block my-4 max-w-full"
             id={blockDomId(node.attrs.blockId)}
             data-block-id={node.attrs.blockId || undefined}
+            data-comments={
+                normalizeBlockComments(node.attrs.blockComments).length
+                    ? encodeURIComponent(JSON.stringify(normalizeBlockComments(node.attrs.blockComments)))
+                    : undefined
+            }
             style={{
                 width,
                 maxWidth: '100%',
@@ -1097,6 +1165,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
     const [blockMenuOpen, setBlockMenuOpen] = useState(false);
     const [dragBlock, setDragBlock] = useState<DragBlockState | null>(null);
     const [columnResizeHandles, setColumnResizeHandles] = useState<ColumnResizeHandleInfo[]>([]);
+    const [commentPanelBlock, setCommentPanelBlock] = useState<BlockHandleInfo | null>(null);
     const shellRef = React.useRef<HTMLDivElement | null>(null);
     const mmSigRef = React.useRef<string>('');
     const externalSigRef = React.useRef<string>(getContentSignature(contentJson, content));
@@ -1419,6 +1488,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
         tr.delete(pos, pos + node.nodeSize);
         tr.insert(tr.mapping.map(rawInsertPos), node);
         editor.view.dispatch(tr.scrollIntoView());
+        setCommentPanelBlock((current) => current?.id === block.id ? null : current);
         closeBlockMenu();
     }, [closeBlockMenu, editor, getLiveBlock]);
 
@@ -1542,6 +1612,75 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
 
         closeBlockMenu();
     }, [closeBlockMenu, editor, getLiveBlock]);
+
+    const refreshBlockPanelInfo = useCallback((blockId: string) => {
+        if (!editor || !shellRef.current) return;
+        const nextInfo = getBlockInfoById(editor, blockId, shellRef.current);
+        if (nextInfo) {
+            setCommentPanelBlock(nextInfo);
+            setHoveredBlock((current) => current?.id === blockId ? nextInfo : current);
+        }
+    }, [editor]);
+
+    const updateBlockComments = useCallback((block: BlockHandleInfo, comments: BlockComment[]) => {
+        if (!editor) return;
+        const live = getLiveBlock(block);
+        if (!live) return;
+
+        const nextComments = normalizeBlockComments(comments);
+        const tr = editor.state.tr.setNodeMarkup(live.pos, undefined, {
+            ...live.node.attrs,
+            blockComments: nextComments,
+        }, live.node.marks);
+        editor.view.dispatch(tr.scrollIntoView());
+
+        window.requestAnimationFrame(() => refreshBlockPanelInfo(block.id));
+    }, [editor, getLiveBlock, refreshBlockPanelInfo]);
+
+    const openBlockComments = useCallback((block: BlockHandleInfo) => {
+        if (!editor || !shellRef.current) return;
+        const nextInfo = getBlockInfoById(editor, block.id, shellRef.current) || block;
+        setCommentPanelBlock(nextInfo);
+        setBlockMenuOpen(false);
+    }, [editor]);
+
+    const closeBlockComments = useCallback(() => {
+        setCommentPanelBlock(null);
+    }, []);
+
+    const addBlockComment = useCallback((block: BlockHandleInfo, text: string) => {
+        const trimmed = text.trim();
+        if (!trimmed) return;
+
+        const live = getLiveBlock(block);
+        if (!live) return;
+
+        updateBlockComments(block, [
+            ...normalizeBlockComments(live.node.attrs.blockComments),
+            {
+                id: createCommentId(),
+                text: trimmed,
+                author: CURRENT_USER_ID,
+                createdAt: new Date().toISOString(),
+            },
+        ]);
+    }, [getLiveBlock, updateBlockComments]);
+
+    const resolveBlockComment = useCallback((block: BlockHandleInfo, commentId: string) => {
+        const live = getLiveBlock(block);
+        if (!live) return;
+
+        updateBlockComments(block, normalizeBlockComments(live.node.attrs.blockComments).map((comment) => (
+            comment.id === commentId ? { ...comment, resolved: !comment.resolved } : comment
+        )));
+    }, [getLiveBlock, updateBlockComments]);
+
+    const deleteBlockComment = useCallback((block: BlockHandleInfo, commentId: string) => {
+        const live = getLiveBlock(block);
+        if (!live) return;
+
+        updateBlockComments(block, normalizeBlockComments(live.node.attrs.blockComments).filter((comment) => comment.id !== commentId));
+    }, [getLiveBlock, updateBlockComments]);
 
     const handleEditorMouseMove = useCallback((event: React.MouseEvent) => {
         if (!editor) return;
@@ -1758,6 +1897,10 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
 
     if (!editor) return null;
 
+    const commentPanelComments = commentPanelBlock
+        ? normalizeBlockComments(findBlockById(editor, commentPanelBlock.id)?.node.attrs.blockComments)
+        : [];
+
     return (
         <div
             ref={shellRef}
@@ -1775,10 +1918,19 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
                 onDelete={deleteBlock}
                 onTurnInto={turnBlockInto}
                 onCopyLink={copyBlockLink}
+                onOpenComments={openBlockComments}
                 onDragStart={handleBlockDragStart}
             />
             <BlockDropIndicator dragBlock={dragBlock} />
             <ColumnResizeLayer handles={columnResizeHandles} onResizeStart={handleColumnResizeStart} />
+            <BlockCommentPanel
+                block={commentPanelBlock}
+                comments={commentPanelComments}
+                onClose={closeBlockComments}
+                onAdd={addBlockComment}
+                onResolve={resolveBlockComment}
+                onDelete={deleteBlockComment}
+            />
             {/* Outline / Table of Contents (Left Side) */}
             {showTOC && (
                 <div className="hidden xl:flex flex-col w-64 sticky top-0 h-full border-r border-gray-100 bg-gray-50/30 flex-shrink-0 transition-all duration-300">
@@ -1832,6 +1984,7 @@ const BlockHandleLayer = ({
     onDelete,
     onTurnInto,
     onCopyLink,
+    onOpenComments,
     onDragStart,
 }: {
     block: BlockHandleInfo | null;
@@ -1842,6 +1995,7 @@ const BlockHandleLayer = ({
     onDelete: (block: BlockHandleInfo) => void;
     onTurnInto: (block: BlockHandleInfo, target: 'paragraph' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'todo' | 'quote') => void;
     onCopyLink: (block: BlockHandleInfo) => void;
+    onOpenComments: (block: BlockHandleInfo) => void;
     onDragStart: (event: React.MouseEvent, block: BlockHandleInfo) => void;
 }) => {
     if (!block) return null;
@@ -1861,6 +2015,21 @@ const BlockHandleLayer = ({
             >
                 <GripVertical className="h-4 w-4" />
             </button>
+            {block.commentCount > 0 && (
+                <button
+                    type="button"
+                    title="评论"
+                    onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onOpenComments(block);
+                    }}
+                    className="mt-0.5 flex h-7 min-w-7 items-center justify-center rounded px-1 text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+                >
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    <span className="ml-0.5 text-[10px] font-semibold">{block.commentCount}</span>
+                </button>
+            )}
             <div className="relative">
                 <button
                     type="button"
@@ -1893,6 +2062,10 @@ const BlockHandleLayer = ({
                         </button>
                         <button className={menuButtonClass} onClick={() => onCopyLink(block)}>
                             <LinkIcon className="h-3.5 w-3.5" /> 复制块链接
+                        </button>
+
+                        <button className={menuButtonClass} onClick={() => onOpenComments(block)}>
+                            <MessageSquare className="h-3.5 w-3.5" /> 评论{block.commentCount ? ` (${block.commentCount})` : ''}
                         </button>
 
                         {block.canTurnIntoText && (
@@ -1932,6 +2105,147 @@ const BlockHandleLayer = ({
                         </button>
                     </div>
                 )}
+            </div>
+        </div>
+    );
+};
+
+const formatCommentTime = (value: string) => {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    return date.toLocaleString('zh-CN', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+};
+
+const BlockCommentPanel = ({
+    block,
+    comments,
+    onClose,
+    onAdd,
+    onResolve,
+    onDelete,
+}: {
+    block: BlockHandleInfo | null;
+    comments: BlockComment[];
+    onClose: () => void;
+    onAdd: (block: BlockHandleInfo, text: string) => void;
+    onResolve: (block: BlockHandleInfo, commentId: string) => void;
+    onDelete: (block: BlockHandleInfo, commentId: string) => void;
+}) => {
+    const [draft, setDraft] = useState('');
+
+    useEffect(() => {
+        setDraft('');
+    }, [block?.id]);
+
+    if (!block) return null;
+
+    const activeComments = comments.filter((comment) => !comment.resolved);
+    const resolvedComments = comments.filter((comment) => comment.resolved);
+    const panelLeft = typeof window === 'undefined'
+        ? block.left + block.width + 72
+        : Math.max(8, Math.min(block.left + block.width + 72, window.innerWidth - 344));
+    const submitDraft = () => {
+        if (!draft.trim()) return;
+        onAdd(block, draft);
+        setDraft('');
+    };
+
+    return (
+        <div
+            className="absolute z-50 w-80 rounded-lg border border-gray-200 bg-white p-3 shadow-xl"
+            style={{
+                top: Math.max(8, block.top),
+                left: panelLeft,
+            }}
+            contentEditable={false}
+            onMouseDown={(event) => event.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
+        >
+            <div className="mb-2 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+                    <MessageSquare className="h-4 w-4" />
+                    评论
+                </div>
+                <button
+                    type="button"
+                    title="关闭评论"
+                    className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-700"
+                    onClick={onClose}
+                >
+                    <X className="h-4 w-4" />
+                </button>
+            </div>
+
+            <div className="max-h-64 space-y-2 overflow-y-auto pr-1">
+                {comments.length === 0 && (
+                    <div className="rounded-md bg-gray-50 px-3 py-2 text-xs text-gray-500">
+                        还没有评论。
+                    </div>
+                )}
+
+                {[...activeComments, ...resolvedComments].map((comment) => (
+                    <div
+                        key={comment.id}
+                        className={`rounded-md border px-3 py-2 ${
+                            comment.resolved ? 'border-gray-100 bg-gray-50 text-gray-400' : 'border-gray-200 bg-white text-gray-700'
+                        }`}
+                    >
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                            <div className="min-w-0 truncate text-xs font-semibold">
+                                {formatCommentAuthor(comment.author)}
+                                <span className="ml-2 font-normal text-gray-400">{formatCommentTime(comment.createdAt)}</span>
+                            </div>
+                            <div className="flex flex-shrink-0 items-center gap-1">
+                                <button
+                                    type="button"
+                                    className="rounded px-1.5 py-0.5 text-[10px] font-semibold text-gray-500 hover:bg-gray-100"
+                                    onClick={() => onResolve(block, comment.id)}
+                                >
+                                    {comment.resolved ? '重新打开' : '解决'}
+                                </button>
+                                <button
+                                    type="button"
+                                    title="删除评论"
+                                    className="rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                                    onClick={() => onDelete(block, comment.id)}
+                                >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                            </div>
+                        </div>
+                        <div className={`whitespace-pre-wrap text-xs leading-5 ${comment.resolved ? 'line-through' : ''}`}>
+                            {comment.text}
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            <textarea
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                    if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                        event.preventDefault();
+                        submitDraft();
+                    }
+                }}
+                placeholder="添加评论..."
+                className="mt-3 min-h-20 w-full resize-none rounded-md border border-gray-200 px-3 py-2 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/10"
+            />
+            <div className="mt-2 flex justify-end">
+                <button
+                    type="button"
+                    disabled={!draft.trim()}
+                    className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={submitDraft}
+                >
+                    添加评论
+                </button>
             </div>
         </div>
     );
