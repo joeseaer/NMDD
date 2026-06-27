@@ -40,6 +40,7 @@ import {
     BookmarkBlock,
     EmbedBlock,
     MediaBlock,
+    PageLinkBlock,
     EquationBlock,
 } from './TiptapExtensions';
 
@@ -68,6 +69,7 @@ const BLOCK_ID_TYPES = [
     'bookmarkBlock',
     'embedBlock',
     'mediaBlock',
+    'pageLinkBlock',
     'equationBlock',
 ];
 
@@ -660,7 +662,7 @@ turndownService.addRule('keepSmartDocumentBlocks', {
     return (
       (nodeName === 'details' && dataType === 'toggle') ||
       (nodeName === 'div' && ['callout', 'embed', 'media', 'equation'].includes(dataType || '')) ||
-      (nodeName === 'a' && dataType === 'bookmark')
+      (nodeName === 'a' && ['bookmark', 'page-link'].includes(dataType || ''))
     );
   },
   replacement: (_content, node) => {
@@ -935,13 +937,32 @@ const NotionImageComponent = (props: any) => {
                     className={`overflow-hidden border border-gray-100 bg-gray-50 shadow-sm ${shapeClass}`}
                     style={aspectRatio ? { aspectRatio } : undefined}
                 >
-                    <img
-                        src={src}
-                        alt={alt || caption}
-                        title={node.attrs.title || alt || caption}
-                        className={`block w-full ${aspectRatio ? `h-full ${fit === 'cover' ? 'object-cover' : 'object-contain'}` : 'h-auto'}`}
-                        draggable={false}
-                    />
+                    {link ? (
+                        <a
+                            href={link}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="block"
+                            contentEditable={false}
+                            onMouseDown={(event) => event.stopPropagation()}
+                        >
+                            <img
+                                src={src}
+                                alt={alt || caption}
+                                title={node.attrs.title || alt || caption}
+                                className={`block w-full ${aspectRatio ? `h-full ${fit === 'cover' ? 'object-cover' : 'object-contain'}` : 'h-auto'}`}
+                                draggable={false}
+                            />
+                        </a>
+                    ) : (
+                        <img
+                            src={src}
+                            alt={alt || caption}
+                            title={node.attrs.title || alt || caption}
+                            className={`block w-full ${aspectRatio ? `h-full ${fit === 'cover' ? 'object-cover' : 'object-contain'}` : 'h-auto'}`}
+                            draggable={false}
+                        />
+                    )}
                 </div>
 
                 <div
@@ -1100,9 +1121,17 @@ export type SmartDocumentValue = {
     text: string;
 };
 
+export type SmartDocumentPageLink = {
+    id: string;
+    title: string;
+    category?: string;
+};
+
 type SmartDocumentEditorProps = {
     content?: string;
     contentJson?: JSONContent | null;
+    pages?: SmartDocumentPageLink[];
+    currentDocumentId?: string | null;
     onChange: (value: SmartDocumentValue) => void;
 };
 
@@ -1161,7 +1190,13 @@ const getContentSignature = (contentJson: JSONContent | null | undefined, markdo
     return `markdown:${markdown || ''}`;
 };
 
-export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange }: SmartDocumentEditorProps) => {
+export const SmartDocumentEditor = ({
+    content = '',
+    contentJson = null,
+    pages = [],
+    currentDocumentId = null,
+    onChange,
+}: SmartDocumentEditorProps) => {
     const [showTOC, setShowTOC] = useState(false);
     const [hoveredBlock, setHoveredBlock] = useState<BlockHandleInfo | null>(null);
     const [blockMenuOpen, setBlockMenuOpen] = useState(false);
@@ -1305,6 +1340,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
             BookmarkBlock,
             EmbedBlock,
             MediaBlock,
+            PageLinkBlock,
             EquationBlock,
             Table.configure({
                 resizable: true,
@@ -1421,14 +1457,18 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
             smartDocument?: {
                 uploadImage?: (file: File) => Promise<string | null>;
                 uploadFile?: (file: File) => Promise<string | null>;
+                pages?: SmartDocumentPageLink[];
+                currentDocumentId?: string | null;
             };
         };
         storage.smartDocument = {
             ...(storage.smartDocument || {}),
             uploadImage,
             uploadFile,
+            pages,
+            currentDocumentId,
         };
-    }, [editor, uploadImage, uploadFile]);
+    }, [currentDocumentId, editor, pages, uploadImage, uploadFile]);
 
     useEffect(() => {
         if (!editor) return;

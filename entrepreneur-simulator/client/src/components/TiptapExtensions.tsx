@@ -547,6 +547,176 @@ const encodeJsonAttribute = (value: unknown) => {
   }
 };
 
+type SmartDocumentPageLinkOption = {
+  id: string;
+  title: string;
+  category?: string;
+};
+
+const normalizePageTitle = (title: string | null | undefined) => {
+  return (title || '').trim() || '未命名文档';
+};
+
+const getPageLinkView = (category?: string | null) => {
+  return category === 'note' || !category ? 'notes' : 'sop';
+};
+
+const getPageLinkHref = (pageId?: string | null, category?: string | null) => {
+  if (!pageId) return '#';
+  return `/notes?view=${getPageLinkView(category)}&doc=${encodeURIComponent(pageId)}`;
+};
+
+const getPageLinkCategoryLabel = (category?: string | null) => {
+  if (category === 'note' || !category) return '文档';
+  if (category === 'people') return '识人 SOP';
+  if (category === 'business') return '商业 SOP';
+  if (category === 'brand') return '品牌 SOP';
+  return 'SOP';
+};
+
+const getPageLinkOptions = (editor: any): SmartDocumentPageLinkOption[] => {
+  const pages = editor?.storage?.smartDocument?.pages;
+  if (!Array.isArray(pages)) return [];
+
+  return pages
+    .map((page: any) => ({
+      id: String(page?.id || ''),
+      title: normalizePageTitle(page?.title),
+      category: typeof page?.category === 'string' ? page.category : 'note',
+    }))
+    .filter((page) => page.id);
+};
+
+const PageLinkBlockView = ({ node, updateAttributes, selected, editor }: any) => {
+  const pageId = node.attrs.pageId || '';
+  const title = normalizePageTitle(node.attrs.title);
+  const category = node.attrs.category || 'note';
+  const pages = getPageLinkOptions(editor);
+  const currentDocumentId = editor?.storage?.smartDocument?.currentDocumentId || '';
+  const selectedPage = pages.find((page) => page.id === pageId);
+  const displayTitle = selectedPage?.title || title;
+  const displayCategory = selectedPage?.category || category;
+  const href = getPageLinkHref(pageId, displayCategory);
+  const commentsAttr = Array.isArray(node.attrs.blockComments) && node.attrs.blockComments.length
+    ? encodeJsonAttribute(node.attrs.blockComments)
+    : undefined;
+  const selectOptions = pages.filter((page) => page.id !== currentDocumentId || page.id === pageId);
+
+  const handleSelectPage = (event: any) => {
+    const nextPageId = event.target.value;
+    const nextPage = pages.find((page) => page.id === nextPageId);
+
+    if (!nextPage) {
+      updateAttributes({ pageId: '', title: '', category: 'note' });
+      return;
+    }
+
+    updateAttributes({
+      pageId: nextPage.id,
+      title: nextPage.title,
+      category: nextPage.category || 'note',
+    });
+  };
+
+  return (
+    <NodeViewWrapper
+      className={`smart-doc-page-link group my-2 rounded-md border bg-white px-3 py-2 transition-colors ${
+        selected ? 'border-gray-400 shadow-sm' : 'border-gray-200 hover:border-gray-300'
+      }`}
+      data-type="page-link"
+      data-page-id={pageId || undefined}
+      data-title={displayTitle || undefined}
+      data-category={displayCategory || undefined}
+      data-block-id={node.attrs.blockId || undefined}
+      data-comments={commentsAttr}
+      id={blockDomId(node.attrs.blockId)}
+      contentEditable={false}
+    >
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <a
+          href={href}
+          className={`flex min-w-0 flex-1 items-center gap-2 text-sm font-medium no-underline ${
+            pageId ? 'text-gray-800 hover:text-primary' : 'pointer-events-none text-gray-400'
+          }`}
+          onClick={(event) => {
+            if (!pageId) event.preventDefault();
+          }}
+        >
+          <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-500">
+            <FileText className="h-3.5 w-3.5" />
+          </span>
+          <span className="min-w-0 flex-1 truncate">{pageId ? displayTitle : '选择页面'}</span>
+          {pageId && <span className="flex-shrink-0 text-[11px] font-normal text-gray-400">{getPageLinkCategoryLabel(displayCategory)}</span>}
+        </a>
+
+        <select
+          value={pageId}
+          onChange={handleSelectPage}
+          className="h-8 max-w-full rounded border border-gray-200 bg-white px-2 text-xs text-gray-600 outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-100 sm:w-44"
+        >
+          <option value="">选择页面...</option>
+          {selectOptions.map((page) => (
+            <option key={page.id} value={page.id}>
+              {page.title}
+            </option>
+          ))}
+        </select>
+      </div>
+    </NodeViewWrapper>
+  );
+};
+
+export const PageLinkBlock = Node.create({
+  name: 'pageLinkBlock',
+  group: 'block',
+  atom: true,
+  defining: true,
+
+  addAttributes() {
+    return {
+      pageId: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-page-id') || '',
+        renderHTML: attributes => ({ 'data-page-id': attributes.pageId || undefined }),
+      },
+      title: {
+        default: '',
+        parseHTML: element => element.getAttribute('data-title') || element.textContent?.trim() || '',
+        renderHTML: attributes => ({ 'data-title': attributes.title || undefined }),
+      },
+      category: {
+        default: 'note',
+        parseHTML: element => element.getAttribute('data-category') || 'note',
+        renderHTML: attributes => ({ 'data-category': attributes.category || 'note' }),
+      },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'a[data-type="page-link"]' }]
+  },
+
+  renderHTML({ node, HTMLAttributes }) {
+    const pageId = node.attrs.pageId || '';
+    const title = normalizePageTitle(node.attrs.title);
+    const category = node.attrs.category || 'note';
+
+    return [
+      'a',
+      mergeAttributes(HTMLAttributes, {
+        'data-type': 'page-link',
+        href: getPageLinkHref(pageId, category),
+        class: 'smart-doc-page-link my-2 flex items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800 no-underline hover:bg-gray-50',
+      }),
+      title,
+    ]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(PageLinkBlockView)
+  },
+});
+
 const renderEquation = (formula: string) => {
   const source = formula.trim() || DEFAULT_EQUATION;
   try {
@@ -993,6 +1163,17 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
         editor.chain().focus().deleteRange(range).insertContent({
           type: 'equationBlock',
           attrs: { formula: DEFAULT_EQUATION },
+        }).run();
+      },
+    },
+    {
+      title: '页面链接',
+      shortcut: '/page',
+      icon: <FileText className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        editor.chain().focus().deleteRange(range).insertContent({
+          type: 'pageLinkBlock',
+          attrs: {},
         }).run();
       },
     },

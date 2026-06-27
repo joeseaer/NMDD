@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   Plus, Tag, Search, X, 
   MoreHorizontal, Trash2, FileText, 
   ArrowLeft
 } from 'lucide-react';
 import { api } from '../services/api';
-import { SmartDocumentEditor, type SmartDocumentValue } from '../components/SmartDocumentEditor';
+import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue } from '../components/SmartDocumentEditor';
 import { useSearchParams } from 'react-router-dom';
 
 // --- Types ---
@@ -69,6 +69,10 @@ const normalizeSopEntity = (raw: any): SOPEntity => {
   };
 };
 
+const getDocumentView = (note: Pick<SOPEntity, 'category'>) => {
+  return note.category === 'note' ? 'notes' : 'sop';
+};
+
 // --- Custom Hooks ---
 function useDebouncedCallback<T extends (...args: any[]) => any>(
   callback: T,
@@ -99,6 +103,7 @@ export default function NoteManager() {
 
   const [searchParams, setSearchParams] = useSearchParams();
   const view = (searchParams.get('view') || 'notes') === 'sop' ? 'sop' : 'notes';
+  const docParam = searchParams.get('doc');
   
   // Navigation State
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
@@ -106,6 +111,14 @@ export default function NoteManager() {
   const selectedNote = items.find(n => n.id === selectedNoteId) || null;
 
   const shouldShowSidebar = showMobileSidebar || !selectedNoteId;
+
+  const documentPages = useMemo<SmartDocumentPageLink[]>(() => (
+    items.map((item) => ({
+      id: item.id,
+      title: item.title || '未命名文档',
+      category: item.category,
+    }))
+  ), [items]);
 
   const fetchData = async () => {
     try {
@@ -123,6 +136,24 @@ export default function NoteManager() {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (!docParam) return;
+
+    const target = items.find((item) => item.id === docParam);
+    if (!target) return;
+
+    const targetView = getDocumentView(target);
+    if (targetView !== view) {
+      setSearchParams({ view: targetView, doc: docParam }, { replace: true });
+      return;
+    }
+
+    if (selectedNoteId !== docParam) {
+      setSelectedNoteId(docParam);
+      setShowMobileSidebar(false);
+    }
+  }, [docParam, items, selectedNoteId, setSearchParams, view]);
+
   const visibleItems = useCallback((list: SOPEntity[]) => {
     if (view === 'sop') return list.filter((it) => it.category !== 'note');
     return list.filter((it) => it.category === 'note');
@@ -135,12 +166,16 @@ export default function NoteManager() {
   });
 
   const handleOpenDetail = (id: string) => {
+    const note = items.find((item) => item.id === id);
+    const nextView = note ? getDocumentView(note) : view;
     setSelectedNoteId(id);
     setShowMobileSidebar(false);
+    setSearchParams({ view: nextView, doc: id });
   };
 
   const handleBack = () => {
     setSelectedNoteId(null);
+    setSearchParams({ view });
     fetchData();
   };
 
@@ -178,6 +213,7 @@ export default function NoteManager() {
             setItems(prev => prev.filter(n => n.id !== id));
             if (selectedNoteId === id) {
                 setSelectedNoteId(null);
+                setSearchParams({ view });
             }
         } catch (error) {
             console.error("Failed to delete note", error);
@@ -217,6 +253,7 @@ export default function NoteManager() {
 
           setItems(prev => [createdNote, ...prev]);
           setSelectedNoteId(result.id);
+          setSearchParams({ view, doc: result.id });
       } catch (error: any) {
           console.error("Failed to create note", error);
           alert(`创建失败: ${error.message || 'Unknown error'}`);
@@ -253,13 +290,19 @@ export default function NoteManager() {
         <div className="px-4 pt-3">
           <div className="flex items-center gap-2 bg-gray-50 rounded-lg p-1 border border-gray-100">
             <button
-              onClick={() => setSearchParams({ view: 'notes' })}
+              onClick={() => {
+                setSelectedNoteId(null);
+                setSearchParams({ view: 'notes' });
+              }}
               className={`flex-1 text-xs font-medium px-3 py-1.5 rounded-md ${view === 'notes' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-600 hover:bg-white/60'}`}
             >
               文档
             </button>
             <button
-              onClick={() => setSearchParams({ view: 'sop' })}
+              onClick={() => {
+                setSelectedNoteId(null);
+                setSearchParams({ view: 'sop' });
+              }}
               className={`flex-1 text-xs font-medium px-3 py-1.5 rounded-md ${view === 'sop' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-600 hover:bg-white/60'}`}
             >
               SOP 冷库
@@ -342,14 +385,15 @@ export default function NoteManager() {
                   if (!selectedNote) return;
                   const next: SOPEntity = { ...selectedNote, category: cat, updated_at: new Date().toISOString().split('T')[0] };
                   handleSaveNote(next);
-                  setSearchParams({ view: 'sop' });
+                  setSearchParams({ view: 'sop', doc: selectedNote.id });
                 }}
                 onUnpublish={() => {
                   if (!selectedNote) return;
                   const next: SOPEntity = { ...selectedNote, category: 'note', updated_at: new Date().toISOString().split('T')[0] };
                   handleSaveNote(next);
-                  setSearchParams({ view: 'notes' });
+                  setSearchParams({ view: 'notes', doc: selectedNote.id });
                 }}
+                pages={documentPages}
             />
         ) : (
             <div className="flex-1 flex flex-col items-center justify-center h-full text-gray-400 bg-gray-50/30">
@@ -370,6 +414,7 @@ function NoteDetailView({
   onDelete,
   onPublish,
   onUnpublish,
+  pages,
 }: {
   note: SOPEntity;
   isSaving: boolean;
@@ -378,6 +423,7 @@ function NoteDetailView({
   onDelete: () => void;
   onPublish: (cat: 'people' | 'business' | 'brand') => void;
   onUnpublish: () => void;
+  pages: SmartDocumentPageLink[];
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showPublish, setShowPublish] = useState(false);
@@ -556,6 +602,8 @@ function NoteDetailView({
                     key={note.id}
                     content={note.content || ''}
                     contentJson={note.content_json || null}
+                    pages={pages}
+                    currentDocumentId={note.id}
                     onChange={handleContentUpdate}
                   />
               </div>
