@@ -1,16 +1,26 @@
 
-import { Node, mergeAttributes, InputRule, Extension } from '@tiptap/core';
+import { Node, mergeAttributes, InputRule, Extension, type JSONContent } from '@tiptap/core';
 import Suggestion from '@tiptap/suggestion';
-import { ReactRenderer, ReactNodeViewRenderer, NodeViewWrapper } from '@tiptap/react';
+import { EditorContent, ReactRenderer, ReactNodeViewRenderer, NodeViewWrapper, useEditor } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import LinkExtension from '@tiptap/extension-link';
+import TiptapImage from '@tiptap/extension-image';
+import { Table } from '@tiptap/extension-table';
+import { TableCell } from '@tiptap/extension-table-cell';
+import { TableHeader } from '@tiptap/extension-table-header';
+import { TableRow } from '@tiptap/extension-table-row';
+import TaskList from '@tiptap/extension-task-list';
+import TaskItem from '@tiptap/extension-task-item';
+import Placeholder from '@tiptap/extension-placeholder';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Fragment } from '@tiptap/pm/model';
 import tippy from 'tippy.js';
-import { useState, useEffect, useMemo, forwardRef, useImperativeHandle } from 'react';
+import { useState, useEffect, useMemo, useRef, forwardRef, useImperativeHandle, type ReactNode } from 'react';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import { 
-  Heading1, Heading2, Heading3, List, ListOrdered, CheckSquare, 
-  Quote, Minus, Code, Layout, Image as ImageIcon,
+  Bold, Heading1, Heading2, Heading3, Italic, List, ListOrdered, CheckSquare,
+  Quote, Minus, Code, Layout, Image as ImageIcon, Strikethrough,
   Type, Network, ChevronRight, AlertTriangle, Bookmark, Globe,
   Paperclip, Video, Music, FileText, Sigma, RefreshCw, CalendarDays, X,
   Database, Plus, Trash2
@@ -882,6 +892,9 @@ type DatabaseRow = {
   cells: Record<string, any>;
   page: {
     content: string;
+    contentJson?: JSONContent | null;
+    contentHtml?: string;
+    contentText?: string;
     updatedAt?: string;
   };
 };
@@ -1014,6 +1027,40 @@ const getDefaultDatabaseCellValue = (property: DatabaseProperty) => {
   if (property.type === 'checkbox') return false;
   if (property.type === 'status') return property.options?.[0] || DEFAULT_STATUS_OPTIONS[0];
   return '';
+};
+
+const isDatabaseRowPageJson = (value: unknown): value is JSONContent => {
+  return !!value && typeof value === 'object' && (value as any).type === 'doc';
+};
+
+const createEmptyDatabaseRowPageJson = (): JSONContent => ({
+  type: 'doc',
+  content: [{ type: 'paragraph' }],
+});
+
+const createDatabaseRowPageJsonFromText = (value: string): JSONContent => {
+  const normalized = String(value || '').replace(/\r\n/g, '\n');
+  if (!normalized) return createEmptyDatabaseRowPageJson();
+
+  return {
+    type: 'doc',
+    content: normalized.split('\n').map((line) => (
+      line
+        ? { type: 'paragraph', content: [{ type: 'text', text: line }] }
+        : { type: 'paragraph' }
+    )),
+  };
+};
+
+const getDatabaseRowPageInitialContent = (page: DatabaseRow['page']) => {
+  return isDatabaseRowPageJson(page.contentJson)
+    ? page.contentJson
+    : createDatabaseRowPageJsonFromText(page.content || '');
+};
+
+const getDatabaseRowPageSignature = (page: DatabaseRow['page']) => {
+  if (isDatabaseRowPageJson(page.contentJson)) return `json:${JSON.stringify(page.contentJson)}`;
+  return `text:${page.content || ''}`;
 };
 
 type DatabaseFormulaResult = {
@@ -1251,8 +1298,30 @@ const createDatabaseCells = (properties: DatabaseProperty[], existingCells: Reco
 
 const normalizeDatabaseRowPage = (value: unknown): DatabaseRow['page'] => {
   const raw: any = value && typeof value === 'object' ? value : {};
+  const content = String(raw.content || '');
+  const contentText = raw.contentText !== undefined
+    ? String(raw.contentText || '')
+    : raw.text !== undefined
+      ? String(raw.text || '')
+      : content;
+  const contentHtml = raw.contentHtml !== undefined
+    ? String(raw.contentHtml || '')
+    : raw.html !== undefined
+      ? String(raw.html || '')
+      : undefined;
+  const contentJson = isDatabaseRowPageJson(raw.contentJson)
+    ? raw.contentJson
+    : isDatabaseRowPageJson(raw.content_json)
+      ? raw.content_json
+      : content
+        ? createDatabaseRowPageJsonFromText(content)
+        : null;
+
   return {
-    content: String(raw.content || ''),
+    content,
+    contentJson,
+    contentHtml,
+    contentText,
     updatedAt: raw.updatedAt ? String(raw.updatedAt) : undefined,
   };
 };
@@ -1507,7 +1576,279 @@ const getDatabasePropertyPreview = (database: SmartDocumentDatabase, row: Databa
   return getCellDisplayValue(database, row, property);
 };
 
-const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
+type DatabaseRowPageEditorValue = {
+  content: string;
+  contentJson: JSONContent;
+  contentHtml: string;
+  contentText: string;
+};
+
+type SmartDocumentStorageLike = {
+  uploadImage?: (file: File) => Promise<string | null>;
+  uploadFile?: (file: File) => Promise<string | null>;
+  pages?: any[];
+  currentDocumentId?: string | null;
+};
+
+const DatabaseRowPageImage = TiptapImage.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      width: {
+        default: '100%',
+        parseHTML: element => element.getAttribute('data-width') || element.getAttribute('width') || element.style.width || '100%',
+        renderHTML: attributes => ({
+          width: attributes.width || '100%',
+          'data-width': attributes.width || '100%',
+          style: `width: ${attributes.width || '100%'}; max-width: 100%; height: auto;`,
+        }),
+      },
+      align: {
+        default: 'center',
+        parseHTML: element => element.getAttribute('data-align') || 'center',
+        renderHTML: attributes => ({ 'data-align': attributes.align || 'center' }),
+      },
+    };
+  },
+});
+
+const DatabaseRowPageToolbarButton = ({
+  title,
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  title: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) => (
+  <button
+    type="button"
+    title={title}
+    disabled={disabled}
+    onMouseDown={(event) => event.preventDefault()}
+    onClick={onClick}
+    className={`flex h-7 min-w-7 items-center justify-center gap-1 rounded px-1.5 text-[11px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+      active ? 'bg-gray-900 text-white' : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
+    }`}
+  >
+    {children}
+  </button>
+);
+
+const DatabaseRowPageEditor = ({
+  page,
+  smartDocument,
+  onChange,
+}: {
+  page: DatabaseRow['page'];
+  smartDocument?: SmartDocumentStorageLike;
+  onChange: (value: DatabaseRowPageEditorValue) => void;
+}) => {
+  const pageSignature = getDatabaseRowPageSignature(page);
+  const externalSigRef = useRef(pageSignature);
+  const uploadImage = smartDocument?.uploadImage || smartDocument?.uploadFile;
+
+  const rowPageEditor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        bulletList: {
+          keepMarks: true,
+          keepAttributes: false,
+        },
+        orderedList: {
+          keepMarks: true,
+          keepAttributes: false,
+        },
+      }),
+      LinkExtension.configure({ openOnClick: false }),
+      DatabaseRowPageImage.configure({
+        inline: false,
+        allowBase64: true,
+      }),
+      TaskList,
+      TaskItem.configure({ nested: true }),
+      Placeholder.configure({ placeholder: '输入条目详情，或输入 / 插入块' }),
+      ColumnList,
+      Column,
+      SlashCommand.configure({
+        suggestion: {
+          items: getSuggestionItems,
+          render: renderItems,
+        },
+      }),
+      Indent,
+      MindMap,
+      ToggleBlock,
+      CalloutBlock,
+      BookmarkBlock,
+      EmbedBlock,
+      MediaBlock,
+      TemplateButtonBlock,
+      SyncedBlock,
+      PageLinkBlock,
+      EquationBlock,
+      DatabaseBlock,
+      Table.configure({
+        resizable: true,
+      }),
+      TableRow,
+      TableHeader,
+      TableCell,
+    ],
+    content: getDatabaseRowPageInitialContent(page),
+    editorProps: {
+      attributes: {
+        class: 'prose prose-sm max-w-none min-h-[180px] rounded-b-md bg-white px-4 py-3 text-gray-800 outline-none whitespace-pre-wrap break-words [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_ul[data-type="taskList"]]:list-none [&_ul[data-type="taskList"]]:pl-0 [&_li_p]:m-0 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-50 [&_th]:px-2 [&_th]:py-1',
+      },
+      handlePaste: (view, event) => {
+        const item = Array.from(event.clipboardData?.items || []).find((entry) => entry.kind === 'file' && entry.type.startsWith('image/'));
+        const file = item?.getAsFile();
+        if (!file || typeof uploadImage !== 'function') return false;
+
+        event.preventDefault();
+        uploadImage(file).then((url) => {
+          if (!url) return;
+          const node = view.state.schema.nodes.image.create({ src: url, width: '100%', align: 'center' });
+          view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
+        });
+        return true;
+      },
+      handleDrop: (view, event, _slice, moved) => {
+        const file = !moved && event.dataTransfer?.files?.[0];
+        if (!file || !file.type.startsWith('image/') || typeof uploadImage !== 'function') return false;
+
+        event.preventDefault();
+        uploadImage(file).then((url) => {
+          if (!url) return;
+          const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY });
+          const node = view.state.schema.nodes.image.create({ src: url, width: '100%', align: 'center' });
+          const tr = coordinates
+            ? view.state.tr.insert(coordinates.pos, node)
+            : view.state.tr.replaceSelectionWith(node);
+          view.dispatch(tr.scrollIntoView());
+        });
+        return true;
+      },
+    },
+    onUpdate: ({ editor }) => {
+      const contentJson = editor.getJSON();
+      const contentHtml = editor.getHTML();
+      const contentText = editor.state.doc.textBetween(0, editor.state.doc.content.size, '\n');
+      externalSigRef.current = `json:${JSON.stringify(contentJson)}`;
+      onChange({
+        content: contentText,
+        contentJson,
+        contentHtml,
+        contentText,
+      });
+    },
+  });
+
+  useEffect(() => {
+    if (!rowPageEditor) return;
+    const storage = rowPageEditor.storage as typeof rowPageEditor.storage & {
+      smartDocument?: SmartDocumentStorageLike;
+    };
+    storage.smartDocument = {
+      ...(storage.smartDocument || {}),
+      ...(smartDocument || {}),
+    };
+  }, [rowPageEditor, smartDocument]);
+
+  useEffect(() => {
+    if (!rowPageEditor) return;
+    if (pageSignature === externalSigRef.current) return;
+    if (rowPageEditor.isFocused) return;
+
+    rowPageEditor.commands.setContent(getDatabaseRowPageInitialContent(page), { emitUpdate: false });
+    externalSigRef.current = pageSignature;
+  }, [page, pageSignature, rowPageEditor]);
+
+  const addImage = () => {
+    if (!rowPageEditor || typeof uploadImage !== 'function') return;
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const url = await uploadImage(file);
+      if (url) rowPageEditor.chain().focus().setImage({ src: url, width: '100%', align: 'center' } as any).run();
+      input.value = '';
+    };
+    input.click();
+  };
+
+  if (!rowPageEditor) return null;
+
+  return (
+    <div
+      className="overflow-hidden rounded-md border border-gray-200 bg-white"
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+      contentEditable={false}
+    >
+      <div className="flex flex-wrap items-center gap-1 border-b border-gray-100 bg-gray-50 px-2 py-1.5">
+        <DatabaseRowPageToolbarButton title="正文" active={rowPageEditor.isActive('paragraph')} onClick={() => rowPageEditor.chain().focus().setParagraph().run()}>
+          <Type className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="一级标题" active={rowPageEditor.isActive('heading', { level: 1 })} onClick={() => rowPageEditor.chain().focus().toggleHeading({ level: 1 }).run()}>
+          H1
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="二级标题" active={rowPageEditor.isActive('heading', { level: 2 })} onClick={() => rowPageEditor.chain().focus().toggleHeading({ level: 2 }).run()}>
+          H2
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="粗体" active={rowPageEditor.isActive('bold')} onClick={() => rowPageEditor.chain().focus().toggleBold().run()}>
+          <Bold className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="斜体" active={rowPageEditor.isActive('italic')} onClick={() => rowPageEditor.chain().focus().toggleItalic().run()}>
+          <Italic className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="删除线" active={rowPageEditor.isActive('strike')} onClick={() => rowPageEditor.chain().focus().toggleStrike().run()}>
+          <Strikethrough className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="行内代码" active={rowPageEditor.isActive('code')} onClick={() => rowPageEditor.chain().focus().toggleCode().run()}>
+          <Code className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <span className="mx-1 h-4 w-px bg-gray-200" />
+        <DatabaseRowPageToolbarButton title="项目列表" active={rowPageEditor.isActive('bulletList')} onClick={() => rowPageEditor.chain().focus().toggleBulletList().run()}>
+          <List className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="编号列表" active={rowPageEditor.isActive('orderedList')} onClick={() => rowPageEditor.chain().focus().toggleOrderedList().run()}>
+          <ListOrdered className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="待办" active={rowPageEditor.isActive('taskList')} onClick={() => rowPageEditor.chain().focus().toggleTaskList().run()}>
+          <CheckSquare className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="引用" active={rowPageEditor.isActive('blockquote')} onClick={() => rowPageEditor.chain().focus().toggleBlockquote().run()}>
+          <Quote className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="代码块" active={rowPageEditor.isActive('codeBlock')} onClick={() => rowPageEditor.chain().focus().toggleCodeBlock().run()}>
+          <Code className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="分隔线" onClick={() => rowPageEditor.chain().focus().setHorizontalRule().run()}>
+          <Minus className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="表格" onClick={() => rowPageEditor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}>
+          <Database className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="图片" disabled={typeof uploadImage !== 'function'} onClick={addImage}>
+          <ImageIcon className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <span className="ml-auto hidden text-[11px] text-gray-400 sm:inline">输入 / 插入更多块</span>
+      </div>
+      <EditorContent editor={rowPageEditor} />
+    </div>
+  );
+};
+
+const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) => {
   const database = normalizeDatabase(node.attrs.database);
   const commentsAttr = Array.isArray(node.attrs.blockComments) && node.attrs.blockComments.length
     ? encodeJsonAttribute(node.attrs.blockComments)
@@ -1705,7 +2046,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
     });
   };
 
-  const updateRowPageContent = (rowId: string, content: string) => {
+  const updateRowPageContent = (rowId: string, patch: Partial<DatabaseRow['page']>) => {
     commit({
       ...database,
       rows: database.rows.map((row) => row.id === rowId
@@ -1713,7 +2054,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
           ...row,
           page: {
             ...normalizeDatabaseRowPage(row.page),
-            content,
+            ...patch,
             updatedAt: new Date().toISOString(),
           },
         }
@@ -2347,11 +2688,11 @@ const DatabaseBlockView = ({ node, updateAttributes, selected }: any) => {
           </div>
 
           <div className="px-3 py-3">
-            <textarea
-              value={rowPage.content}
-              onChange={(event) => updateRowPageContent(openRow.id, event.target.value)}
-              placeholder="添加详情..."
-              className="min-h-32 w-full resize-y rounded border border-gray-200 bg-white px-3 py-2 text-sm leading-6 text-gray-700 outline-none placeholder:text-gray-300 focus:border-gray-400 focus:ring-2 focus:ring-gray-100"
+            <DatabaseRowPageEditor
+              key={openRow.id}
+              page={rowPage}
+              smartDocument={editor?.storage?.smartDocument}
+              onChange={(value) => updateRowPageContent(openRow.id, value)}
             />
             {rowPage.updatedAt && (
               <div className="mt-1 text-[11px] text-gray-400">
