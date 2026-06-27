@@ -3,7 +3,8 @@ import {
   Bold, Italic, Type, Strikethrough, Quote, ListOrdered, List, CheckSquare, 
   Code, PanelLeft, Columns, Table as TableIcon, Image as ImageIcon, X, Network,
   Link as LinkIcon, Unlink, AlignLeft, AlignCenter, AlignRight, Captions,
-  ImagePlus, Download, ExternalLink, Maximize2, Trash2, Copy
+  ImagePlus, Download, ExternalLink, Maximize2, Trash2, Copy, GripVertical,
+  MoreHorizontal, ArrowUp, ArrowDown, Heading1, Heading2, Heading3
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -19,7 +20,9 @@ import Placeholder from '@tiptap/extension-placeholder';
 import Heading from '@tiptap/extension-heading';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 import { DOMParser as ProseMirrorDOMParser } from 'prosemirror-model';
-import type { JSONContent } from '@tiptap/core';
+import { Extension, type JSONContent } from '@tiptap/core';
+import { Plugin, PluginKey } from '@tiptap/pm/state';
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import MarkdownIt from 'markdown-it';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
@@ -29,6 +32,345 @@ import { ColumnList, Column, SlashCommand, getSuggestionItems, renderItems, Inde
 // --- Parsers ---
 
 const mdParser = new MarkdownIt({ html: true });
+
+const BLOCK_ID_TYPES = [
+    'paragraph',
+    'heading',
+    'blockquote',
+    'codeBlock',
+    'horizontalRule',
+    'bulletList',
+    'orderedList',
+    'listItem',
+    'taskList',
+    'taskItem',
+    'image',
+    'table',
+    'columnList',
+    'column',
+    'mindMap',
+];
+
+const LIST_CONTAINER_TYPES = new Set(['bulletList', 'orderedList', 'taskList']);
+const LIST_ITEM_TYPES = new Set(['listItem', 'taskItem']);
+const TEXT_TURN_TYPES = new Set(['paragraph', 'heading']);
+
+const createBlockId = () => {
+    const randomPart = Math.random().toString(36).slice(2, 9);
+    return `blk_${Date.now().toString(36)}_${randomPart}`;
+};
+
+const isBlockIdentityNode = (node: ProseMirrorNode) => {
+    return BLOCK_ID_TYPES.includes(node.type.name);
+};
+
+const blockDomId = (blockId?: string | null) => blockId ? `block-${blockId}` : undefined;
+
+const BlockIdentity = Extension.create({
+    name: 'blockIdentity',
+    priority: 1000,
+
+    addGlobalAttributes() {
+        return [
+            {
+                types: BLOCK_ID_TYPES,
+                attributes: {
+                    blockId: {
+                        default: null,
+                        parseHTML: (element) => element.getAttribute('data-block-id') || null,
+                        renderHTML: (attributes) => {
+                            const id = attributes.blockId;
+                            if (!id) return {};
+                            return {
+                                id: blockDomId(id),
+                                'data-block-id': id,
+                            };
+                        },
+                    },
+                },
+            },
+        ];
+    },
+
+    addProseMirrorPlugins() {
+        return [
+            new Plugin({
+                key: new PluginKey('blockIdentity'),
+                appendTransaction: (transactions, _oldState, newState) => {
+                    if (!transactions.some((transaction) => transaction.docChanged)) return null;
+
+                    const tr = newState.tr;
+                    const seen = new Set<string>();
+
+                    newState.doc.descendants((node, pos) => {
+                        if (!isBlockIdentityNode(node)) return true;
+
+                        const currentId = node.attrs.blockId;
+                        if (!currentId || seen.has(currentId)) {
+                            tr.setNodeMarkup(pos, undefined, {
+                                ...node.attrs,
+                                blockId: createBlockId(),
+                            }, node.marks);
+                            return true;
+                        }
+
+                        seen.add(currentId);
+                        return true;
+                    });
+
+                    if (!tr.docChanged) return null;
+                    tr.setMeta('addToHistory', false);
+                    return tr;
+                },
+            }),
+        ];
+    },
+});
+
+const ensureEditorBlockIds = (editor: any) => {
+    const { state, view } = editor;
+    const tr = state.tr;
+    const seen = new Set<string>();
+
+    state.doc.descendants((node: ProseMirrorNode, pos: number) => {
+        if (!isBlockIdentityNode(node)) return true;
+
+        const currentId = node.attrs.blockId;
+        if (!currentId || seen.has(currentId)) {
+            tr.setNodeMarkup(pos, undefined, {
+                ...node.attrs,
+                blockId: createBlockId(),
+            }, node.marks);
+            return true;
+        }
+
+        seen.add(currentId);
+        return true;
+    });
+
+    if (tr.docChanged) {
+        tr.setMeta('addToHistory', false);
+        view.dispatch(tr);
+        return true;
+    }
+
+    return false;
+};
+
+type BlockHandleInfo = {
+    id: string;
+    pos: number;
+    nodeSize: number;
+    nodeType: string;
+    depth: number;
+    parentDepth: number;
+    parentStart: number;
+    parentType: string;
+    index: number;
+    canMoveUp: boolean;
+    canMoveDown: boolean;
+    canTurnIntoText: boolean;
+    top: number;
+    left: number;
+    width: number;
+    height: number;
+};
+
+type DragBlockState = {
+    source: BlockHandleInfo;
+    drop?: {
+        target: BlockHandleInfo;
+        placement: 'before' | 'after';
+        top: number;
+        left: number;
+        width: number;
+        allowed: boolean;
+    };
+};
+
+const getBlockElementScore = (element: HTMLElement) => {
+    const tagName = element.tagName.toLowerCase();
+    const dataType = element.getAttribute('data-type') || '';
+
+    if (element.classList.contains('notion-image-block')) return 110;
+    if (dataType === 'mind-map') return 105;
+    if (tagName === 'table') return 100;
+    if (tagName === 'blockquote' || tagName === 'pre') return 95;
+    if (tagName === 'li') return 90;
+    if (tagName === 'hr') return 80;
+    if (/^h[1-6]$/.test(tagName)) return 70;
+    if (tagName === 'p') return 60;
+    if (tagName === 'ul' || tagName === 'ol') return 50;
+    if (dataType === 'column-list') return 30;
+    if (dataType === 'column') return 20;
+
+    return 10;
+};
+
+const findBestBlockElement = (target: EventTarget | null, root: HTMLElement) => {
+    let element = target instanceof HTMLElement ? target : null;
+    if (!element && target instanceof Text) element = target.parentElement;
+
+    const candidates: HTMLElement[] = [];
+    while (element && root.contains(element)) {
+        if (element.getAttribute('data-block-id')) candidates.push(element);
+        element = element.parentElement;
+    }
+
+    if (!candidates.length) return null;
+    return candidates.sort((a, b) => getBlockElementScore(b) - getBlockElementScore(a))[0];
+};
+
+const findBlockById = (editor: any, id: string): { node: ProseMirrorNode; pos: number } | null => {
+    let result: { node: ProseMirrorNode; pos: number } | null = null;
+
+    editor.state.doc.descendants((node: ProseMirrorNode, pos: number) => {
+        if (node.attrs?.blockId === id) {
+            result = { node, pos };
+            return false;
+        }
+        return true;
+    });
+
+    return result;
+};
+
+const getBlockContext = (editor: any, pos: number) => {
+    const $before = editor.state.doc.resolve(pos);
+    const parentDepth = $before.depth;
+    const parent = $before.node(parentDepth);
+    const index = $before.index(parentDepth);
+
+    return {
+        parent,
+        parentDepth,
+        parentStart: $before.start(parentDepth),
+        parentPos: parentDepth > 0 ? $before.before(parentDepth) : 0,
+        index,
+    };
+};
+
+const getBlockDomElement = (editor: any, id: string, pos: number) => {
+    const dom = editor.view.nodeDOM(pos);
+    if (dom instanceof HTMLElement && dom.getAttribute('data-block-id') === id) return dom;
+    if (dom instanceof HTMLElement) {
+        const nested = dom.querySelector(`[data-block-id="${id}"]`);
+        if (nested instanceof HTMLElement) return nested;
+    }
+
+    const matches = Array.from(editor.view.dom.querySelectorAll('[data-block-id]')) as HTMLElement[];
+    return matches.find((element) => element.getAttribute('data-block-id') === id) || null;
+};
+
+const getBlockInfoById = (editor: any, id: string, shell: HTMLElement): BlockHandleInfo | null => {
+    const found = findBlockById(editor, id);
+    if (!found) return null;
+
+    const element = getBlockDomElement(editor, id, found.pos);
+    if (!element) return null;
+
+    const context = getBlockContext(editor, found.pos);
+    const rect = element.getBoundingClientRect();
+    const shellRect = shell.getBoundingClientRect();
+
+    return {
+        id,
+        pos: found.pos,
+        nodeSize: found.node.nodeSize,
+        nodeType: found.node.type.name,
+        depth: context.parentDepth + 1,
+        parentDepth: context.parentDepth,
+        parentStart: context.parentStart,
+        parentType: context.parent.type.name,
+        index: context.index,
+        canMoveUp: context.index > 0,
+        canMoveDown: context.index < context.parent.childCount - 1,
+        canTurnIntoText: TEXT_TURN_TYPES.has(found.node.type.name),
+        top: rect.top - shellRect.top,
+        left: Math.max(8, rect.left - shellRect.left - 44),
+        width: rect.width,
+        height: rect.height,
+    };
+};
+
+const getBlockInfoFromEvent = (editor: any, event: React.MouseEvent, shell: HTMLElement | null) => {
+    if (!shell) return null;
+    const root = editor.view.dom as HTMLElement;
+    const element = findBestBlockElement(event.target, root);
+    const id = element?.getAttribute('data-block-id');
+    if (!id) return null;
+    return getBlockInfoById(editor, id, shell);
+};
+
+const getBlockInfoFromPoint = (editor: any, x: number, y: number, shell: HTMLElement | null) => {
+    if (!shell) return null;
+    const root = editor.view.dom as HTMLElement;
+    const elementAtPoint = document.elementFromPoint(x, y);
+    const element = findBestBlockElement(elementAtPoint, root);
+    const id = element?.getAttribute('data-block-id');
+    if (!id) return null;
+    return getBlockInfoById(editor, id, shell);
+};
+
+const cloneBlockWithFreshIds = (editor: any, node: ProseMirrorNode) => {
+    const json = node.toJSON();
+
+    const refresh = (value: any) => {
+        if (!value || typeof value !== 'object') return;
+        if (value.attrs?.blockId) value.attrs.blockId = createBlockId();
+        if (Array.isArray(value.content)) value.content.forEach(refresh);
+    };
+
+    refresh(json);
+    return editor.state.schema.nodeFromJSON(json);
+};
+
+const copyTextToClipboard = async (text: string) => {
+    let copied = false;
+
+    if (navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(text);
+            copied = true;
+        } catch {
+            copied = false;
+        }
+    }
+
+    const input = document.createElement('textarea');
+    input.value = text;
+    input.setAttribute('readonly', 'true');
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    input.style.top = '0';
+    document.body.appendChild(input);
+
+    try {
+        input.focus();
+        input.select();
+        copied = document.execCommand('copy') || copied;
+    } catch {
+        copied = copied || false;
+    } finally {
+        document.body.removeChild(input);
+    }
+
+    if (navigator.clipboard?.readText) {
+        try {
+            const readBack = await navigator.clipboard.readText();
+            if (readBack === text) return true;
+            copied = false;
+        } catch {
+            return copied;
+        }
+    }
+
+    return copied;
+};
+
+const sameParent = (source: BlockHandleInfo, target: BlockHandleInfo) => {
+    return source.parentDepth === target.parentDepth && source.parentStart === target.parentStart;
+};
 
 const defaultFence = mdParser.renderer.rules.fence;
 mdParser.renderer.rules.fence = (tokens, idx, options, env, self) => {
@@ -335,6 +677,8 @@ const NotionImageComponent = (props: any) => {
     return (
         <NodeViewWrapper
             className="notion-image-block group relative block my-4 max-w-full"
+            id={blockDomId(node.attrs.blockId)}
+            data-block-id={node.attrs.blockId || undefined}
             style={{
                 width,
                 maxWidth: '100%',
@@ -575,6 +919,10 @@ const getContentSignature = (contentJson: JSONContent | null | undefined, markdo
 
 export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange }: SmartDocumentEditorProps) => {
     const [showTOC, setShowTOC] = useState(false);
+    const [hoveredBlock, setHoveredBlock] = useState<BlockHandleInfo | null>(null);
+    const [blockMenuOpen, setBlockMenuOpen] = useState(false);
+    const [dragBlock, setDragBlock] = useState<DragBlockState | null>(null);
+    const shellRef = React.useRef<HTMLDivElement | null>(null);
     const mmSigRef = React.useRef<string>('');
     const externalSigRef = React.useRef<string>(getContentSignature(contentJson, content));
 
@@ -591,6 +939,7 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
 
     const editor = useEditor({
         extensions: [
+            BlockIdentity,
             StarterKit.configure({
                 bulletList: {
                     keepMarks: true,
@@ -800,6 +1149,11 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
 
     useEffect(() => {
         if (!editor) return;
+        ensureEditorBlockIds(editor);
+    }, [editor, content, contentJson]);
+
+    useEffect(() => {
+        if (!editor) return;
         const nextSignature = getContentSignature(contentJson, content);
         if (nextSignature === externalSigRef.current) return;
         if (editor.isFocused) return;
@@ -808,17 +1162,300 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
             const currentSignature = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
             if (currentSignature !== nextSignature) {
                 editor.commands.setContent(contentJson, { emitUpdate: false });
+                ensureEditorBlockIds(editor);
             }
-            externalSigRef.current = nextSignature;
+            externalSigRef.current = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
             return;
         }
 
         const currentMarkdown = editorToMarkdown(editor);
         if (currentMarkdown !== (content || '')) {
             editor.commands.setContent(markdownToHtml(content || ''), { emitUpdate: false });
+            ensureEditorBlockIds(editor);
         }
-        externalSigRef.current = nextSignature;
+        externalSigRef.current = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
     }, [content, contentJson, editor]);
+
+    const getLiveBlock = useCallback((block: BlockHandleInfo) => {
+        if (!editor) return null;
+        const found = findBlockById(editor, block.id);
+        if (!found) return null;
+        return {
+            ...found,
+            context: getBlockContext(editor, found.pos),
+        };
+    }, [editor]);
+
+    const closeBlockMenu = useCallback(() => {
+        setBlockMenuOpen(false);
+    }, []);
+
+    const moveBlock = useCallback((block: BlockHandleInfo, direction: 'up' | 'down') => {
+        if (!editor) return;
+        const live = getLiveBlock(block);
+        if (!live) return;
+
+        const { node, pos, context } = live;
+        const { parent, index } = context;
+        if (direction === 'up' && index <= 0) return;
+        if (direction === 'down' && index >= parent.childCount - 1) return;
+
+        const rawInsertPos = direction === 'up'
+            ? pos - parent.child(index - 1).nodeSize
+            : pos + node.nodeSize + parent.child(index + 1).nodeSize;
+
+        const tr = editor.state.tr;
+        tr.delete(pos, pos + node.nodeSize);
+        tr.insert(tr.mapping.map(rawInsertPos), node);
+        editor.view.dispatch(tr.scrollIntoView());
+        closeBlockMenu();
+    }, [closeBlockMenu, editor, getLiveBlock]);
+
+    const moveBlockToTarget = useCallback((sourceBlock: BlockHandleInfo, targetBlock: BlockHandleInfo, placement: 'before' | 'after') => {
+        if (!editor || !shellRef.current || sourceBlock.id === targetBlock.id) return;
+
+        const source = getLiveBlock(sourceBlock);
+        const target = getLiveBlock(targetBlock);
+        if (!source || !target) return;
+
+        const sourceInfo = getBlockInfoById(editor, sourceBlock.id, shellRef.current as HTMLElement);
+        const targetInfo = getBlockInfoById(editor, targetBlock.id, shellRef.current as HTMLElement);
+        if (!sourceInfo || !targetInfo || !sameParent(sourceInfo, targetInfo)) return;
+
+        const rawInsertPos = placement === 'before'
+            ? target.pos
+            : target.pos + target.node.nodeSize;
+
+        if (rawInsertPos >= source.pos && rawInsertPos <= source.pos + source.node.nodeSize) return;
+
+        const tr = editor.state.tr;
+        tr.delete(source.pos, source.pos + source.node.nodeSize);
+        tr.insert(tr.mapping.map(rawInsertPos), source.node);
+        editor.view.dispatch(tr.scrollIntoView());
+        closeBlockMenu();
+    }, [closeBlockMenu, editor, getLiveBlock]);
+
+    const duplicateBlock = useCallback((block: BlockHandleInfo) => {
+        if (!editor) return;
+        const live = getLiveBlock(block);
+        if (!live) return;
+
+        const clone = cloneBlockWithFreshIds(editor, live.node);
+        const tr = editor.state.tr.insert(live.pos + live.node.nodeSize, clone);
+        editor.view.dispatch(tr.scrollIntoView());
+        closeBlockMenu();
+    }, [closeBlockMenu, editor, getLiveBlock]);
+
+    const deleteBlock = useCallback((block: BlockHandleInfo) => {
+        if (!editor) return;
+        const live = getLiveBlock(block);
+        if (!live) return;
+
+        const { node, pos, context } = live;
+        const { parent, parentDepth, parentPos } = context;
+        const schema = editor.state.schema;
+        const emptyParagraph = schema.nodes.paragraph.create({ blockId: createBlockId() });
+        const tr = editor.state.tr;
+
+        if (LIST_ITEM_TYPES.has(node.type.name) && LIST_CONTAINER_TYPES.has(parent.type.name) && parent.childCount <= 1 && parentDepth > 0) {
+            const parentContext = getBlockContext(editor, parentPos);
+            if (parentContext.parent.type.name === 'doc' && parentContext.parent.childCount <= 1) {
+                tr.replaceWith(parentPos, parentPos + parent.nodeSize, emptyParagraph);
+            } else if (parentContext.parent.type.name !== 'doc' && parentContext.parent.childCount <= 1) {
+                tr.replaceWith(parentPos, parentPos + parent.nodeSize, emptyParagraph);
+            } else {
+                tr.delete(parentPos, parentPos + parent.nodeSize);
+            }
+        } else if (parent.type.name === 'doc' && parent.childCount <= 1) {
+            tr.replaceWith(pos, pos + node.nodeSize, emptyParagraph);
+        } else if (parent.type.name !== 'doc' && parent.childCount <= 1) {
+            tr.replaceWith(pos, pos + node.nodeSize, emptyParagraph);
+        } else {
+            tr.delete(pos, pos + node.nodeSize);
+        }
+
+        editor.view.dispatch(tr.scrollIntoView());
+        closeBlockMenu();
+    }, [closeBlockMenu, editor, getLiveBlock]);
+
+    const turnBlockInto = useCallback((block: BlockHandleInfo, target: 'paragraph' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'todo' | 'quote') => {
+        if (!editor) return;
+        const live = getLiveBlock(block);
+        if (!live || !TEXT_TURN_TYPES.has(live.node.type.name)) return;
+
+        const { node, pos } = live;
+        const attrs = { ...(node.attrs as Record<string, any>) };
+
+        if (target === 'paragraph') {
+            delete attrs.level;
+            const tr = editor.state.tr.setNodeMarkup(pos, editor.state.schema.nodes.paragraph, attrs, node.marks);
+            editor.view.dispatch(tr.scrollIntoView());
+            closeBlockMenu();
+            return;
+        }
+
+        if (target === 'h1' || target === 'h2' || target === 'h3') {
+            const level = target === 'h1' ? 1 : target === 'h2' ? 2 : 3;
+            const tr = editor.state.tr.setNodeMarkup(pos, editor.state.schema.nodes.heading, {
+                ...attrs,
+                level,
+            }, node.marks);
+            editor.view.dispatch(tr.scrollIntoView());
+            closeBlockMenu();
+            return;
+        }
+
+        const chain = editor.chain().focus(pos + 1);
+        if (node.type.name === 'heading') chain.setParagraph();
+        if (target === 'bullet') chain.toggleBulletList().run();
+        if (target === 'ordered') chain.toggleOrderedList().run();
+        if (target === 'todo') chain.toggleTaskList().run();
+        if (target === 'quote') chain.toggleBlockquote().run();
+        closeBlockMenu();
+    }, [closeBlockMenu, editor, getLiveBlock]);
+
+    const copyBlockLink = useCallback(async (block: BlockHandleInfo) => {
+        if (!editor) return;
+        const live = getLiveBlock(block);
+        const blockId = live?.node.attrs.blockId || block.id;
+        const hash = blockDomId(blockId);
+        if (!hash) return;
+
+        const url = new URL(window.location.href);
+        url.hash = hash;
+
+        const copied = await copyTextToClipboard(url.toString());
+        if (!copied) {
+            window.prompt('Copy block link', url.toString());
+        }
+
+        closeBlockMenu();
+    }, [closeBlockMenu, editor, getLiveBlock]);
+
+    const handleEditorMouseMove = useCallback((event: React.MouseEvent) => {
+        if (!editor) return;
+        const nextBlock = getBlockInfoFromEvent(editor, event, shellRef.current);
+        if (!nextBlock) return;
+
+        setHoveredBlock((current) => {
+            if (
+                current?.id === nextBlock.id &&
+                Math.abs(current.top - nextBlock.top) < 1 &&
+                Math.abs(current.height - nextBlock.height) < 1
+            ) {
+                return current;
+            }
+            return nextBlock;
+        });
+    }, [editor]);
+
+    const handleEditorMouseLeave = useCallback(() => {
+        if (!blockMenuOpen && !dragBlock) setHoveredBlock(null);
+    }, [blockMenuOpen, dragBlock]);
+
+    const handleBlockDragStart = useCallback((event: React.MouseEvent, block: BlockHandleInfo) => {
+        if (!editor || !shellRef.current) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const source = getBlockInfoById(editor, block.id, shellRef.current) || block;
+        let currentDrag: DragBlockState = { source };
+        const previousCursor = document.body.style.cursor;
+
+        document.body.style.cursor = 'grabbing';
+        setBlockMenuOpen(false);
+        setDragBlock(currentDrag);
+
+        const updateDropTarget = (clientX: number, clientY: number) => {
+            const target = getBlockInfoFromPoint(editor, clientX, clientY, shellRef.current);
+            if (!target || target.id === source.id) {
+                currentDrag = { source };
+                setDragBlock(currentDrag);
+                return;
+            }
+
+            const shellTop = shellRef.current?.getBoundingClientRect().top || 0;
+            const placement = clientY < target.top + shellTop + target.height / 2 ? 'before' : 'after';
+            const allowed = sameParent(source, target);
+
+            currentDrag = {
+                source,
+                drop: {
+                    target,
+                    placement,
+                    top: placement === 'before' ? target.top : target.top + target.height,
+                    left: target.left + 44,
+                    width: target.width,
+                    allowed,
+                },
+            };
+            setDragBlock(currentDrag);
+        };
+
+        const handleMouseMove = (moveEvent: MouseEvent) => {
+            moveEvent.preventDefault();
+            updateDropTarget(moveEvent.clientX, moveEvent.clientY);
+        };
+
+        const handleMouseUp = (upEvent: MouseEvent) => {
+            upEvent.preventDefault();
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+            document.body.style.cursor = previousCursor;
+
+            if (currentDrag.drop?.allowed) {
+                moveBlockToTarget(currentDrag.source, currentDrag.drop.target, currentDrag.drop.placement);
+            }
+
+            setDragBlock(null);
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+        updateDropTarget(event.clientX, event.clientY);
+    }, [editor, moveBlockToTarget]);
+
+    const handleEditorDragOver = useCallback((event: React.DragEvent) => {
+        if (!editor || !dragBlock || !shellRef.current) return;
+        const target = getBlockInfoFromEvent(editor, event as unknown as React.MouseEvent, shellRef.current);
+        if (!target || target.id === dragBlock.source.id) return;
+
+        const placement = event.clientY < target.top + shellRef.current.getBoundingClientRect().top + target.height / 2
+            ? 'before'
+            : 'after';
+        const allowed = sameParent(dragBlock.source, target);
+
+        event.preventDefault();
+        event.dataTransfer.dropEffect = allowed ? 'move' : 'none';
+
+        setDragBlock({
+            source: dragBlock.source,
+            drop: {
+                target,
+                placement,
+                top: placement === 'before' ? target.top : target.top + target.height,
+                left: target.left + 44,
+                width: target.width,
+                allowed,
+            },
+        });
+    }, [dragBlock, editor]);
+
+    const handleEditorDrop = useCallback((event: React.DragEvent) => {
+        if (!dragBlock?.drop) return;
+        event.preventDefault();
+
+        if (dragBlock.drop.allowed) {
+            moveBlockToTarget(dragBlock.source, dragBlock.drop.target, dragBlock.drop.placement);
+        }
+
+        setDragBlock(null);
+    }, [dragBlock, moveBlockToTarget]);
+
+    const handleEditorDragEnd = useCallback(() => {
+        setDragBlock(null);
+    }, []);
 
     const addImage = useCallback(() => {
         const input = document.createElement('input');
@@ -839,7 +1476,25 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
     if (!editor) return null;
 
     return (
-        <div className="flex h-full min-h-[500px] relative">
+        <div
+            ref={shellRef}
+            className="flex h-full min-h-[500px] relative"
+            onDragOver={handleEditorDragOver}
+            onDrop={handleEditorDrop}
+            onDragEnd={handleEditorDragEnd}
+        >
+            <BlockHandleLayer
+                block={hoveredBlock}
+                menuOpen={blockMenuOpen}
+                onMenuOpenChange={setBlockMenuOpen}
+                onMove={moveBlock}
+                onDuplicate={duplicateBlock}
+                onDelete={deleteBlock}
+                onTurnInto={turnBlockInto}
+                onCopyLink={copyBlockLink}
+                onDragStart={handleBlockDragStart}
+            />
+            <BlockDropIndicator dragBlock={dragBlock} />
             {/* Outline / Table of Contents (Left Side) */}
             {showTOC && (
                 <div className="hidden xl:flex flex-col w-64 sticky top-0 h-full border-r border-gray-100 bg-gray-50/30 flex-shrink-0 transition-all duration-300">
@@ -869,13 +1524,152 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
                     showTOC={showTOC} 
                     onToggleTOC={() => setShowTOC(!showTOC)} 
                 />
-                <div className="flex-1 bg-white cursor-text p-8 sm:p-12 max-w-5xl mx-auto w-full" onClick={() => editor.chain().focus().run()}>
+                <div
+                    className="flex-1 bg-white cursor-text p-8 sm:p-12 max-w-5xl mx-auto w-full"
+                    onClick={() => editor.chain().focus().run()}
+                    onMouseMove={handleEditorMouseMove}
+                    onMouseLeave={handleEditorMouseLeave}
+                >
                     <EditorContent editor={editor} />
                 </div>
             </div>
         </div>
     )
 }
+
+const menuButtonClass = 'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40';
+
+const BlockHandleLayer = ({
+    block,
+    menuOpen,
+    onMenuOpenChange,
+    onMove,
+    onDuplicate,
+    onDelete,
+    onTurnInto,
+    onCopyLink,
+    onDragStart,
+}: {
+    block: BlockHandleInfo | null;
+    menuOpen: boolean;
+    onMenuOpenChange: (open: boolean) => void;
+    onMove: (block: BlockHandleInfo, direction: 'up' | 'down') => void;
+    onDuplicate: (block: BlockHandleInfo) => void;
+    onDelete: (block: BlockHandleInfo) => void;
+    onTurnInto: (block: BlockHandleInfo, target: 'paragraph' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'todo' | 'quote') => void;
+    onCopyLink: (block: BlockHandleInfo) => void;
+    onDragStart: (event: React.MouseEvent, block: BlockHandleInfo) => void;
+}) => {
+    if (!block) return null;
+
+    return (
+        <div
+            className="absolute z-30 flex items-start gap-1"
+            style={{ top: Math.max(0, block.top), left: block.left }}
+            contentEditable={false}
+            onMouseDown={(event) => event.preventDefault()}
+        >
+            <button
+                type="button"
+                title="拖动块"
+                onMouseDown={(event) => onDragStart(event, block)}
+                className="mt-0.5 flex h-7 w-7 cursor-grab items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 active:cursor-grabbing"
+            >
+                <GripVertical className="h-4 w-4" />
+            </button>
+            <div className="relative">
+                <button
+                    type="button"
+                    title="块菜单"
+                    onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onMenuOpenChange(!menuOpen);
+                    }}
+                    className={`mt-0.5 flex h-7 w-7 items-center justify-center rounded ${
+                        menuOpen ? 'bg-gray-900 text-white' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700'
+                    }`}
+                >
+                    <MoreHorizontal className="h-4 w-4" />
+                </button>
+
+                {menuOpen && (
+                    <div
+                        className="absolute left-8 top-0 w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl"
+                        onMouseDown={(event) => event.preventDefault()}
+                    >
+                        <button className={menuButtonClass} disabled={!block.canMoveUp} onClick={() => onMove(block, 'up')}>
+                            <ArrowUp className="h-3.5 w-3.5" /> 上移
+                        </button>
+                        <button className={menuButtonClass} disabled={!block.canMoveDown} onClick={() => onMove(block, 'down')}>
+                            <ArrowDown className="h-3.5 w-3.5" /> 下移
+                        </button>
+                        <button className={menuButtonClass} onClick={() => onDuplicate(block)}>
+                            <Copy className="h-3.5 w-3.5" /> 复制块
+                        </button>
+                        <button className={menuButtonClass} onClick={() => onCopyLink(block)}>
+                            <LinkIcon className="h-3.5 w-3.5" /> 复制块链接
+                        </button>
+
+                        {block.canTurnIntoText && (
+                            <>
+                                <div className="my-1 h-px bg-gray-100" />
+                                <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">Turn into</div>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'paragraph')}>
+                                    <Type className="h-3.5 w-3.5" /> 普通文本
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'h1')}>
+                                    <Heading1 className="h-3.5 w-3.5" /> 一级标题
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'h2')}>
+                                    <Heading2 className="h-3.5 w-3.5" /> 二级标题
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'h3')}>
+                                    <Heading3 className="h-3.5 w-3.5" /> 三级标题
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'bullet')}>
+                                    <List className="h-3.5 w-3.5" /> 项目列表
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'ordered')}>
+                                    <ListOrdered className="h-3.5 w-3.5" /> 编号列表
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'todo')}>
+                                    <CheckSquare className="h-3.5 w-3.5" /> 待办
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'quote')}>
+                                    <Quote className="h-3.5 w-3.5" /> 引用
+                                </button>
+                            </>
+                        )}
+
+                        <div className="my-1 h-px bg-gray-100" />
+                        <button className={`${menuButtonClass} text-red-600 hover:bg-red-50`} onClick={() => onDelete(block)}>
+                            <Trash2 className="h-3.5 w-3.5" /> 删除块
+                        </button>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+const BlockDropIndicator = ({ dragBlock }: { dragBlock: DragBlockState | null }) => {
+    const drop = dragBlock?.drop;
+    if (!drop) return null;
+
+    return (
+        <div
+            className={`pointer-events-none absolute z-40 h-0.5 rounded-full ${
+                drop.allowed ? 'bg-primary' : 'bg-red-400'
+            }`}
+            style={{
+                top: drop.top,
+                left: drop.left,
+                width: drop.width,
+            }}
+        />
+    );
+};
 
 const TableOfContents = ({ editor }: { editor: any }) => {
     const [headings, setHeadings] = useState<{ level: number; text: string; id: string; pos: number }[]>([]);

@@ -2071,7 +2071,12 @@ export const MindMapComponent = (props: any) => {
     const initialData = parseData(node.attrs.data);
 
     return (
-        <NodeViewWrapper className="mind-map-wrapper my-6" contentEditable={false}>
+        <NodeViewWrapper
+            className="mind-map-wrapper my-6"
+            contentEditable={false}
+            id={node.attrs.blockId ? `block-${node.attrs.blockId}` : undefined}
+            data-block-id={node.attrs.blockId || undefined}
+        >
             <ReactFlowProvider>
                 <MindMapInner 
                     initialData={initialData} 
