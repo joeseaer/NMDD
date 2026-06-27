@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { CheckCircle, BarChart2, ArrowRight, UserCheck, UserPlus } from 'lucide-react';
-import { api } from '../services/api';
+import { api, CURRENT_USER_ID } from '../services/api';
 
 export default function Review() {
   const location = useLocation();
@@ -59,7 +59,7 @@ export default function Review() {
               relationship_stage: 'L1_BREAKING',
               favorability_score: 10, // Initial score based on success
               last_interaction_summary: "初次相识，进行了愉快的交流。",
-              user_id: "user_001" // Current user
+              user_id: CURRENT_USER_ID // Current user
           };
           
           await api.createNPCRelation(relationData);

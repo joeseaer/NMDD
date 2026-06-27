@@ -1,7 +1,8 @@
 const fetch = require('node-fetch');
+const { DEFAULT_USER_ID } = require('./config/currentUser');
 
 async function main() {
-  const user_id = 'user-1';
+  const user_id = DEFAULT_USER_ID;
   const mindmapJson = JSON.stringify({
     nodes: [{ id: 'root', type: 'mindMap', position: { x: 0, y: 0 }, data: { label: '中心主题' } }],
     edges: [],
@@ -38,4 +39,3 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
-

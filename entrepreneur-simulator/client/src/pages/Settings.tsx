@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Save, Download, Clock, AlertCircle, Database } from 'lucide-react';
+import { CURRENT_USER_ID } from '../services/api';
 
 export default function Settings() {
   const [autoBackup, setAutoBackup] = useState(false);
@@ -31,14 +32,14 @@ export default function Settings() {
       // Using window.location.href is simplest for file download.
       
       // But to update state after success, fetch is better.
-      const response = await fetch('/api/backup/export?userId=user-1');
+      const response = await fetch(`/api/backup/export?userId=${encodeURIComponent(CURRENT_USER_ID)}`);
       if (!response.ok) throw new Error('Backup failed');
       
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `backup-user-1-${new Date().toISOString().split('T')[0]}.json`;
+      a.download = `backup-${CURRENT_USER_ID}-${new Date().toISOString().split('T')[0]}.json`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);

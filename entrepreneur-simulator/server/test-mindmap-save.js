@@ -1,7 +1,8 @@
 const fetch = require('node-fetch');
+const { DEFAULT_USER_ID } = require('./config/currentUser');
 
 async function main() {
-  const user_id = 'user-1';
+  const user_id = DEFAULT_USER_ID;
   const content = `\n\n<div data-type="mind-map" data-mindmap="%7B%5C%22nodes%5C%22%3A%5B%7B%5C%22id%5C%22%3A%5C%22root%5C%22%2C%5C%22type%5C%22%3A%5C%22mindMap%5C%22%2C%5C%22position%5C%22%3A%7B%5C%22x%5C%22%3A0%2C%5C%22y%5C%22%3A0%7D%2C%5C%22data%5C%22%3A%7B%5C%22label%5C%22%3A%5C%22Center%5C%22%7D%7D%5D%2C%5C%22edges%5C%22%3A%5B%5D%7D"></div>\n\n`;
 
   let res = await fetch('http://localhost:3000/api/sop/create', {

@@ -1,7 +1,8 @@
 const fetch = require('node-fetch');
+const { DEFAULT_USER_ID } = require('./config/currentUser');
 
 async function main() {
-  const res = await fetch('http://localhost:3000/api/sop/user-1');
+  const res = await fetch(`http://localhost:3000/api/sop/${encodeURIComponent(DEFAULT_USER_ID)}`);
   const arr = await res.json();
   const mm = arr.filter(
     (x) => typeof x.content === 'string' && (x.content.includes('```mindmap') || x.content.includes('data-type="mind-map"'))
@@ -17,4 +18,3 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
-

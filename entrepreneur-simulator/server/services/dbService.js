@@ -1,5 +1,6 @@
 const { createClient } = require('@supabase/supabase-js');
 const { ChromaClient } = require('chromadb');
+const { DEFAULT_USER_ID } = require('../config/currentUser');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
@@ -141,7 +142,7 @@ const saveSOP = async (sopData) => {
       const { data, error } = await supabase
         .from('sops')
         .insert([{
-            user_id: insertData.user_id || 'test-user', // Default for now
+            user_id: insertData.user_id || DEFAULT_USER_ID,
             title: insertData.title,
             category: insertData.category,
             tags: insertData.tags,
@@ -921,7 +922,7 @@ const saveReviewSession = async (sessionData) => {
         const { data, error } = await supabase
             .from('review_sessions')
             .insert([{
-                user_id: sessionData.user_id || 'user-1',
+                user_id: sessionData.user_id || DEFAULT_USER_ID,
                 title: sessionData.title,
                 status: sessionData.status,
                 review_type: sessionData.type,

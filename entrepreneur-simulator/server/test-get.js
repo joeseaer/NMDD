@@ -1,8 +1,9 @@
 const fetch = require('node-fetch');
+const { DEFAULT_USER_ID } = require('./config/currentUser');
 
 async function testGet() {
     try {
-        const response = await fetch('http://localhost:3000/api/sop/user-1');
+        const response = await fetch(`http://localhost:3000/api/sop/${encodeURIComponent(DEFAULT_USER_ID)}`);
         console.log("Status:", response.status);
         const data = await response.json();
         console.log("Count:", data.length);

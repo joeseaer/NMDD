@@ -1,27 +1,11 @@
 require('dotenv').config();
 const OpenAI = require('openai');
 const { getLlmApiKey, getLlmModel, getOpenAIClientOptions } = require('./llmConfig');
+const { extractJsonObject } = require('../utils/aiResponse');
 let openaiClient = null;
 
 function getModel() {
   return getLlmModel();
-}
-
-function extractJsonObject(text) {
-  if (!text || typeof text !== 'string') return null;
-  const cleaned = text.replace(/```json\n|```/g, '').trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {}
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return null;
-  const candidate = cleaned.slice(start, end + 1);
-  try {
-    return JSON.parse(candidate);
-  } catch {
-    return null;
-  }
 }
 
 function getOpenAIClient() {
@@ -673,8 +657,7 @@ async function analyzeSOPContent(content) {
             messages: [{ role: "system", content: prompt }],
             model: getModel(),
         });
-        const content = completion.choices[0].message.content.replace(/```json\n|\n```/g, '').replace(/```/g, '').trim();
-        return JSON.parse(content);
+        return extractJsonObject(completion.choices?.[0]?.message?.content);
     } catch (err) {
         console.error("SOP Analysis Error", err);
         return null;

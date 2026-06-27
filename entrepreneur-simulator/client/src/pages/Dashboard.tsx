@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Play, TrendingUp, History, TreeDeciduous, ArrowRight, BarChart3, Zap, Users, BookOpen, Award, Target, Gem, Crown, Shield } from 'lucide-react';
 import { Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import { api } from '../services/api';
+import { api, CURRENT_USER_ID } from '../services/api';
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -15,8 +15,7 @@ export default function Dashboard() {
     api.getUserStats().then(setStats).catch(console.error);
     
     // Fetch history
-    fetch('/api/history/user_001')
-      .then(res => res.json())
+    api.getAllScenes(CURRENT_USER_ID)
       .then(data => {
         if (Array.isArray(data)) setRecentScenes(data);
       })
@@ -46,7 +45,7 @@ export default function Dashboard() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: "user_001",
+          user_id: CURRENT_USER_ID,
           // If customGoal is provided, use it; otherwise, let backend decide based on weaknesses
           goal: customGoal || "auto_generate_based_on_weakness", 
           constraints: "严格的时间限制，对方比较多疑"

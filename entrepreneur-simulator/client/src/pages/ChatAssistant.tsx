@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Send, Bot, Loader2, Sparkles, BookOpen } from 'lucide-react';
+import { CURRENT_USER_ID } from '../services/api';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -35,7 +36,7 @@ export default function ChatAssistant() {
       const response = await fetch('/api/assistant/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: "user_001", query: input })
+        body: JSON.stringify({ userId: CURRENT_USER_ID, query: input })
       });
       
       const data = await response.json();

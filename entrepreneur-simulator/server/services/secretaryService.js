@@ -1,6 +1,8 @@
 const OpenAI = require('openai');
 const dbService = require('./dbService');
 const { getLlmApiKey, getLlmModel, getOpenAIClientOptions } = require('./llmConfig');
+const { resolveUserId } = require('../config/currentUser');
+const { extractJsonObject } = require('../utils/aiResponse');
 
 let openaiClient = null;
 
@@ -38,23 +40,6 @@ function getModel() {
   return getLlmModel();
 }
 
-function extractJsonObject(text) {
-  if (!text || typeof text !== 'string') return null;
-  const cleaned = text.replace(/```json\n|```/g, '').trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {}
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start === -1 || end === -1 || end <= start) return null;
-  const candidate = cleaned.slice(start, end + 1);
-  try {
-    return JSON.parse(candidate);
-  } catch {
-    return null;
-  }
-}
-
 function getOpenAIClientOrNull() {
   if (openaiClient) return openaiClient;
   const apiKey = getLlmApiKey();
@@ -64,7 +49,7 @@ function getOpenAIClientOrNull() {
 }
 
 async function getSecretaryDaily({ userId, refresh }) {
-  const uid = userId || 'user-1';
+  const uid = resolveUserId(userId);
   const now = new Date();
   const nowText = toDateKeyLocal(now);
 

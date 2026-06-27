@@ -14,6 +14,7 @@ import EvolutionTree from './pages/EvolutionTree'
 import SettingsPage from './pages/Settings'
 import Planner from './pages/Planner'
 import FloatingAssistant from './components/FloatingAssistant'
+import { CURRENT_USER_ID } from './config/currentUser'
 
 function App() {
   const location = useLocation();
@@ -58,7 +59,7 @@ function App() {
             // Trigger auto-download
             console.log('Auto-backup triggered');
             const link = document.createElement('a');
-            link.href = '/api/backup/export?userId=user-1';
+            link.href = `/api/backup/export?userId=${encodeURIComponent(CURRENT_USER_ID)}`;
             link.download = `auto-backup-${Date.now()}.json`;
             document.body.appendChild(link);
             link.click();

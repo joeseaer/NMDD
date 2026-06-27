@@ -1,4 +1,5 @@
 const fetch = require('node-fetch');
+const { DEFAULT_USER_ID } = require('./config/currentUser');
 
 async function testCreate() {
     try {
@@ -9,7 +10,7 @@ async function testCreate() {
                 title: "Test Note Script",
                 category: "note",
                 content: "Testing from script",
-                user_id: "user-1"
+                user_id: DEFAULT_USER_ID
             })
         });
         

@@ -3,6 +3,8 @@ const chatService = require('../services/chatService');
 const dbService = require('../services/dbService');
 const plannerAssistantService = require('../services/plannerAssistantService');
 const secretaryService = require('../services/secretaryService');
+const { DEFAULT_USER_ID } = require('../config/currentUser');
+const { parseJsonObject, sendApiError } = require('../utils/aiResponse');
 const crypto = require('crypto');
 
 const normalizeForHash = (v) => {
@@ -382,7 +384,7 @@ async function routes(fastify, options) {
       return response;
     } catch (err) {
       request.log.error(err);
-      reply.code(500).send({ error: 'Assistant failed' });
+      return sendApiError(reply, request, { error: 'Assistant failed', err, stage: 'llm_call' });
     }
   });
 
@@ -540,7 +542,7 @@ async function routes(fastify, options) {
   fastify.post('/planner/nl/parse', async (request, reply) => {
     try {
       const { userId, text, listId, tzOffsetMinutes } = request.body || {};
-      const uid = userId || 'user-1';
+      const uid = userId || DEFAULT_USER_ID;
       if (!text) {
         reply.code(400).send({ error: 'Text is required' });
         return;
@@ -605,7 +607,7 @@ async function routes(fastify, options) {
         ? (() => { try { return JSON.parse(profile_analysis); } catch { return null; } })()
         : (profile_analysis ?? null);
 
-      const profiles = await dbService.getPeopleProfiles('user-1');
+      const profiles = await dbService.getPeopleProfiles(DEFAULT_USER_ID);
       const current = profiles.find(p => p.id === id);
       const base = current && typeof current.private_info === 'string'
         ? (() => { try { return JSON.parse(current.private_info); } catch { return {}; } })()
@@ -634,7 +636,7 @@ async function routes(fastify, options) {
   fastify.post('/people/:id/ai-suggestion', async (request, reply) => {
     try {
       const { id } = request.params;
-      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
       const profiles = await dbService.getPeopleProfiles(userId);
       const profile = profiles.find(p => p.id === id);
       if (!profile) return reply.code(404).send({ error: 'Person not found' });
@@ -707,13 +709,9 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
         });
         const content = completion?.choices?.[0]?.message?.content || '{}';
         request.log.info({ msg: 'AI suggestion response', content, personId: id });
-        let cleaned = content.replace(/```(?:json)?\s*|```/g, '').trim();
-        const start = cleaned.indexOf('{');
-        const end = cleaned.lastIndexOf('}');
-        if (start !== -1 && end !== -1 && end >= start) cleaned = cleaned.slice(start, end + 1);
-        const parsed = JSON.parse(cleaned);
+        const parsed = parseJsonObject(content, 'AI suggestion output is not valid JSON');
         if (!parsed || typeof parsed.label !== 'string' || !parsed.label.trim()) {
-          return reply.code(502).send({ error: 'Invalid AI output', detail: 'Missing label field from AI response' });
+          return sendApiError(reply, request, { statusCode: 502, error: 'Invalid AI output', detail: 'Missing label field from AI response', stage: 'json_validate' });
         }
         suggestionObj = {
           label: parsed.label.trim().slice(0, 20),
@@ -721,28 +719,28 @@ ${logs.slice(0, 3).map(l => `- ${l.event_date}: ${l.event_context}`).join('\n')}
         };
       } catch (e) {
         request.log.error({ msg: 'AI suggestion generate/parse failed', error: e?.message, personId: id });
-        return reply.code(502).send({ error: 'AI suggestion generation failed', detail: e?.message || 'Unknown AI error' });
+        return sendApiError(reply, request, { statusCode: 502, error: 'AI suggestion generation failed', err: e, stage: e?.stage || 'llm_call' });
       }
 
       try {
         await dbService.updatePersonAIFollowUp(id, suggestionObj);
       } catch (e) {
         request.log.error({ msg: 'Persist ai followup failed', error: e?.message, personId: id });
-        return reply.code(500).send({ error: 'Failed to persist AI suggestion', detail: e?.message || 'persist failed' });
+        return sendApiError(reply, request, { error: 'Failed to persist AI suggestion', err: e, stage: 'db_write' });
       }
 
       return { id, suggestion: suggestionObj, source: 'ai', persisted: true };
 
     } catch (err) {
       request.log.error(err);
-      reply.code(500).send({ error: 'Failed to generate AI follow-up suggestion' });
+      return sendApiError(reply, request, { error: 'Failed to generate AI follow-up suggestion', err, stage: err?.stage || 'llm_call' });
     }
   });
 
   fastify.post('/people/:id/strategy-suggestion', async (request, reply) => {
     try {
       const { id } = request.params;
-      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
       const profiles = await dbService.getPeopleProfiles(userId);
       const profile = profiles.find((p) => p.id === id);
       if (!profile) return reply.code(404).send({ error: 'Person not found' });
@@ -813,13 +811,9 @@ ${JSON.stringify(strategy)}
         temperature: 0.6,
       });
       const content = completion?.choices?.[0]?.message?.content || '{}';
-      let cleaned = content.replace(/```(?:json)?\s*|```/g, '').trim();
-      const start = cleaned.indexOf('{');
-      const end = cleaned.lastIndexOf('}');
-      if (start !== -1 && end !== -1 && end >= start) cleaned = cleaned.slice(start, end + 1);
-      const parsed = JSON.parse(cleaned);
+      const parsed = parseJsonObject(content, 'Strategy suggestion output is not valid JSON');
       if (!parsed || typeof parsed !== 'object' || !parsed.recommendation || typeof parsed.recommendation !== 'object') {
-        return reply.code(502).send({ error: 'Invalid AI output', detail: 'Missing recommendation field' });
+        return sendApiError(reply, request, { statusCode: 502, error: 'Invalid AI output', detail: 'Missing recommendation field', stage: 'json_validate' });
       }
       const recommendation = {
         relation_positioning: String(parsed.recommendation.relation_positioning || '').trim(),
@@ -852,14 +846,14 @@ ${JSON.stringify(strategy)}
       };
     } catch (err) {
       request.log.error(err);
-      reply.code(500).send({ error: 'Failed to generate strategy suggestion', detail: err?.message });
+      return sendApiError(reply, request, { statusCode: err?.stage === 'json_parse' ? 502 : 500, error: 'Failed to generate strategy suggestion', err, stage: err?.stage || 'llm_call' });
     }
   });
 
   fastify.post('/people/:id/strategy-evaluate', async (request, reply) => {
     try {
       const { id } = request.params;
-      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
       const profiles = await dbService.getPeopleProfiles(userId);
       const profile = profiles.find((p) => p.id === id);
       if (!profile) return reply.code(404).send({ error: 'Person not found' });
@@ -937,7 +931,7 @@ ${JSON.stringify(strategy)}
     try {
         const { personId, currentData } = request.body;
         // Fetch person and logs
-        const profiles = await dbService.getPeopleProfiles('user-1'); // Simplified: fetching all to find one is inefficient but works for now. Better to add getPersonById.
+        const profiles = await dbService.getPeopleProfiles(request.body?.userId || request.query?.userId || DEFAULT_USER_ID); // Simplified: fetching all to find one is inefficient but works for now. Better to add getPersonById.
         let profile = profiles.find(p => p.id === personId);
         
         if (!profile) return reply.code(404).send({ error: 'Person not found' });
@@ -953,14 +947,14 @@ ${JSON.stringify(strategy)}
         return analysis;
     } catch (err) {
         request.log.error(err);
-        reply.code(500).send({ error: 'Analysis failed' });
+        return sendApiError(reply, request, { error: 'Analysis failed', err, stage: err?.stage || 'llm_call' });
     }
   });
 
   fastify.post('/people/script', async (request, reply) => {
       try {
           const { personId, intent, context } = request.body;
-          const profiles = await dbService.getPeopleProfiles('user-1');
+          const profiles = await dbService.getPeopleProfiles(request.body?.userId || request.query?.userId || DEFAULT_USER_ID);
           const profile = profiles.find(p => p.id === personId);
           if (!profile) return reply.code(404).send({ error: 'Person not found' });
           
@@ -969,7 +963,7 @@ ${JSON.stringify(strategy)}
           return result;
       } catch (err) {
           request.log.error(err);
-          reply.code(500).send({ error: 'Script generation failed' });
+          return sendApiError(reply, request, { error: 'Script generation failed', err, stage: err?.stage || 'llm_call' });
       }
   });
 
@@ -977,7 +971,7 @@ ${JSON.stringify(strategy)}
   fastify.post('/people/consult', async (request, reply) => {
       try {
           const { personId, query } = request.body;
-          const profiles = await dbService.getPeopleProfiles('user-1');
+          const profiles = await dbService.getPeopleProfiles(request.body?.userId || request.query?.userId || DEFAULT_USER_ID);
           const profile = profiles.find(p => p.id === personId);
           if (!profile) return reply.code(404).send({ error: 'Person not found' });
           
@@ -986,14 +980,14 @@ ${JSON.stringify(strategy)}
           return result;
       } catch (err) {
           request.log.error(err);
-          reply.code(500).send({ error: 'Consultation failed' });
+          return sendApiError(reply, request, { error: 'Consultation failed', err, stage: err?.stage || 'llm_call' });
       }
   });
 
   fastify.get('/people/:id/advisor/threads', async (request, reply) => {
     try {
       const { id } = request.params;
-      const userId = request.query?.userId || 'user-1';
+      const userId = request.query?.userId || DEFAULT_USER_ID;
       const profiles = await dbService.getPeopleProfiles(userId);
       const profile = profiles.find((p) => p.id === id);
       if (!profile) return reply.code(404).send({ error: 'Person not found' });
@@ -1012,7 +1006,7 @@ ${JSON.stringify(strategy)}
   fastify.post('/people/:id/advisor/thread', async (request, reply) => {
     try {
       const { id } = request.params;
-      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
       const title = String(request.body?.title || '新建会话').trim().slice(0, 60) || '新建会话';
       const profiles = await dbService.getPeopleProfiles(userId);
       const profile = profiles.find((p) => p.id === id);
@@ -1038,7 +1032,7 @@ ${JSON.stringify(strategy)}
   fastify.get('/people/:id/advisor/thread/:threadId', async (request, reply) => {
     try {
       const { id, threadId } = request.params;
-      const userId = request.query?.userId || 'user-1';
+      const userId = request.query?.userId || DEFAULT_USER_ID;
       const profiles = await dbService.getPeopleProfiles(userId);
       const profile = profiles.find((p) => p.id === id);
       if (!profile) return reply.code(404).send({ error: 'Person not found' });
@@ -1056,7 +1050,7 @@ ${JSON.stringify(strategy)}
   fastify.post('/people/:id/advisor/chat', async (request, reply) => {
     try {
       const { id } = request.params;
-      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
       const threadId = String(request.body?.threadId || '');
       const content = String(request.body?.content || '').trim();
       if (!threadId || !content) return reply.code(400).send({ error: 'threadId and content are required' });
@@ -1105,7 +1099,7 @@ ${JSON.stringify(strategy)}
   fastify.post('/people/:id/advisor/apply', async (request, reply) => {
     try {
       const { id } = request.params;
-      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
       const threadId = String(request.body?.threadId || '');
       const messageId = String(request.body?.messageId || '');
       if (!threadId || !messageId) return reply.code(400).send({ error: 'threadId and messageId are required' });
@@ -1151,7 +1145,7 @@ ${JSON.stringify(strategy)}
   fastify.post('/people/summary', async (request, reply) => {
       try {
           const { personId, forceRefresh } = request.body;
-          const userId = request.body?.userId || request.query?.userId || 'user-1';
+          const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
           const profiles = await dbService.getPeopleProfiles(userId);
           const profile = profiles.find(p => p.id === personId);
           if (!profile) return reply.code(404).send({ error: 'Person not found' });
@@ -1194,7 +1188,7 @@ ${JSON.stringify(strategy)}
           };
       } catch (err) {
           request.log.error(err);
-          reply.code(500).send({ error: 'Summary generation failed' });
+          return sendApiError(reply, request, { error: 'Summary generation failed', err, stage: err?.stage || 'llm_call' });
       }
   });
 
@@ -1202,7 +1196,7 @@ ${JSON.stringify(strategy)}
   fastify.post('/people/practical-scenes', async (request, reply) => {
     try {
       const { personId } = request.body;
-      const profiles = await dbService.getPeopleProfiles('user-1');
+      const profiles = await dbService.getPeopleProfiles(request.body?.userId || request.query?.userId || DEFAULT_USER_ID);
       const profile = profiles.find(p => p.id === personId);
       if (!profile) return reply.code(404).send({ error: 'Person not found' });
 
@@ -1214,14 +1208,14 @@ ${JSON.stringify(strategy)}
       return { triggers: result.triggers, pleasers: result.pleasers };
     } catch (err) {
       request.log.error(err);
-      reply.code(500).send({ error: 'Failed to generate practical scenes' });
+      return sendApiError(reply, request, { error: 'Failed to generate practical scenes', err, stage: err?.stage || 'llm_call' });
     }
   });
 
   fastify.get('/people/:id/scenario-cards', async (request, reply) => {
     try {
       const { id } = request.params;
-      const userId = request.query?.userId || 'user-1';
+      const userId = request.query?.userId || DEFAULT_USER_ID;
       const sops = await dbService.getSOPs(userId);
       const cards = (sops || [])
         .filter((s) => Array.isArray(s.tags) && s.tags.includes('scenario-lab') && s.tags.includes(`person:${id}`))
@@ -1238,7 +1232,7 @@ ${JSON.stringify(strategy)}
   fastify.post('/people/:id/scenario-simulate', async (request, reply) => {
     try {
       const { id } = request.params;
-      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
       const query = String(request.body?.query || '').trim();
       const category = String(request.body?.category || '').trim().slice(0, 24) || '职场协作';
 
@@ -1277,14 +1271,14 @@ ${JSON.stringify(strategy)}
       };
     } catch (err) {
       request.log.error(err);
-      reply.code(500).send({ error: 'Failed to generate scenario simulation', detail: err?.message });
+      return sendApiError(reply, request, { error: 'Failed to generate scenario simulation', err, stage: err?.stage || 'llm_call' });
     }
   });
 
   fastify.patch('/people/:id/scenario-cards/:sopId', async (request, reply) => {
     try {
       const { id, sopId } = request.params;
-      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
       const patch = request.body?.patch || {};
       const sops = await dbService.getSOPs(userId);
       const sop = (sops || []).find((s) => s.id === sopId);
@@ -1320,7 +1314,7 @@ ${JSON.stringify(strategy)}
   fastify.delete('/people/:id/scenario-cards/:sopId', async (request, reply) => {
     try {
       const { id, sopId } = request.params;
-      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
       const sops = await dbService.getSOPs(userId);
       const sop = (sops || []).find((s) => s.id === sopId);
       if (!sop) return reply.code(404).send({ error: 'Scenario card not found' });
@@ -1338,7 +1332,7 @@ ${JSON.stringify(strategy)}
   fastify.post('/people/:id/map-proposal/apply', async (request, reply) => {
     try {
       const { id } = request.params;
-      const userId = request.body?.userId || request.query?.userId || 'user-1';
+      const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
       const proposal = request.body?.proposal || {};
       const profiles = await dbService.getPeopleProfiles(userId);
       const profile = profiles.find(p => p.id === id);
@@ -1384,7 +1378,7 @@ ${JSON.stringify(strategy)}
       const { personId, layerKey, force } = request.body || {};
       if (!personId || !layerKey) return reply.code(400).send({ error: 'Missing personId or layerKey' });
 
-      const profiles = await dbService.getPeopleProfiles('user-1');
+      const profiles = await dbService.getPeopleProfiles(request.body?.userId || request.query?.userId || DEFAULT_USER_ID);
       const profile = profiles.find(p => p.id === personId);
       if (!profile) return reply.code(404).send({ error: 'Person not found' });
 
@@ -1430,7 +1424,7 @@ ${JSON.stringify(strategy)}
       return { items: next.verification_checklists[layerKey].items, hash: currentHash, reused: false };
     } catch (err) {
       request.log.error(err);
-      reply.code(500).send({ error: 'Failed to generate verification checklist', detail: err?.message });
+      return sendApiError(reply, request, { error: 'Failed to generate verification checklist', err, stage: err?.stage || 'llm_call' });
     }
   });
 
@@ -1449,7 +1443,7 @@ ${JSON.stringify(strategy)}
       try {
         const personId = logData?.person_id;
         if (personId) {
-          const profiles = await dbService.getPeopleProfiles('user-1');
+          const profiles = await dbService.getPeopleProfiles(request.body?.userId || request.query?.userId || DEFAULT_USER_ID);
           const profile = profiles.find((p) => p.id === personId);
           if (profile) {
             const logs = await dbService.getInteractionLogs(personId);
@@ -1505,7 +1499,7 @@ ${JSON.stringify(strategy)}
       if (!person_id) return reply.code(400).send({ error: 'person_id is required' });
       if (!text || !String(text).trim()) return reply.code(400).send({ error: 'text is required' });
 
-      const uid = userId || 'user-1';
+      const uid = userId || DEFAULT_USER_ID;
       const profiles = await dbService.getPeopleProfiles(uid);
       const profile = profiles.find((p) => p.id === person_id);
       if (!profile) return reply.code(404).send({ error: 'Person not found' });
@@ -1548,11 +1542,7 @@ ${String(text).trim()}
         temperature: 0.2,
       });
       const content = completion?.choices?.[0]?.message?.content || '{}';
-      let cleaned = String(content).replace(/```(?:json)?\s*|```/g, '').trim();
-      const start = cleaned.indexOf('{');
-      const end = cleaned.lastIndexOf('}');
-      if (start !== -1 && end !== -1 && end >= start) cleaned = cleaned.slice(start, end + 1);
-      const parsed = JSON.parse(cleaned);
+      const parsed = parseJsonObject(content, 'Interaction log extraction output is not valid JSON');
       const logs = Array.isArray(parsed?.logs) ? parsed.logs : [];
       if (!logs.length) return reply.code(422).send({ error: 'No interaction logs extracted' });
 
@@ -1614,7 +1604,7 @@ ${String(text).trim()}
       return;
     } catch (err) {
       request.log.error(err);
-      reply.code(500).send({ error: 'Failed to parse and create interaction logs', detail: err?.message });
+      return sendApiError(reply, request, { statusCode: err?.stage === 'json_parse' ? 502 : 500, error: 'Failed to parse and create interaction logs', err, stage: err?.stage || 'llm_call' });
     }
   });
 
@@ -1632,7 +1622,7 @@ ${String(text).trim()}
         // If review exists, return it
         if (log.ai_review) return { review: log.ai_review };
 
-        const profiles = await dbService.getPeopleProfiles('user-1');
+        const profiles = await dbService.getPeopleProfiles(request.body?.userId || request.query?.userId || DEFAULT_USER_ID);
         const profile = profiles.find(p => p.id === personId);
         
         if (!profile) return reply.code(404).send({ error: 'Person not found' });
@@ -1645,10 +1635,10 @@ ${String(text).trim()}
         }
         
         return result;
-    } catch (err) {
+      } catch (err) {
         request.log.error(err);
-        reply.code(500).send({ error: 'Review generation failed' });
-    }
+        return sendApiError(reply, request, { error: 'Review generation failed', err, stage: err?.stage || 'llm_call' });
+      }
   });
 
   // --- Real Scene Review Routes ---
@@ -1711,7 +1701,7 @@ ${String(text).trim()}
           return aiResponse;
       } catch (err) {
           request.log.error(err);
-          reply.code(500).send({ error: 'Review chat failed' });
+          return sendApiError(reply, request, { error: 'Review chat failed', err, stage: err?.stage || 'llm_call' });
       }
   });
 
@@ -1760,14 +1750,14 @@ ${String(text).trim()}
               tags: sopContent ? [...sopContent.tags, '复盘转化'] : ['复盘转化', '草稿'],
               version: '0.1',
               content: sopContent ? `## 来源复盘\nID: ${reviewId}\n\n${sopContent.content}` : `## 来源复盘\nID: ${reviewId}\n\n## 亮点 (Keep)\n${summaryData.keep.map(i=>`- ${i}`).join('\n')}\n\n## 不足 (Improve)\n${summaryData.improve.map(i=>`- ${i}`).join('\n')}\n\n## 行动点 (Action)\n${summaryData.action.map(i=>`- ${i}`).join('\n')}`,
-              user_id: 'user-1'
+              user_id: request.body?.userId || request.query?.userId || DEFAULT_USER_ID
           };
 
           const id = await dbService.saveSOP(sopData);
           return { id, message: "SOP Draft Saved" };
       } catch (err) {
           request.log.error(err);
-          reply.code(500).send({ error: 'Save SOP draft failed' });
+          return sendApiError(reply, request, { error: 'Save SOP draft failed', err, stage: err?.stage || 'llm_call' });
       }
   });
 
@@ -1778,7 +1768,7 @@ ${String(text).trim()}
           return result;
       } catch (err) {
           request.log.error(err);
-          reply.code(500).send({ error: 'SOP analysis failed' });
+          return sendApiError(reply, request, { error: 'SOP analysis failed', err, stage: err?.stage || 'llm_call' });
       }
   });
 
@@ -1809,8 +1799,8 @@ ${String(text).trim()}
   fastify.get('/backup/export', async (request, reply) => {
     try {
       const { userId } = request.query;
-      // Default to 'user-1' if not provided (for dev convenience)
-      const uid = userId || 'user-1'; 
+      // Default to configured local user if not provided (for dev convenience)
+      const uid = userId || DEFAULT_USER_ID;
       const data = await dbService.getAllUserData(uid);
       
       reply
@@ -1831,7 +1821,7 @@ ${String(text).trim()}
       return data;
     } catch (err) {
       request.log.error(err);
-      reply.code(500).send({ error: 'Failed to generate secretary reminders' });
+      return sendApiError(reply, request, { error: 'Failed to generate secretary reminders', err, stage: err?.stage || 'llm_call' });
     }
   });
 

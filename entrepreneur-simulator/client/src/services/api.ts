@@ -1,6 +1,7 @@
+import { CURRENT_USER_ID } from '../config/currentUser';
 
 const API_BASE_URL = '/api';
-export const CURRENT_USER_ID = 'user-1';
+export { CURRENT_USER_ID };
 
 export const api = {
     // SOPs
@@ -384,12 +385,15 @@ export const api = {
             const text = await response.text().catch(() => '');
             const statusHint = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
             if (!text) throw new Error(`获取每日内参失败（${statusHint}）`);
+            let parsed: any = null;
             try {
-                const data = JSON.parse(text);
-                throw new Error(data?.detail || data?.error || `获取每日内参失败（${statusHint}）`);
+                parsed = JSON.parse(text);
             } catch {
-                throw new Error(`获取每日内参失败（${statusHint}）：${text.substring(0, 300)}`);
+                parsed = null;
             }
+            const detail = parsed?.detail || parsed?.error;
+            if (detail) throw new Error(`获取每日内参失败（${statusHint}）：${detail}`);
+            throw new Error(`获取每日内参失败（${statusHint}）：${text.substring(0, 300)}`);
         }
         return response.json();
     },
