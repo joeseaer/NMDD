@@ -875,10 +875,20 @@ export const SyncedBlock = Node.create({
   },
 });
 
-type DatabasePropertyType = 'title' | 'text' | 'number' | 'status' | 'date' | 'checkbox' | 'url' | 'formula' | 'relation' | 'rollup';
+type DatabasePropertyType = 'title' | 'text' | 'number' | 'status' | 'date' | 'checkbox' | 'url' | 'formula' | 'relation' | 'rollup' | 'files';
 type DatabaseViewMode = 'table' | 'list' | 'board' | 'calendar' | 'timeline' | 'gallery';
 type DatabaseFilterOperator = 'contains' | 'equals' | 'not_empty' | 'empty';
 type DatabaseRollupFunction = 'count' | 'show' | 'sum' | 'avg' | 'min' | 'max';
+type DatabaseFileKind = 'image' | 'video' | 'audio' | 'pdf' | 'file';
+
+type DatabaseFileValue = {
+  id: string;
+  url: string;
+  name: string;
+  mime: string;
+  size: number;
+  kind: DatabaseFileKind;
+};
 
 type DatabaseProperty = {
   id: string;
@@ -948,6 +958,7 @@ const DATABASE_PROPERTY_TYPES: Array<{ value: DatabasePropertyType; label: strin
   { value: 'formula', label: '公式' },
   { value: 'relation', label: '关系' },
   { value: 'rollup', label: '汇总' },
+  { value: 'files', label: '文件' },
 ];
 
 const DATABASE_VIEW_OPTIONS: Array<{ value: DatabaseViewMode; label: string }> = [
@@ -1082,9 +1093,73 @@ const normalizeRelationCellValue = (value: unknown) => {
     });
 };
 
+const getDatabaseFileNameFromUrl = (url: string) => {
+  const rawName = url.split(/[?#]/)[0].split('/').filter(Boolean).pop() || '文件';
+  try {
+    return decodeURIComponent(rawName);
+  } catch {
+    return rawName;
+  }
+};
+
+const getDatabaseFileKind = (mime: string, name: string): DatabaseFileKind => {
+  const normalizedMime = String(mime || '').toLowerCase();
+  const normalizedName = String(name || '').toLowerCase();
+  if (normalizedMime.startsWith('image/')) return 'image';
+  if (normalizedMime.startsWith('video/')) return 'video';
+  if (normalizedMime.startsWith('audio/')) return 'audio';
+  if (normalizedMime === 'application/pdf' || /\.pdf$/i.test(normalizedName)) return 'pdf';
+  return 'file';
+};
+
+const normalizeDatabaseFileValue = (value: unknown): DatabaseFileValue[] => {
+  const source = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object'
+      ? [value]
+      : typeof value === 'string' && value.trim()
+        ? value.split(/[,，\n]/).map((url) => ({ url: url.trim() }))
+        : [];
+  const seen = new Set<string>();
+
+  return source
+    .map((item: any) => {
+      const url = String(item?.url || item?.src || item?.href || '').trim();
+      if (!url || seen.has(url)) return null;
+      seen.add(url);
+
+      const name = String(item?.name || item?.filename || '').trim() || getDatabaseFileNameFromUrl(url);
+      const mime = String(item?.mime || item?.type || '').trim();
+      const size = Number(item?.size || 0);
+      const kind = getDatabaseFileKind(mime, name);
+
+      return {
+        id: String(item?.id || createSmartDocumentId('file')),
+        url,
+        name,
+        mime,
+        size: Number.isFinite(size) && size > 0 ? size : 0,
+        kind,
+      };
+    })
+    .filter(Boolean) as DatabaseFileValue[];
+};
+
+const formatDatabaseFileSize = (size: number) => {
+  if (!Number.isFinite(size) || size <= 0) return '';
+  if (size < 1024) return `${Math.round(size)} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 102.4) / 10} KB`;
+  return `${Math.round(size / 1024 / 102.4) / 10} MB`;
+};
+
+const getDatabaseFilesDisplayValue = (value: unknown) => {
+  return normalizeDatabaseFileValue(value).map((file) => file.name || file.url).join(', ');
+};
+
 const normalizeDatabaseCellValue = (property: DatabaseProperty, value: any) => {
   if (property.type === 'formula' || property.type === 'rollup') return '';
   if (property.type === 'relation') return normalizeRelationCellValue(value);
+  if (property.type === 'files') return normalizeDatabaseFileValue(value);
   if (property.type === 'checkbox') return Boolean(value);
   if (property.type === 'status') {
     const options = property.options?.length ? property.options : DEFAULT_STATUS_OPTIONS;
@@ -1099,6 +1174,7 @@ const getDefaultDatabaseCellValue = (property: DatabaseProperty) => {
   if (property.type === 'checkbox') return false;
   if (property.type === 'status') return property.options?.[0] || DEFAULT_STATUS_OPTIONS[0];
   if (property.type === 'relation') return [];
+  if (property.type === 'files') return [];
   return '';
 };
 
@@ -1675,6 +1751,7 @@ const getCellDisplayValue = (
     const result = evaluateDatabaseRollup(database, row, property, seen);
     return result.error ? `#${result.error}` : formatDatabaseFormulaValue(result.value);
   }
+  if (property.type === 'files') return getDatabaseFilesDisplayValue(row.cells[property.id]);
   if (property.type === 'checkbox') return row.cells[property.id] ? 'true' : '';
   return String(row.cells[property.id] || '').trim();
 };
@@ -1695,6 +1772,7 @@ const getCellSortValue = (database: SmartDocumentDatabase, row: DatabaseRow, pro
     return String(result.value || '').toLowerCase();
   }
   if (property.type === 'relation') return getRelationDisplayValue(database, row, property).toLowerCase();
+  if (property.type === 'files') return getDatabaseFilesDisplayValue(row.cells[property.id]).toLowerCase();
   const value = row.cells[property.id];
   if (property.type === 'checkbox') return value ? 1 : 0;
   if (property.type === 'number') return Number(value || 0);
@@ -2125,6 +2203,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
   const boardGroupProperty = groupProperty || boardProperty || titleProperty || null;
   const statusProperties = database.properties.filter((property) => property.type === 'status');
   const relationProperties = database.properties.filter((property) => property.type === 'relation');
+  const uploadDatabaseFile = editor?.storage?.smartDocument?.uploadFile || editor?.storage?.smartDocument?.uploadImage;
   const activeView = database.views.find((view) => view.id === database.activeViewId) || database.views[0];
   const [filterDraft, setFilterDraft] = useState<Pick<DatabaseFilter, 'propertyId' | 'operator' | 'value'>>({
     propertyId: database.properties[0]?.id || '',
@@ -2371,6 +2450,39 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
     });
   };
 
+  const addDatabaseFiles = (row: DatabaseRow, property: DatabaseProperty) => {
+    if (property.type !== 'files' || typeof uploadDatabaseFile !== 'function') return;
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = Array.from(input.files || []);
+      if (!files.length) return;
+
+      const currentFiles = normalizeDatabaseFileValue(row.cells[property.id]);
+      const uploadedFiles: DatabaseFileValue[] = [];
+
+      for (const file of files) {
+        const url = await uploadDatabaseFile(file);
+        if (!url) continue;
+        uploadedFiles.push({
+          id: createSmartDocumentId('file'),
+          url,
+          name: file.name,
+          mime: file.type || '',
+          size: file.size,
+          kind: getDatabaseFileKind(file.type || '', file.name),
+        });
+      }
+
+      if (uploadedFiles.length) {
+        updateCell(row.id, property.id, [...currentFiles, ...uploadedFiles]);
+      }
+    };
+    input.click();
+  };
+
   const updateRowPageContent = (rowId: string, patch: Partial<DatabaseRow['page']>) => {
     commit({
       ...database,
@@ -2407,6 +2519,59 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
     if (property.type === 'date') return <input type="date" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
     if (property.type === 'number') return <input type="number" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
     if (property.type === 'url') return <input type="url" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} placeholder="https://" />;
+    if (property.type === 'files') {
+      const files = normalizeDatabaseFileValue(rawValue);
+      const removeFile = (fileId: string) => {
+        updateCell(row.id, property.id, files.filter((file) => file.id !== fileId));
+      };
+
+      return (
+        <div className="min-w-0 space-y-1">
+          <div className="flex min-h-7 flex-wrap items-center gap-1 rounded border border-transparent px-1 py-0.5 hover:border-gray-200">
+            {files.length === 0 && <span className="px-1 text-xs text-gray-400">未添加文件</span>}
+            {files.map((file) => (
+              <span key={file.id} className="flex max-w-48 items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                <Paperclip className="h-3 w-3 flex-shrink-0 text-gray-400" />
+                <a
+                  href={file.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="min-w-0 truncate text-gray-600 no-underline hover:text-gray-900"
+                  title={`${file.name}${formatDatabaseFileSize(file.size) ? ` · ${formatDatabaseFileSize(file.size)}` : ''}`}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  {file.name}
+                </a>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    removeFile(file.id);
+                  }}
+                  className="rounded-full text-gray-300 hover:bg-red-100 hover:text-red-600"
+                  title="移除文件"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+          <button
+            type="button"
+            disabled={typeof uploadDatabaseFile !== 'function'}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              addDatabaseFiles(row, property);
+            }}
+            className="flex h-7 items-center gap-1 rounded border border-gray-200 bg-white px-2 text-xs font-medium text-gray-500 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus className="h-3.5 w-3.5" /> 添加文件
+          </button>
+        </div>
+      );
+    }
     if (property.type === 'relation') {
       const relationIds = getRelationCellRowIds(database, row, property);
       const availableRows = database.rows.filter((item) => item.id !== row.id && !relationIds.includes(item.id));
