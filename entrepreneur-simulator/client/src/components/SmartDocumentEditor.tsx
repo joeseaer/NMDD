@@ -43,6 +43,7 @@ import {
     SyncedBlock,
     PageLinkBlock,
     EquationBlock,
+    DatabaseBlock,
 } from './TiptapExtensions';
 
 // --- Parsers ---
@@ -73,6 +74,7 @@ const BLOCK_ID_TYPES = [
     'syncedBlock',
     'pageLinkBlock',
     'equationBlock',
+    'databaseBlock',
 ];
 
 const LIST_CONTAINER_TYPES = new Set(['bulletList', 'orderedList', 'taskList']);
@@ -293,6 +295,7 @@ const getBlockElementScore = (element: HTMLElement) => {
 
     if (element.classList.contains('notion-image-block')) return 110;
     if (dataType === 'mind-map') return 105;
+    if (dataType === 'database') return 105;
     if (dataType === 'media' || dataType === 'embed' || dataType === 'bookmark') return 104;
     if (dataType === 'toggle' || dataType === 'callout') return 98;
     if (tagName === 'table') return 100;
@@ -663,7 +666,7 @@ turndownService.addRule('keepSmartDocumentBlocks', {
 
     return (
       (nodeName === 'details' && dataType === 'toggle') ||
-      (nodeName === 'div' && ['callout', 'embed', 'media', 'equation', 'synced-block'].includes(dataType || '')) ||
+      (nodeName === 'div' && ['callout', 'embed', 'media', 'equation', 'synced-block', 'database'].includes(dataType || '')) ||
       (nodeName === 'a' && ['bookmark', 'page-link'].includes(dataType || ''))
     );
   },
@@ -1345,6 +1348,7 @@ export const SmartDocumentEditor = ({
             SyncedBlock,
             PageLinkBlock,
             EquationBlock,
+            DatabaseBlock,
             Table.configure({
                 resizable: true,
             }),
