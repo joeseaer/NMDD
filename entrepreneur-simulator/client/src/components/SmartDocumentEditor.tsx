@@ -110,7 +110,11 @@ turndownService.addRule('keepSmartImages', {
     return Boolean(
       el.getAttribute('data-width') ||
       el.getAttribute('data-align') ||
-      el.getAttribute('data-caption')
+      el.getAttribute('data-caption') ||
+      el.getAttribute('data-fit') ||
+      el.getAttribute('data-aspect-ratio') ||
+      el.getAttribute('data-shape') ||
+      el.getAttribute('data-link')
     );
   },
   replacement: (_content, node) => {
@@ -118,6 +122,10 @@ turndownService.addRule('keepSmartImages', {
     const width = normalizeImageWidth(el.getAttribute('data-width') || el.getAttribute('width') || el.style.width || '100%');
     const align = el.getAttribute('data-align') || 'center';
     const caption = el.getAttribute('data-caption') || '';
+    const fit = el.getAttribute('data-fit') || 'contain';
+    const aspectRatio = el.getAttribute('data-aspect-ratio') || '';
+    const shape = el.getAttribute('data-shape') || 'rounded';
+    const link = el.getAttribute('data-link') || '';
     const attrs = [
       `src="${escapeHtmlAttribute(el.getAttribute('src') || '')}"`,
       `alt="${escapeHtmlAttribute(el.getAttribute('alt') || '')}"`,
@@ -125,6 +133,10 @@ turndownService.addRule('keepSmartImages', {
       `data-width="${escapeHtmlAttribute(width)}"`,
       `data-align="${escapeHtmlAttribute(align)}"`,
       caption ? `data-caption="${escapeHtmlAttribute(caption)}"` : '',
+      fit !== 'contain' ? `data-fit="${escapeHtmlAttribute(fit)}"` : '',
+      aspectRatio ? `data-aspect-ratio="${escapeHtmlAttribute(aspectRatio)}"` : '',
+      shape !== 'rounded' ? `data-shape="${escapeHtmlAttribute(shape)}"` : '',
+      link ? `data-link="${escapeHtmlAttribute(link)}"` : '',
       `style="width: ${escapeHtmlAttribute(width)}; max-width: 100%; height: auto;"`,
     ].filter(Boolean);
 
@@ -180,6 +192,12 @@ const getImageAlignmentStyle = (align: string) => {
     return { marginLeft: 'auto', marginRight: 'auto' };
 };
 
+const getImageShapeClass = (shape: string) => {
+    if (shape === 'circle') return 'rounded-full';
+    if (shape === 'square') return 'rounded-none';
+    return 'rounded-lg';
+};
+
 const ImageActionButton = ({
     children,
     title,
@@ -227,6 +245,11 @@ const NotionImageComponent = (props: any) => {
     const align = node.attrs.align || 'center';
     const caption = node.attrs.caption || '';
     const alt = node.attrs.alt || '';
+    const fit = node.attrs.fit || 'contain';
+    const aspectRatio = node.attrs.aspectRatio || '';
+    const shape = node.attrs.shape || 'rounded';
+    const link = node.attrs.link || '';
+    const shapeClass = getImageShapeClass(shape);
 
     useEffect(() => {
         setWidth(normalizeImageWidth(node.attrs.width));
@@ -284,6 +307,12 @@ const NotionImageComponent = (props: any) => {
         updateAttributes({ alt: nextAlt.trim() });
     };
 
+    const promptImageLink = () => {
+        const nextLink = window.prompt('图片链接', link);
+        if (nextLink === null) return;
+        updateAttributes({ link: nextLink.trim() });
+    };
+
     const copyImageLink = async () => {
         try {
             await navigator.clipboard.writeText(src);
@@ -313,14 +342,19 @@ const NotionImageComponent = (props: any) => {
             }}
             ref={wrapperRef}
         >
-            <div className={`relative rounded-lg ${selected ? 'ring-2 ring-primary/80 ring-offset-2' : ''}`}>
-                <img
-                    src={src}
-                    alt={alt || caption}
-                    title={node.attrs.title || alt || caption}
-                    className="block w-full h-auto rounded-lg border border-gray-100 bg-gray-50 shadow-sm"
-                    draggable={false}
-                />
+            <div className={`relative ${shapeClass} ${selected ? 'ring-2 ring-primary/80 ring-offset-2' : ''}`}>
+                <div
+                    className={`overflow-hidden border border-gray-100 bg-gray-50 shadow-sm ${shapeClass}`}
+                    style={aspectRatio ? { aspectRatio } : undefined}
+                >
+                    <img
+                        src={src}
+                        alt={alt || caption}
+                        title={node.attrs.title || alt || caption}
+                        className={`block w-full ${aspectRatio ? `h-full ${fit === 'cover' ? 'object-cover' : 'object-contain'}` : 'h-auto'}`}
+                        draggable={false}
+                    />
+                </div>
 
                 <div
                     className={`absolute left-0 top-1/2 h-16 w-1.5 -translate-x-2 -translate-y-1/2 cursor-ew-resize rounded-full bg-gray-900 transition-opacity ${
@@ -362,6 +396,34 @@ const NotionImageComponent = (props: any) => {
                             {percent}
                         </ImageActionButton>
                     ))}
+                    <ImageActionButton
+                        title="原始比例"
+                        active={!aspectRatio && shape === 'rounded'}
+                        onClick={() => updateAttributes({ aspectRatio: '', fit: 'contain', shape: 'rounded' })}
+                    >
+                        原
+                    </ImageActionButton>
+                    <ImageActionButton
+                        title="裁剪 16:9"
+                        active={aspectRatio === '16 / 9' && fit === 'cover'}
+                        onClick={() => updateAttributes({ aspectRatio: '16 / 9', fit: 'cover', shape: 'rounded' })}
+                    >
+                        16:9
+                    </ImageActionButton>
+                    <ImageActionButton
+                        title="裁剪 1:1"
+                        active={aspectRatio === '1 / 1' && fit === 'cover' && shape !== 'circle'}
+                        onClick={() => updateAttributes({ aspectRatio: '1 / 1', fit: 'cover', shape: 'rounded' })}
+                    >
+                        1:1
+                    </ImageActionButton>
+                    <ImageActionButton
+                        title="圆形遮罩"
+                        active={shape === 'circle'}
+                        onClick={() => updateAttributes({ aspectRatio: '1 / 1', fit: 'cover', shape: 'circle' })}
+                    >
+                        圆
+                    </ImageActionButton>
                     <ImageActionButton title="添加说明" active={showCaption || Boolean(caption)} onClick={() => setShowCaption(true)}>
                         <Captions className="h-4 w-4" />
                     </ImageActionButton>
@@ -370,6 +432,9 @@ const NotionImageComponent = (props: any) => {
                     </ImageActionButton>
                     <ImageActionButton title="Alt 文本" active={Boolean(alt)} onClick={promptAltText}>
                         ALT
+                    </ImageActionButton>
+                    <ImageActionButton title="图片链接" active={Boolean(link)} onClick={promptImageLink}>
+                        <LinkIcon className="h-4 w-4" />
                     </ImageActionButton>
                     <ImageActionButton title="复制图片链接" onClick={copyImageLink}>
                         <Copy className="h-4 w-4" />
@@ -569,6 +634,34 @@ export const SmartDocumentEditor = ({ content = '', contentJson = null, onChange
                             parseHTML: element => element.getAttribute('title') || '',
                             renderHTML: attributes => ({
                                 title: attributes.title || undefined,
+                            }),
+                        },
+                        fit: {
+                            default: 'contain',
+                            parseHTML: element => element.getAttribute('data-fit') || 'contain',
+                            renderHTML: attributes => ({
+                                'data-fit': attributes.fit && attributes.fit !== 'contain' ? attributes.fit : undefined,
+                            }),
+                        },
+                        aspectRatio: {
+                            default: '',
+                            parseHTML: element => element.getAttribute('data-aspect-ratio') || '',
+                            renderHTML: attributes => ({
+                                'data-aspect-ratio': attributes.aspectRatio || undefined,
+                            }),
+                        },
+                        shape: {
+                            default: 'rounded',
+                            parseHTML: element => element.getAttribute('data-shape') || 'rounded',
+                            renderHTML: attributes => ({
+                                'data-shape': attributes.shape && attributes.shape !== 'rounded' ? attributes.shape : undefined,
+                            }),
+                        },
+                        link: {
+                            default: '',
+                            parseHTML: element => element.getAttribute('data-link') || '',
+                            renderHTML: attributes => ({
+                                'data-link': attributes.link || undefined,
                             }),
                         },
                     }
