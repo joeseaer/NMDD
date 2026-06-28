@@ -3963,6 +3963,60 @@ const getMediaKind = (file: File) => {
   return 'file';
 };
 
+type SmartDocumentMediaKind = 'video' | 'audio' | 'pdf' | 'file';
+
+const getMediaKindFromUrl = (url: string, forcedKind?: SmartDocumentMediaKind): SmartDocumentMediaKind => {
+  if (forcedKind) return forcedKind;
+  const pathname = (() => {
+    try {
+      return new URL(url, window.location.origin).pathname.toLowerCase();
+    } catch {
+      return url.toLowerCase();
+    }
+  })();
+
+  if (/\.(mp4|webm|mov|m4v|ogv)$/i.test(pathname)) return 'video';
+  if (/\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(pathname)) return 'audio';
+  if (/\.pdf$/i.test(pathname)) return 'pdf';
+  return 'file';
+};
+
+const getMediaNameFromUrl = (url: string, kind: SmartDocumentMediaKind) => {
+  try {
+    const parsed = new URL(url, window.location.origin);
+    const lastSegment = parsed.pathname.split('/').filter(Boolean).pop();
+    if (lastSegment) {
+      try {
+        return decodeURIComponent(lastSegment);
+      } catch {
+        return lastSegment;
+      }
+    }
+    return parsed.hostname || url;
+  } catch {
+    return kind === 'video' ? '视频'
+      : kind === 'audio' ? '音频'
+        : kind === 'pdf' ? 'PDF'
+          : '文件';
+  }
+};
+
+const getMediaMimeFromUrl = (url: string, kind: SmartDocumentMediaKind) => {
+  const lower = url.toLowerCase();
+  if (kind === 'video') {
+    if (lower.includes('.webm')) return 'video/webm';
+    if (lower.includes('.mov')) return 'video/quicktime';
+    return 'video/mp4';
+  }
+  if (kind === 'audio') {
+    if (lower.includes('.wav')) return 'audio/wav';
+    if (lower.includes('.ogg')) return 'audio/ogg';
+    return 'audio/mpeg';
+  }
+  if (kind === 'pdf') return 'application/pdf';
+  return '';
+};
+
 const insertUploadedMedia = ({ editor, range, accept, forcedKind }: any) => {
   editor.chain().focus().deleteRange(range).run();
   const uploadFile = editor.storage?.smartDocument?.uploadFile || editor.storage?.smartDocument?.uploadImage;
@@ -3989,6 +4043,33 @@ const insertUploadedMedia = ({ editor, range, accept, forcedKind }: any) => {
     }).run();
   };
   input.click();
+};
+
+const insertMediaFromUrl = async ({ editor, range, forcedKind, title }: any) => {
+  const url = await promptForUrl({
+    title,
+    placeholder: forcedKind === 'video'
+      ? 'https://example.com/video.mp4'
+      : forcedKind === 'audio'
+        ? 'https://example.com/audio.mp3'
+        : forcedKind === 'pdf'
+          ? 'https://example.com/file.pdf'
+          : 'https://example.com/file.pdf',
+    confirmLabel: '插入',
+  });
+  if (!url) return;
+
+  const kind = getMediaKindFromUrl(url, forcedKind);
+  editor.chain().focus().deleteRange(range).insertContent({
+    type: 'mediaBlock',
+    attrs: {
+      url,
+      name: getMediaNameFromUrl(url, kind),
+      mime: getMediaMimeFromUrl(url, kind),
+      size: 0,
+      kind,
+    },
+  }).run();
 };
 
 type PromptForTextOptions = {
@@ -4427,10 +4508,22 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
       command: ({ editor, range }: any) => insertUploadedMedia({ editor, range }),
     },
     {
+      title: '文件 URL',
+      shortcut: '/fileurl',
+      icon: <Globe className="w-3 h-3" />,
+      command: ({ editor, range }: any) => insertMediaFromUrl({ editor, range, title: '插入文件 URL' }),
+    },
+    {
       title: 'Video',
       shortcut: '/video',
       icon: <Video className="w-3 h-3" />,
       command: ({ editor, range }: any) => insertUploadedMedia({ editor, range, accept: 'video/*', forcedKind: 'video' }),
+    },
+    {
+      title: '视频 URL',
+      shortcut: '/videourl',
+      icon: <Globe className="w-3 h-3" />,
+      command: ({ editor, range }: any) => insertMediaFromUrl({ editor, range, forcedKind: 'video', title: '插入视频 URL' }),
     },
     {
       title: 'Audio',
@@ -4439,10 +4532,22 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
       command: ({ editor, range }: any) => insertUploadedMedia({ editor, range, accept: 'audio/*', forcedKind: 'audio' }),
     },
     {
+      title: '音频 URL',
+      shortcut: '/audiourl',
+      icon: <Globe className="w-3 h-3" />,
+      command: ({ editor, range }: any) => insertMediaFromUrl({ editor, range, forcedKind: 'audio', title: '插入音频 URL' }),
+    },
+    {
       title: 'PDF',
       shortcut: '/pdf',
       icon: <FileText className="w-3 h-3" />,
       command: ({ editor, range }: any) => insertUploadedMedia({ editor, range, accept: 'application/pdf', forcedKind: 'pdf' }),
+    },
+    {
+      title: 'PDF URL',
+      shortcut: '/pdfurl',
+      icon: <Globe className="w-3 h-3" />,
+      command: ({ editor, range }: any) => insertMediaFromUrl({ editor, range, forcedKind: 'pdf', title: '插入 PDF URL' }),
     },
   ].filter(item => item.title.toLowerCase().includes(query.toLowerCase()) || item.shortcut.includes(query.toLowerCase()));
 };
