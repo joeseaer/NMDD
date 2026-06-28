@@ -3888,22 +3888,46 @@ const SLASH_COMMAND_CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
   advanced: '高级块',
 };
 
+const SLASH_COMMAND_CATEGORY_ORDER: SlashCommandCategory[] = ['basic', 'media', 'layout', 'data', 'advanced'];
+
 const normalizeSlashSearchValue = (value: string) => value
   .toLowerCase()
+  .replace(/^\/+/, '')
   .replace(/\s+/g, '');
 
-const slashCommandMatches = (item: SlashCommandItem, query: string) => {
+const getSlashCommandSearchValues = (item: SlashCommandItem) => ([
+  { value: item.shortcut, weight: 100 },
+  { value: item.shortcut.replace(/^\/+/, ''), weight: 100 },
+  { value: item.title, weight: 90 },
+  ...(item.aliases || []).map((alias) => ({ value: alias, weight: 80 })),
+  { value: item.description || '', weight: 30 },
+]);
+
+const getSlashCommandMatchScore = (item: SlashCommandItem, query: string) => {
   const normalizedQuery = normalizeSlashSearchValue(query);
-  if (!normalizedQuery) return true;
+  if (!normalizedQuery) return 0;
 
-  const haystack = [
-    item.title,
-    item.shortcut,
-    item.description || '',
-    ...(item.aliases || []),
-  ].map(normalizeSlashSearchValue);
+  return getSlashCommandSearchValues(item).reduce((best, entry) => {
+    const value = normalizeSlashSearchValue(entry.value);
+    if (!value) return best;
 
-  return haystack.some((value) => value.includes(normalizedQuery));
+    if (value === normalizedQuery) return Math.max(best, entry.weight + 100);
+    if (value.startsWith(normalizedQuery)) return Math.max(best, entry.weight + 20);
+
+    const index = value.indexOf(normalizedQuery);
+    if (index >= 0) return Math.max(best, entry.weight + Math.max(1, 12 - index));
+
+    return best;
+  }, -1);
+};
+
+const getSlashCategoryRank = (category: SlashCommandCategory) => (
+  SLASH_COMMAND_CATEGORY_ORDER.indexOf(category)
+);
+
+const slashCommandMatches = (item: SlashCommandItem, query: string) => {
+  if (!normalizeSlashSearchValue(query)) return true;
+  return getSlashCommandMatchScore(item, query) >= 0;
 };
 
 const CommandList = forwardRef((props: any, ref) => {
@@ -4717,12 +4741,21 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
     },
   ];
 
-  const categoryOrder: SlashCommandCategory[] = ['basic', 'media', 'layout', 'data', 'advanced'];
+  const normalizedQuery = normalizeSlashSearchValue(query);
 
   return items
     .map(enrichSlashCommandItem)
-    .filter((item) => slashCommandMatches(item, query))
-    .sort((left, right) => categoryOrder.indexOf(left.category) - categoryOrder.indexOf(right.category));
+    .map((item, index) => ({
+      item,
+      index,
+      score: getSlashCommandMatchScore(item, query),
+    }))
+    .filter(({ item, score }) => !normalizedQuery || (score >= 0 && slashCommandMatches(item, query)))
+    .sort((left, right) => {
+      if (normalizedQuery && left.score !== right.score) return right.score - left.score;
+      return getSlashCategoryRank(left.item.category) - getSlashCategoryRank(right.item.category) || left.index - right.index;
+    })
+    .map(({ item }) => item);
 };
 
 export const renderItems = () => {
