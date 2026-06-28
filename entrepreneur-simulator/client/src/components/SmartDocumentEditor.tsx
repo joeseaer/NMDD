@@ -5,7 +5,8 @@ import {
   Link as LinkIcon, Unlink, AlignLeft, AlignCenter, AlignRight, Captions,
   ImagePlus, Download, ExternalLink, Maximize2, Trash2, Copy, GripVertical,
   MoreHorizontal, ArrowUp, ArrowDown, Heading1, Heading2, Heading3, MessageSquare,
-  Paperclip, Video, Music, FileText, RefreshCw, Palette, ChevronRight, AlertTriangle
+  Paperclip, Video, Music, FileText, RefreshCw, Palette, ChevronRight, AlertTriangle,
+  Plus
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -22,7 +23,7 @@ import Heading from '@tiptap/extension-heading';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
 import { DOMParser as ProseMirrorDOMParser, DOMSerializer } from 'prosemirror-model';
 import { Extension, type JSONContent } from '@tiptap/core';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { selectedRect } from '@tiptap/pm/tables';
 import MarkdownIt from 'markdown-it';
@@ -429,6 +430,28 @@ const setTableCellBackground = (editor: any, scope: TableCellBackgroundScope, va
     editor.view.dispatch(tr.scrollIntoView());
     editor.view.focus();
     return true;
+};
+
+const createEmptyTextBlock = (schema: any) => (
+    schema.nodes.paragraph.create({ blockId: createBlockId() })
+);
+
+const createEmptySiblingBlock = (editor: any, sourceNode: ProseMirrorNode) => {
+    const schema = editor.state.schema;
+
+    if (LIST_ITEM_TYPES.has(sourceNode.type.name)) {
+        return sourceNode.type.create(
+            {
+                ...sourceNode.attrs,
+                blockId: createBlockId(),
+                checked: sourceNode.type.name === 'taskItem' ? false : sourceNode.attrs.checked,
+                blockComments: [],
+            },
+            createEmptyTextBlock(schema),
+        );
+    }
+
+    return createEmptyTextBlock(schema);
 };
 
 const getBlockElementScore = (element: HTMLElement) => {
@@ -2306,6 +2329,33 @@ export const SmartDocumentEditor = ({
         closeBlockMenu();
     }, [closeBlockMenu, editor, getLiveBlock]);
 
+    const insertBlankBlock = useCallback((block: BlockHandleInfo, placement: 'before' | 'after') => {
+        if (!editor) return;
+        const live = getLiveBlock(block);
+        if (!live) return;
+
+        const { node, pos, context } = live;
+        const { parent, index } = context;
+        const insertIndex = placement === 'before' ? index : index + 1;
+        const blankBlock = createEmptySiblingBlock(editor, node);
+
+        if (!parent.canReplaceWith(insertIndex, insertIndex, blankBlock.type)) return;
+
+        const insertPos = placement === 'before' ? pos : pos + node.nodeSize;
+        const tr = editor.state.tr.insert(insertPos, blankBlock).scrollIntoView();
+        const focusPos = Math.min(tr.doc.content.size, insertPos + 1);
+
+        try {
+            tr.setSelection(TextSelection.near(tr.doc.resolve(focusPos), 1));
+        } catch {
+            // Falling back to browser focus is better than rejecting the insert.
+        }
+
+        editor.view.dispatch(tr);
+        editor.view.focus();
+        closeBlockMenu();
+    }, [closeBlockMenu, editor, getLiveBlock]);
+
     const turnBlockInto = useCallback((block: BlockHandleInfo, target: TurnIntoTarget) => {
         if (!editor) return;
         const live = getLiveBlock(block);
@@ -2722,6 +2772,7 @@ export const SmartDocumentEditor = ({
                 onDuplicate={duplicateBlock}
                 onCopyContent={copyBlockContent}
                 onDelete={deleteBlock}
+                onInsertBlank={insertBlankBlock}
                 onTurnInto={turnBlockInto}
                 onCopyLink={copyBlockLink}
                 onOpenComments={openBlockComments}
@@ -2790,6 +2841,7 @@ const BlockHandleLayer = ({
     onDuplicate,
     onCopyContent,
     onDelete,
+    onInsertBlank,
     onTurnInto,
     onCopyLink,
     onOpenComments,
@@ -2802,6 +2854,7 @@ const BlockHandleLayer = ({
     onDuplicate: (block: BlockHandleInfo) => void;
     onCopyContent: (block: BlockHandleInfo) => void;
     onDelete: (block: BlockHandleInfo) => void;
+    onInsertBlank: (block: BlockHandleInfo, placement: 'before' | 'after') => void;
     onTurnInto: (block: BlockHandleInfo, target: TurnIntoTarget) => void;
     onCopyLink: (block: BlockHandleInfo) => void;
     onOpenComments: (block: BlockHandleInfo) => void;
@@ -2865,6 +2918,12 @@ const BlockHandleLayer = ({
                         </button>
                         <button className={menuButtonClass} disabled={!block.canMoveDown} onClick={() => onMove(block, 'down')}>
                             <ArrowDown className="h-3.5 w-3.5" /> 下移
+                        </button>
+                        <button className={menuButtonClass} onClick={() => onInsertBlank(block, 'before')}>
+                            <Plus className="h-3.5 w-3.5" /> 上方插入
+                        </button>
+                        <button className={menuButtonClass} onClick={() => onInsertBlank(block, 'after')}>
+                            <Plus className="h-3.5 w-3.5" /> 下方插入
                         </button>
                         <button className={menuButtonClass} onClick={() => onCopyContent(block)}>
                             <Copy className="h-3.5 w-3.5" /> 复制内容
