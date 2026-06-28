@@ -3869,12 +3869,14 @@ export const EquationBlock = Node.create({
 // --- Slash Command Extension ---
 
 type SlashCommandCategory = 'basic' | 'media' | 'layout' | 'data' | 'advanced';
+type SlashCommandGroup = SlashCommandCategory | 'recent';
 
 type SlashCommandItem = {
   title: string;
   shortcut: string;
   icon: ReactNode;
   category: SlashCommandCategory;
+  group?: SlashCommandGroup;
   description?: string;
   aliases?: string[];
   command: (props: any) => void | Promise<void>;
@@ -3889,11 +3891,51 @@ const SLASH_COMMAND_CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
 };
 
 const SLASH_COMMAND_CATEGORY_ORDER: SlashCommandCategory[] = ['basic', 'media', 'layout', 'data', 'advanced'];
+const SLASH_COMMAND_GROUP_LABELS: Record<SlashCommandGroup, string> = {
+  recent: '最近使用',
+  ...SLASH_COMMAND_CATEGORY_LABELS,
+};
+const SLASH_RECENT_COMMANDS_STORAGE_KEY = 'smart-document.slash.recent';
+const SLASH_RECENT_COMMANDS_LIMIT = 5;
 
 const normalizeSlashSearchValue = (value: string) => value
   .toLowerCase()
   .replace(/^\/+/, '')
   .replace(/\s+/g, '');
+
+const readRecentSlashCommandShortcuts = () => {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(SLASH_RECENT_COMMANDS_STORAGE_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+
+    const seen = new Set<string>();
+    return parsed
+      .map((shortcut) => String(shortcut || '').trim())
+      .filter((shortcut) => {
+        if (!shortcut.startsWith('/') || seen.has(shortcut)) return false;
+        seen.add(shortcut);
+        return true;
+      })
+      .slice(0, SLASH_RECENT_COMMANDS_LIMIT);
+  } catch {
+    return [];
+  }
+};
+
+const recordSlashCommandUsage = (item: SlashCommandItem | null | undefined) => {
+  if (typeof window === 'undefined' || !item?.shortcut) return;
+
+  const nextShortcuts = [
+    item.shortcut,
+    ...readRecentSlashCommandShortcuts().filter((shortcut) => shortcut !== item.shortcut),
+  ].slice(0, SLASH_RECENT_COMMANDS_LIMIT);
+
+  try {
+    window.localStorage.setItem(SLASH_RECENT_COMMANDS_STORAGE_KEY, JSON.stringify(nextShortcuts));
+  } catch {}
+};
 
 const getSlashCommandSearchValues = (item: SlashCommandItem) => ([
   { value: item.shortcut, weight: 100 },
@@ -3925,6 +3967,8 @@ const getSlashCategoryRank = (category: SlashCommandCategory) => (
   SLASH_COMMAND_CATEGORY_ORDER.indexOf(category)
 );
 
+const getSlashCommandGroup = (item: SlashCommandItem): SlashCommandGroup => item.group || item.category;
+
 const slashCommandMatches = (item: SlashCommandItem, query: string) => {
   if (!normalizeSlashSearchValue(query)) return true;
   return getSlashCommandMatchScore(item, query) >= 0;
@@ -3937,6 +3981,7 @@ const CommandList = forwardRef((props: any, ref) => {
     const item = props.items[index];
 
     if (item) {
+      recordSlashCommandUsage(item);
       props.command(item);
     }
   };
@@ -3947,6 +3992,8 @@ const CommandList = forwardRef((props: any, ref) => {
 
   useImperativeHandle(ref, () => ({
     onKeyDown: ({ event }: { event: KeyboardEvent }) => {
+      if (!props.items.length) return false;
+
       if (event.key === 'ArrowUp') {
         setSelectedIndex((selectedIndex + props.items.length - 1) % props.items.length);
         return true;
@@ -4000,7 +4047,10 @@ const GroupedCommandList = forwardRef((props: any, ref) => {
 
   const selectItem = (index: number) => {
     const item = props.items[index];
-    if (item) props.command(item);
+    if (item) {
+      recordSlashCommandUsage(item);
+      props.command(item);
+    }
   };
 
   useEffect(() => {
@@ -4009,6 +4059,8 @@ const GroupedCommandList = forwardRef((props: any, ref) => {
 
   useImperativeHandle(ref, () => ({
     onKeyDown: ({ event }: { event: KeyboardEvent }) => {
+      if (!props.items.length) return false;
+
       if (event.key === 'ArrowUp') {
         setSelectedIndex((selectedIndex + props.items.length - 1) % props.items.length);
         return true;
@@ -4033,13 +4085,14 @@ const GroupedCommandList = forwardRef((props: any, ref) => {
       {props.items.length ? (
         props.items.map((item: SlashCommandItem, index: number) => {
           const previousItem = props.items[index - 1] as SlashCommandItem | undefined;
-          const showCategory = !previousItem || previousItem.category !== item.category;
+          const group = getSlashCommandGroup(item);
+          const showCategory = !previousItem || getSlashCommandGroup(previousItem) !== group;
 
           return (
             <div key={`${item.shortcut}-${index}`}>
               {showCategory && (
                 <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 first:pt-1">
-                  {SLASH_COMMAND_CATEGORY_LABELS[item.category]}
+                  {SLASH_COMMAND_GROUP_LABELS[group]}
                 </div>
               )}
               <button
@@ -4061,7 +4114,12 @@ const GroupedCommandList = forwardRef((props: any, ref) => {
           );
         })
       ) : (
-        <div className="px-3 py-3 text-sm text-gray-400">没有匹配的命令</div>
+        <div className="px-4 py-5 text-center">
+          <div className="text-sm font-medium text-gray-700">没有匹配的命令</div>
+          <div className="mt-1 text-xs leading-5 text-gray-400">
+            试试输入 table、image、database，或者换一个更短的关键词。
+          </div>
+        </div>
       )}
     </div>
   );
@@ -4742,9 +4800,28 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
   ];
 
   const normalizedQuery = normalizeSlashSearchValue(query);
+  const enrichedItems = items.map(enrichSlashCommandItem);
 
-  return items
-    .map(enrichSlashCommandItem)
+  if (!normalizedQuery) {
+    const recentItems = readRecentSlashCommandShortcuts()
+      .map((shortcut) => enrichedItems.find((item) => item.shortcut === shortcut))
+      .filter(Boolean)
+      .map((item) => ({ ...(item as SlashCommandItem), group: 'recent' as const }));
+    const recentShortcuts = new Set(recentItems.map((item) => item.shortcut));
+
+    return [
+      ...recentItems,
+      ...enrichedItems
+        .filter((item) => !recentShortcuts.has(item.shortcut))
+        .map((item, index) => ({ item, index }))
+        .sort((left, right) => (
+          getSlashCategoryRank(left.item.category) - getSlashCategoryRank(right.item.category) || left.index - right.index
+        ))
+        .map(({ item }) => item),
+    ];
+  }
+
+  return enrichedItems
     .map((item, index) => ({
       item,
       index,
