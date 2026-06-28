@@ -23,7 +23,7 @@ import {
   Quote, Minus, Code, Layout, Image as ImageIcon, Strikethrough,
   Type, Network, ChevronRight, AlertTriangle, Bookmark, Globe,
   Paperclip, Video, Music, FileText, Sigma, RefreshCw, CalendarDays, X,
-  Database, Plus, Trash2
+  Database, Plus, Trash2, Table as TableIcon
 } from 'lucide-react';
 import { MindMapComponent } from './MindMapExtension';
 
@@ -3867,6 +3867,44 @@ export const EquationBlock = Node.create({
 
 // --- Slash Command Extension ---
 
+type SlashCommandCategory = 'basic' | 'media' | 'layout' | 'data' | 'advanced';
+
+type SlashCommandItem = {
+  title: string;
+  shortcut: string;
+  icon: ReactNode;
+  category: SlashCommandCategory;
+  description?: string;
+  aliases?: string[];
+  command: (props: any) => void | Promise<void>;
+};
+
+const SLASH_COMMAND_CATEGORY_LABELS: Record<SlashCommandCategory, string> = {
+  basic: '基础块',
+  media: '媒体',
+  layout: '布局',
+  data: '数据',
+  advanced: '高级块',
+};
+
+const normalizeSlashSearchValue = (value: string) => value
+  .toLowerCase()
+  .replace(/\s+/g, '');
+
+const slashCommandMatches = (item: SlashCommandItem, query: string) => {
+  const normalizedQuery = normalizeSlashSearchValue(query);
+  if (!normalizedQuery) return true;
+
+  const haystack = [
+    item.title,
+    item.shortcut,
+    item.description || '',
+    ...(item.aliases || []),
+  ].map(normalizeSlashSearchValue);
+
+  return haystack.some((value) => value.includes(normalizedQuery));
+};
+
 const CommandList = forwardRef((props: any, ref) => {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -3925,6 +3963,80 @@ const CommandList = forwardRef((props: any, ref) => {
         ))
       ) : (
         <div className="px-2 py-2 text-sm text-gray-400">无匹配命令</div>
+      )}
+    </div>
+  );
+});
+
+CommandList.displayName = 'LegacyCommandList';
+
+const GroupedCommandList = forwardRef((props: any, ref) => {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const selectItem = (index: number) => {
+    const item = props.items[index];
+    if (item) props.command(item);
+  };
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [props.items]);
+
+  useImperativeHandle(ref, () => ({
+    onKeyDown: ({ event }: { event: KeyboardEvent }) => {
+      if (event.key === 'ArrowUp') {
+        setSelectedIndex((selectedIndex + props.items.length - 1) % props.items.length);
+        return true;
+      }
+
+      if (event.key === 'ArrowDown') {
+        setSelectedIndex((selectedIndex + 1) % props.items.length);
+        return true;
+      }
+
+      if (event.key === 'Enter') {
+        selectItem(selectedIndex);
+        return true;
+      }
+
+      return false;
+    },
+  }));
+
+  return (
+    <div className="max-h-[360px] w-80 overflow-y-auto overflow-x-hidden rounded-lg border border-gray-100 bg-white p-1 shadow-xl">
+      {props.items.length ? (
+        props.items.map((item: SlashCommandItem, index: number) => {
+          const previousItem = props.items[index - 1] as SlashCommandItem | undefined;
+          const showCategory = !previousItem || previousItem.category !== item.category;
+
+          return (
+            <div key={`${item.shortcut}-${index}`}>
+              {showCategory && (
+                <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-gray-400 first:pt-1">
+                  {SLASH_COMMAND_CATEGORY_LABELS[item.category]}
+                </div>
+              )}
+              <button
+                className={`flex w-full items-center rounded-md px-2 py-2 text-left text-sm transition-colors ${
+                  index === selectedIndex ? 'bg-gray-100 text-primary' : 'text-gray-700 hover:bg-gray-50'
+                }`}
+                onClick={() => selectItem(index)}
+              >
+                <div className="mr-3 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-500">
+                  {item.icon}
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate font-medium">{item.title}</span>
+                  {item.description && <span className="mt-0.5 truncate text-[11px] text-gray-400">{item.description}</span>}
+                </div>
+                {item.shortcut && <span className="ml-3 flex-shrink-0 font-mono text-[10px] text-gray-400">{item.shortcut}</span>}
+              </button>
+            </div>
+          );
+        })
+      ) : (
+        <div className="px-3 py-3 text-sm text-gray-400">没有匹配的命令</div>
       )}
     </div>
   );
@@ -4239,8 +4351,53 @@ export const promptForImageUrl = (initialValue: string = ''): Promise<string | n
   })
 );
 
+const SLASH_COMMAND_METADATA: Record<string, Pick<SlashCommandItem, 'category' | 'description' | 'aliases'>> = {
+  '/bt1': { category: 'basic', description: '大标题，用来分隔页面主段落', aliases: ['h1', 'heading1', 'title', '一级标题'] },
+  '/bt2': { category: 'basic', description: '二级标题，用来组织章节', aliases: ['h2', 'heading2', '二级标题'] },
+  '/bt3': { category: 'basic', description: '三级标题，用来组织小节', aliases: ['h3', 'heading3', '三级标题'] },
+  '/wb': { category: 'basic', description: '普通正文段落', aliases: ['text', 'paragraph', '正文', '文本'] },
+  '/xmlb': { category: 'basic', description: '无序项目列表', aliases: ['bullet', 'list', '项目符号', '列表'] },
+  '/bhlb': { category: 'basic', description: '有序编号列表', aliases: ['numbered', 'ordered', 'ol', '编号'] },
+  '/dblb': { category: 'basic', description: '可勾选待办事项', aliases: ['todo', 'task', 'checkbox', '待办'] },
+  '/yywz': { category: 'basic', description: '引用一段文字', aliases: ['quote', 'blockquote', '引用'] },
+  '/dmk': { category: 'basic', description: '多行代码块', aliases: ['code', 'codeblock', '代码'] },
+  '/fgx': { category: 'basic', description: '页面分割线', aliases: ['divider', 'hr', '分割线'] },
+  '/tp': { category: 'media', description: '上传本地图片', aliases: ['image', 'picture', 'upload image', '图片'] },
+  '/tpurl': { category: 'media', description: '通过 URL 插入图片', aliases: ['image url', 'picture url', '图片链接'] },
+  '/file': { category: 'media', description: '上传附件文件', aliases: ['attachment', 'upload file', '文件'] },
+  '/fileurl': { category: 'media', description: '通过 URL 插入附件', aliases: ['file url', 'attachment url', '文件链接'] },
+  '/video': { category: 'media', description: '上传视频块', aliases: ['movie', 'mp4', '视频'] },
+  '/videourl': { category: 'media', description: '通过 URL 插入视频', aliases: ['video url', 'mp4 url', '视频链接'] },
+  '/audio': { category: 'media', description: '上传音频块', aliases: ['sound', 'music', '音频'] },
+  '/audiourl': { category: 'media', description: '通过 URL 插入音频', aliases: ['audio url', 'sound url', '音频链接'] },
+  '/pdf': { category: 'media', description: '上传 PDF 预览块', aliases: ['document', 'pdf file'] },
+  '/pdfurl': { category: 'media', description: '通过 URL 插入 PDF', aliases: ['pdf url', 'pdf链接'] },
+  '/bookmark': { category: 'media', description: '生成网页书签卡片', aliases: ['web bookmark', 'link preview', '网页书签'] },
+  '/embed': { category: 'media', description: '嵌入网页或外部工具', aliases: ['iframe', 'embed url', '嵌入'] },
+  '/2': { category: 'layout', description: '插入两栏布局', aliases: ['columns', 'two columns', '两栏', '2栏'] },
+  '/3': { category: 'layout', description: '插入三栏布局', aliases: ['columns', 'three columns', '三栏', '3栏'] },
+  '/table': { category: 'layout', description: '插入普通 3x3 表格', aliases: ['simple table', '表格', 'table'] },
+  '/swdt': { category: 'advanced', description: '插入可编辑思维导图', aliases: ['mindmap', 'mind map', '导图'] },
+  '/toggle': { category: 'advanced', description: '可折叠内容块', aliases: ['toggle list', '折叠', 'toggle'] },
+  '/callout': { category: 'advanced', description: '强调提示块', aliases: ['notice', 'hint', '提示', '标注'] },
+  '/equation': { category: 'advanced', description: 'LaTeX 公式块', aliases: ['math', 'formula', '公式'] },
+  '/sync': { category: 'advanced', description: '同一文档内同步内容块', aliases: ['synced', 'sync block', '同步块'] },
+  '/template': { category: 'advanced', description: '点击后插入预设内容', aliases: ['template button', 'button', '模板按钮'] },
+  '/page': { category: 'advanced', description: '链接到已有文档或 SOP', aliases: ['page link', 'document link', '页面链接'] },
+  '/database': { category: 'data', description: '插入带多视图的数据库', aliases: ['db', 'table view', '数据库'] },
+};
+
+const enrichSlashCommandItem = (item: Omit<SlashCommandItem, 'category'> & Partial<Pick<SlashCommandItem, 'category'>>) => {
+  const metadata = SLASH_COMMAND_METADATA[item.shortcut] || { category: 'advanced' as SlashCommandCategory };
+  return {
+    ...item,
+    ...metadata,
+    aliases: [...(metadata.aliases || []), ...(item.aliases || [])],
+  } as SlashCommandItem;
+};
+
 export const getSuggestionItems = ({ query }: { query: string }) => {
-  return [
+  const items = [
     {
       title: '一级标题',
       shortcut: '/bt1',
@@ -4549,7 +4706,22 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
       icon: <Globe className="w-3 h-3" />,
       command: ({ editor, range }: any) => insertMediaFromUrl({ editor, range, forcedKind: 'pdf', title: '插入 PDF URL' }),
     },
-  ].filter(item => item.title.toLowerCase().includes(query.toLowerCase()) || item.shortcut.includes(query.toLowerCase()));
+    {
+      title: '普通表格',
+      shortcut: '/table',
+      icon: <TableIcon className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        editor.chain().focus().deleteRange(range).insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+      },
+    },
+  ];
+
+  const categoryOrder: SlashCommandCategory[] = ['basic', 'media', 'layout', 'data', 'advanced'];
+
+  return items
+    .map(enrichSlashCommandItem)
+    .filter((item) => slashCommandMatches(item, query))
+    .sort((left, right) => categoryOrder.indexOf(left.category) - categoryOrder.indexOf(right.category));
 };
 
 export const renderItems = () => {
@@ -4558,7 +4730,7 @@ export const renderItems = () => {
 
   return {
     onStart: (props: any) => {
-      component = new ReactRenderer(CommandList, {
+      component = new ReactRenderer(GroupedCommandList, {
         props,
         editor: props.editor,
       });
