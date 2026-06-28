@@ -88,7 +88,10 @@ const BLOCK_ID_TYPES = [
 const LIST_CONTAINER_TYPES = new Set(['bulletList', 'orderedList', 'taskList']);
 const LIST_ITEM_TYPES = new Set(['listItem', 'taskItem']);
 const TEXT_TURN_TYPES = new Set(['paragraph', 'heading']);
+const TEXT_STYLE_BLOCK_TYPES = new Set(['paragraph', 'heading', 'blockquote', 'codeBlock', 'listItem', 'taskItem']);
 const TABLE_CELL_BACKGROUND_ATTRIBUTE = 'backgroundColor';
+const BLOCK_TEXT_COLOR_ATTRIBUTE = 'blockTextColor';
+const BLOCK_BACKGROUND_COLOR_ATTRIBUTE = 'blockBackgroundColor';
 
 const TABLE_CELL_BACKGROUND_COLORS = [
     { label: '默认', value: null, swatch: 'transparent' },
@@ -100,6 +103,41 @@ const TABLE_CELL_BACKGROUND_COLORS = [
     { label: '蓝色', value: '#dbeafe', swatch: '#dbeafe' },
     { label: '紫色', value: '#ede9fe', swatch: '#ede9fe' },
 ];
+
+const BLOCK_COLOR_TOKENS = ['gray', 'brown', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink', 'red'] as const;
+type BlockColorToken = typeof BLOCK_COLOR_TOKENS[number];
+type BlockColorValue = BlockColorToken | null;
+
+const BLOCK_TEXT_COLOR_OPTIONS: Array<{ label: string; value: BlockColorValue; swatch: string }> = [
+    { label: '默认', value: null, swatch: '#111827' },
+    { label: '灰色', value: 'gray', swatch: '#6b7280' },
+    { label: '棕色', value: 'brown', swatch: '#92400e' },
+    { label: '橙色', value: 'orange', swatch: '#c2410c' },
+    { label: '黄色', value: 'yellow', swatch: '#a16207' },
+    { label: '绿色', value: 'green', swatch: '#15803d' },
+    { label: '蓝色', value: 'blue', swatch: '#2563eb' },
+    { label: '紫色', value: 'purple', swatch: '#7c3aed' },
+    { label: '粉色', value: 'pink', swatch: '#db2777' },
+    { label: '红色', value: 'red', swatch: '#dc2626' },
+];
+
+const BLOCK_BACKGROUND_COLOR_OPTIONS: Array<{ label: string; value: BlockColorValue; swatch: string }> = [
+    { label: '默认', value: null, swatch: '#ffffff' },
+    { label: '灰色', value: 'gray', swatch: '#f3f4f6' },
+    { label: '棕色', value: 'brown', swatch: '#f5f0ea' },
+    { label: '橙色', value: 'orange', swatch: '#ffedd5' },
+    { label: '黄色', value: 'yellow', swatch: '#fef3c7' },
+    { label: '绿色', value: 'green', swatch: '#dcfce7' },
+    { label: '蓝色', value: 'blue', swatch: '#dbeafe' },
+    { label: '紫色', value: 'purple', swatch: '#ede9fe' },
+    { label: '粉色', value: 'pink', swatch: '#fce7f3' },
+    { label: '红色', value: 'red', swatch: '#fee2e2' },
+];
+
+const normalizeBlockColor = (value: unknown): BlockColorValue => {
+    const token = String(value || '').trim().toLowerCase();
+    return BLOCK_COLOR_TOKENS.includes(token as BlockColorToken) ? token as BlockColorToken : null;
+};
 
 const createBlockId = () => {
     const randomPart = Math.random().toString(36).slice(2, 9);
@@ -292,6 +330,22 @@ const BlockIdentity = Extension.create({
                             };
                         },
                     },
+                    [BLOCK_TEXT_COLOR_ATTRIBUTE]: {
+                        default: null,
+                        parseHTML: (element) => normalizeBlockColor(element.getAttribute('data-block-text-color')),
+                        renderHTML: (attributes) => {
+                            const color = normalizeBlockColor(attributes[BLOCK_TEXT_COLOR_ATTRIBUTE]);
+                            return color ? { 'data-block-text-color': color } : {};
+                        },
+                    },
+                    [BLOCK_BACKGROUND_COLOR_ATTRIBUTE]: {
+                        default: null,
+                        parseHTML: (element) => normalizeBlockColor(element.getAttribute('data-block-background-color')),
+                        renderHTML: (attributes) => {
+                            const color = normalizeBlockColor(attributes[BLOCK_BACKGROUND_COLOR_ATTRIBUTE]);
+                            return color ? { 'data-block-background-color': color } : {};
+                        },
+                    },
                 },
             },
         ];
@@ -379,6 +433,9 @@ type BlockHandleInfo = {
     canMoveUp: boolean;
     canMoveDown: boolean;
     canTurnIntoText: boolean;
+    canStyleBlock: boolean;
+    blockTextColor: BlockColorValue;
+    blockBackgroundColor: BlockColorValue;
     commentCount: number;
     top: number;
     left: number;
@@ -629,6 +686,9 @@ const getBlockInfoById = (editor: any, id: string, shell: HTMLElement): BlockHan
         canMoveUp: context.index > 0,
         canMoveDown: context.index < context.parent.childCount - 1,
         canTurnIntoText: TEXT_TURN_TYPES.has(found.node.type.name),
+        canStyleBlock: TEXT_STYLE_BLOCK_TYPES.has(found.node.type.name),
+        blockTextColor: normalizeBlockColor(found.node.attrs[BLOCK_TEXT_COLOR_ATTRIBUTE]),
+        blockBackgroundColor: normalizeBlockColor(found.node.attrs[BLOCK_BACKGROUND_COLOR_ATTRIBUTE]),
         commentCount: normalizeBlockComments(found.node.attrs.blockComments).filter((comment) => !comment.resolved).length,
         top: rect.top - shellRect.top,
         left: Math.max(8, rect.left - shellRect.left - 44),
@@ -2591,6 +2651,22 @@ export const SmartDocumentEditor = ({
         window.requestAnimationFrame(() => refreshBlockPanelInfo(block.id));
     }, [editor, getLiveBlock, refreshBlockPanelInfo]);
 
+    const setBlockColor = useCallback((block: BlockHandleInfo, attribute: typeof BLOCK_TEXT_COLOR_ATTRIBUTE | typeof BLOCK_BACKGROUND_COLOR_ATTRIBUTE, value: BlockColorValue) => {
+        if (!editor || !block.canStyleBlock) return;
+        const live = getLiveBlock(block);
+        if (!live || !TEXT_STYLE_BLOCK_TYPES.has(live.node.type.name)) return;
+
+        const nextColor = normalizeBlockColor(value);
+        const tr = editor.state.tr.setNodeMarkup(live.pos, undefined, {
+            ...live.node.attrs,
+            [attribute]: nextColor,
+        }, live.node.marks);
+
+        editor.view.dispatch(tr.scrollIntoView());
+        window.requestAnimationFrame(() => refreshBlockPanelInfo(block.id));
+        closeBlockMenu();
+    }, [closeBlockMenu, editor, getLiveBlock, refreshBlockPanelInfo]);
+
     const openBlockComments = useCallback((block: BlockHandleInfo) => {
         if (!editor || !shellRef.current) return;
         const nextInfo = getBlockInfoById(editor, block.id, shellRef.current) || block;
@@ -2888,6 +2964,8 @@ export const SmartDocumentEditor = ({
                 onDelete={deleteBlock}
                 onInsertBlank={insertBlankBlock}
                 onTurnInto={turnBlockInto}
+                onSetBlockTextColor={(block, color) => setBlockColor(block, BLOCK_TEXT_COLOR_ATTRIBUTE, color)}
+                onSetBlockBackgroundColor={(block, color) => setBlockColor(block, BLOCK_BACKGROUND_COLOR_ATTRIBUTE, color)}
                 onCopyLink={copyBlockLink}
                 onOpenComments={openBlockComments}
                 onDragStart={handleBlockDragStart}
@@ -2947,6 +3025,43 @@ export const SmartDocumentEditor = ({
 
 const menuButtonClass = 'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-40';
 
+const BlockColorSwatchRow = ({
+    label,
+    value,
+    options,
+    onSelect,
+}: {
+    label: string;
+    value: BlockColorValue;
+    options: Array<{ label: string; value: BlockColorValue; swatch: string }>;
+    onSelect: (value: BlockColorValue) => void;
+}) => (
+    <div className="px-2 py-1">
+        <div className="mb-1 text-[10px] font-medium text-gray-400">{label}</div>
+        <div className="grid grid-cols-10 gap-1">
+            {options.map((option) => {
+                const active = normalizeBlockColor(option.value) === normalizeBlockColor(value);
+                return (
+                    <button
+                        key={option.value || 'default'}
+                        type="button"
+                        title={`${label}: ${option.label}`}
+                        className={`flex h-5 w-5 items-center justify-center rounded border transition-colors ${
+                            active ? 'border-gray-900 ring-1 ring-gray-900' : 'border-gray-200 hover:border-gray-400'
+                        }`}
+                        onClick={() => onSelect(option.value)}
+                    >
+                        <span
+                            className="block h-3.5 w-3.5 rounded-sm border border-black/10"
+                            style={{ backgroundColor: option.swatch }}
+                        />
+                    </button>
+                );
+            })}
+        </div>
+    </div>
+);
+
 const BlockHandleLayer = ({
     block,
     menuOpen,
@@ -2957,6 +3072,8 @@ const BlockHandleLayer = ({
     onDelete,
     onInsertBlank,
     onTurnInto,
+    onSetBlockTextColor,
+    onSetBlockBackgroundColor,
     onCopyLink,
     onOpenComments,
     onDragStart,
@@ -2970,6 +3087,8 @@ const BlockHandleLayer = ({
     onDelete: (block: BlockHandleInfo) => void;
     onInsertBlank: (block: BlockHandleInfo, placement: 'before' | 'after') => void;
     onTurnInto: (block: BlockHandleInfo, target: TurnIntoTarget) => void;
+    onSetBlockTextColor: (block: BlockHandleInfo, color: BlockColorValue) => void;
+    onSetBlockBackgroundColor: (block: BlockHandleInfo, color: BlockColorValue) => void;
     onCopyLink: (block: BlockHandleInfo) => void;
     onOpenComments: (block: BlockHandleInfo) => void;
     onDragStart: (event: React.MouseEvent, block: BlockHandleInfo) => void;
@@ -3052,6 +3171,27 @@ const BlockHandleLayer = ({
                         <button className={menuButtonClass} onClick={() => onOpenComments(block)}>
                             <MessageSquare className="h-3.5 w-3.5" /> 评论{block.commentCount ? ` (${block.commentCount})` : ''}
                         </button>
+
+                        {block.canStyleBlock && (
+                            <>
+                                <div className="my-1 h-px bg-gray-100" />
+                                <div className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                                    <Palette className="h-3 w-3" /> 颜色
+                                </div>
+                                <BlockColorSwatchRow
+                                    label="文字"
+                                    value={block.blockTextColor}
+                                    options={BLOCK_TEXT_COLOR_OPTIONS}
+                                    onSelect={(color) => onSetBlockTextColor(block, color)}
+                                />
+                                <BlockColorSwatchRow
+                                    label="背景"
+                                    value={block.blockBackgroundColor}
+                                    options={BLOCK_BACKGROUND_COLOR_OPTIONS}
+                                    onSelect={(color) => onSetBlockBackgroundColor(block, color)}
+                                />
+                            </>
+                        )}
 
                         {block.canTurnIntoText && (
                             <>

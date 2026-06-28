@@ -90,6 +90,30 @@
   transition: background-color 0.2s ease, box-shadow 0.2s ease;
 }
 
+.ProseMirror [data-block-text-color="gray"] { color: #6b7280; }
+.ProseMirror [data-block-text-color="brown"] { color: #92400e; }
+.ProseMirror [data-block-text-color="orange"] { color: #c2410c; }
+.ProseMirror [data-block-text-color="yellow"] { color: #a16207; }
+.ProseMirror [data-block-text-color="green"] { color: #15803d; }
+.ProseMirror [data-block-text-color="blue"] { color: #2563eb; }
+.ProseMirror [data-block-text-color="purple"] { color: #7c3aed; }
+.ProseMirror [data-block-text-color="pink"] { color: #db2777; }
+.ProseMirror [data-block-text-color="red"] { color: #dc2626; }
+
+.ProseMirror [data-block-background-color] {
+  border-radius: 6px;
+}
+
+.ProseMirror [data-block-background-color="gray"] { background-color: #f3f4f6; }
+.ProseMirror [data-block-background-color="brown"] { background-color: #f5f0ea; }
+.ProseMirror [data-block-background-color="orange"] { background-color: #ffedd5; }
+.ProseMirror [data-block-background-color="yellow"] { background-color: #fef3c7; }
+.ProseMirror [data-block-background-color="green"] { background-color: #dcfce7; }
+.ProseMirror [data-block-background-color="blue"] { background-color: #dbeafe; }
+.ProseMirror [data-block-background-color="purple"] { background-color: #ede9fe; }
+.ProseMirror [data-block-background-color="pink"] { background-color: #fce7f3; }
+.ProseMirror [data-block-background-color="red"] { background-color: #fee2e2; }
+
 .smart-doc-action-label::before {
   content: attr(data-label);
 }
