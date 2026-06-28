@@ -203,6 +203,7 @@ const isBlockIdentityNode = (node: ProseMirrorNode) => {
 
 const blockDomId = (blockId?: string | null) => blockId ? `block-${blockId}` : undefined;
 const BLOCK_LINK_HIGHLIGHT_CLASS = 'smart-doc-block-link-highlight';
+const BLOCK_LINK_TARGET_ATTRIBUTE = 'data-block-link-target';
 const BLOCK_LINK_RETRY_MS = 8000;
 const BLOCK_LINK_RETRY_INTERVAL_MS = 100;
 
@@ -216,6 +217,18 @@ const getBlockDomIdFromHash = () => {
     } catch {
         return rawHash.slice(1);
     }
+};
+
+const clearBlockLinkTargets = (root: ParentNode | null = null) => {
+    if (typeof document === 'undefined') return;
+
+    const scope = root || document;
+    scope
+        .querySelectorAll(`[${BLOCK_LINK_TARGET_ATTRIBUTE}], .${BLOCK_LINK_HIGHLIGHT_CLASS}`)
+        .forEach((element) => {
+            element.removeAttribute(BLOCK_LINK_TARGET_ATTRIBUTE);
+            element.classList.remove(BLOCK_LINK_HIGHLIGHT_CLASS);
+        });
 };
 
 const scrollBlockHashIntoView = (root: HTMLElement | null, attempt = 0): boolean => {
@@ -232,11 +245,10 @@ const scrollBlockHashIntoView = (root: HTMLElement | null, attempt = 0): boolean
         return false;
     }
 
-    document
-        .querySelectorAll(`.${BLOCK_LINK_HIGHLIGHT_CLASS}`)
-        .forEach((element) => element.classList.remove(BLOCK_LINK_HIGHLIGHT_CLASS));
+    clearBlockLinkTargets(root || document);
 
     target.scrollIntoView({ behavior: attempt === 0 ? 'smooth' : 'auto', block: 'center' });
+    target.setAttribute(BLOCK_LINK_TARGET_ATTRIBUTE, 'true');
     target.classList.add(BLOCK_LINK_HIGHLIGHT_CLASS);
     window.setTimeout(() => {
         target.classList.remove(BLOCK_LINK_HIGHLIGHT_CLASS);
@@ -264,7 +276,7 @@ const BlockIdentity = Extension.create({
                             return {
                                 id: domId,
                                 'data-block-id': id,
-                                ...(domId === getBlockDomIdFromHash() ? { 'data-block-link-target': 'true' } : {}),
+                                ...(domId === getBlockDomIdFromHash() ? { [BLOCK_LINK_TARGET_ATTRIBUTE]: 'true' } : {}),
                             };
                         },
                     },
@@ -2236,6 +2248,7 @@ export const SmartDocumentEditor = ({
             if (!targetId) {
                 handledHash = '';
                 settleUntil = 0;
+                clearBlockLinkTargets(shellRef.current || (editor.view?.dom as HTMLElement | null) || null);
                 clearRetry();
                 return;
             }
