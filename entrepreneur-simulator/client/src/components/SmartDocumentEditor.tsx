@@ -3309,10 +3309,16 @@ const EditorToolbar = ({
                 label="表格"
             />
             <ToolbarBtn
+                onClick={() => editor.chain().focus().addColumnBefore().run()}
+                disabled={!editor.can().addColumnBefore()}
+                icon={<TableIcon className="w-4 h-4"/>}
+                label="左列"
+            />
+            <ToolbarBtn
                 onClick={() => editor.chain().focus().addColumnAfter().run()}
                 disabled={!editor.can().addColumnAfter()}
                 icon={<TableIcon className="w-4 h-4"/>}
-                label="+列"
+                label="右列"
             />
             <ToolbarBtn
                 onClick={() => editor.chain().focus().deleteColumn().run()}
@@ -3321,10 +3327,16 @@ const EditorToolbar = ({
                 label="-列"
             />
             <ToolbarBtn
+                onClick={() => editor.chain().focus().addRowBefore().run()}
+                disabled={!editor.can().addRowBefore()}
+                icon={<TableIcon className="w-4 h-4"/>}
+                label="上行"
+            />
+            <ToolbarBtn
                 onClick={() => editor.chain().focus().addRowAfter().run()}
                 disabled={!editor.can().addRowAfter()}
                 icon={<TableIcon className="w-4 h-4"/>}
-                label="+行"
+                label="下行"
             />
             <ToolbarBtn
                 onClick={() => editor.chain().focus().deleteRow().run()}
