@@ -202,6 +202,48 @@ const isBlockIdentityNode = (node: ProseMirrorNode) => {
 };
 
 const blockDomId = (blockId?: string | null) => blockId ? `block-${blockId}` : undefined;
+const BLOCK_LINK_HIGHLIGHT_CLASS = 'smart-doc-block-link-highlight';
+const BLOCK_LINK_RETRY_MS = 8000;
+const BLOCK_LINK_RETRY_INTERVAL_MS = 100;
+
+const getBlockDomIdFromHash = () => {
+    if (typeof window === 'undefined') return '';
+    const rawHash = window.location.hash || '';
+    if (!rawHash.startsWith('#block-')) return '';
+
+    try {
+        return decodeURIComponent(rawHash.slice(1));
+    } catch {
+        return rawHash.slice(1);
+    }
+};
+
+const scrollBlockHashIntoView = (root: HTMLElement | null, attempt = 0): boolean => {
+    if (typeof document === 'undefined') return false;
+
+    const targetId = getBlockDomIdFromHash();
+    if (!targetId) return false;
+
+    const target = document.getElementById(targetId);
+    if (!(target instanceof HTMLElement) || (root && !root.contains(target))) {
+        if (attempt < 8) {
+            window.requestAnimationFrame(() => scrollBlockHashIntoView(root, attempt + 1));
+        }
+        return false;
+    }
+
+    document
+        .querySelectorAll(`.${BLOCK_LINK_HIGHLIGHT_CLASS}`)
+        .forEach((element) => element.classList.remove(BLOCK_LINK_HIGHLIGHT_CLASS));
+
+    target.scrollIntoView({ behavior: attempt === 0 ? 'smooth' : 'auto', block: 'center' });
+    target.classList.add(BLOCK_LINK_HIGHLIGHT_CLASS);
+    window.setTimeout(() => {
+        target.classList.remove(BLOCK_LINK_HIGHLIGHT_CLASS);
+    }, 1800);
+
+    return true;
+};
 
 const BlockIdentity = Extension.create({
     name: 'blockIdentity',
@@ -218,9 +260,11 @@ const BlockIdentity = Extension.create({
                         renderHTML: (attributes) => {
                             const id = attributes.blockId;
                             if (!id) return {};
+                            const domId = blockDomId(id);
                             return {
-                                id: blockDomId(id),
+                                id: domId,
                                 'data-block-id': id,
+                                ...(domId === getBlockDomIdFromHash() ? { 'data-block-link-target': 'true' } : {}),
                             };
                         },
                     },
@@ -2171,6 +2215,63 @@ export const SmartDocumentEditor = ({
         }
         externalSigRef.current = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
     }, [content, contentJson, editor]);
+
+    useEffect(() => {
+        if (!editor || typeof window === 'undefined') return;
+
+        let handledHash = '';
+        let timeoutId: number | null = null;
+        let expiresAt = 0;
+        let settleUntil = 0;
+
+        const clearRetry = () => {
+            if (timeoutId !== null) {
+                window.clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+        };
+
+        const tryScroll = () => {
+            const targetId = getBlockDomIdFromHash();
+            if (!targetId) {
+                handledHash = '';
+                settleUntil = 0;
+                clearRetry();
+                return;
+            }
+
+            if (targetId !== handledHash) {
+                handledHash = targetId;
+                settleUntil = 0;
+            }
+
+            const root = shellRef.current || (editor.view?.dom as HTMLElement | null) || null;
+            const handled = scrollBlockHashIntoView(root);
+            if (handled && settleUntil === 0) {
+                settleUntil = Date.now() + 800;
+            }
+
+            if (Date.now() < expiresAt && (!handled || Date.now() < settleUntil)) {
+                timeoutId = window.setTimeout(tryScroll, BLOCK_LINK_RETRY_INTERVAL_MS);
+            }
+        };
+
+        const startRetry = () => {
+            handledHash = '';
+            settleUntil = 0;
+            expiresAt = Date.now() + BLOCK_LINK_RETRY_MS;
+            clearRetry();
+            tryScroll();
+        };
+
+        startRetry();
+        window.addEventListener('hashchange', startRetry);
+
+        return () => {
+            clearRetry();
+            window.removeEventListener('hashchange', startRetry);
+        };
+    }, [currentDocumentId, editor]);
 
     const getLiveBlock = useCallback((block: BlockHandleInfo) => {
         if (!editor) return null;

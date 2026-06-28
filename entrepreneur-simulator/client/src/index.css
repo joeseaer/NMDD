@@ -81,6 +81,15 @@
   cursor: col-resize;
 }
 
+.ProseMirror .smart-doc-block-link-highlight,
+.ProseMirror [id^="block-"]:target,
+.ProseMirror [data-block-link-target="true"] {
+  border-radius: 6px;
+  background-color: rgba(250, 204, 21, 0.18);
+  box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.32);
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+
 .smart-doc-action-label::before {
   content: attr(data-label);
 }
