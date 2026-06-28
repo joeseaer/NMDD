@@ -22,7 +22,7 @@ import {
   Bold, Heading1, Heading2, Heading3, Italic, List, ListOrdered, CheckSquare,
   Quote, Minus, Code, Layout, Image as ImageIcon, Strikethrough,
   Type, Network, ChevronRight, AlertTriangle, Bookmark, Globe,
-  Paperclip, Video, Music, FileText, Sigma, RefreshCw, CalendarDays, X,
+  Paperclip, Video, Music, FileText, Sigma, RefreshCw, CalendarDays, X, ExternalLink,
   Database, Plus, Trash2, Table as TableIcon
 } from 'lucide-react';
 import { MindMapComponent } from './MindMapExtension';
@@ -576,6 +576,168 @@ export const CalloutBlock = Node.create({
   },
 });
 
+const normalizeBookmarkAttrs = (attrs: any) => {
+  const url = String(attrs?.url || '').trim();
+  const title = String(attrs?.title || '').trim() || url || 'Bookmark';
+  const description = String(attrs?.description || '').trim();
+  return {
+    url,
+    title,
+    description: description || url,
+  };
+};
+
+const normalizeEmbedAttrs = (attrs: any) => {
+  const url = String(attrs?.url || '').trim();
+  return {
+    url,
+    title: String(attrs?.title || '').trim() || 'Embed',
+  };
+};
+
+const getUrlHostLabel = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+};
+
+const openExternalUrl = (url: string) => {
+  if (!url) return;
+  window.open(url, '_blank', 'noopener,noreferrer');
+};
+
+const BookmarkBlockView = ({ node, updateAttributes, selected }: any) => {
+  const attrs = normalizeBookmarkAttrs(node.attrs);
+  const commentsAttr = getNodeViewCommentsAttr(node.attrs);
+  const host = attrs.url ? getUrlHostLabel(attrs.url) : '未设置链接';
+
+  return (
+    <NodeViewWrapper
+      className={`smart-doc-bookmark my-3 rounded-md border bg-white p-3 text-gray-800 transition-colors ${
+        selected ? 'border-gray-400 shadow-sm' : 'border-gray-200 hover:border-gray-300'
+      }`}
+      data-type="bookmark"
+      data-url={attrs.url}
+      data-title={attrs.title}
+      data-description={attrs.description || undefined}
+      data-block-id={node.attrs.blockId || undefined}
+      data-comments={commentsAttr}
+      id={blockDomId(node.attrs.blockId)}
+      contentEditable={false}
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border border-gray-200 bg-gray-50 text-gray-500">
+          <Bookmark className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1 space-y-1">
+          <input
+            value={attrs.title}
+            onMouseDown={(event) => event.stopPropagation()}
+            onChange={(event) => updateAttributes({ title: event.target.value })}
+            className="h-7 w-full border-none bg-transparent px-0 text-sm font-semibold text-gray-900 outline-none focus:ring-0"
+            aria-label="书签标题"
+            placeholder="Bookmark"
+          />
+          <input
+            value={attrs.description}
+            onMouseDown={(event) => event.stopPropagation()}
+            onChange={(event) => updateAttributes({ description: event.target.value })}
+            className="h-6 w-full border-none bg-transparent px-0 text-xs text-gray-500 outline-none focus:ring-0"
+            aria-label="书签描述"
+            placeholder="添加描述"
+          />
+          <input
+            value={attrs.url}
+            onMouseDown={(event) => event.stopPropagation()}
+            onChange={(event) => updateAttributes({ url: event.target.value })}
+            className="h-6 w-full truncate border-none bg-transparent px-0 text-xs text-gray-400 outline-none focus:ring-0"
+            aria-label="书签链接"
+            placeholder="https://example.com"
+          />
+        </div>
+        <button
+          type="button"
+          title={attrs.url ? `打开 ${host}` : '先填写链接'}
+          disabled={!attrs.url}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => openExternalUrl(attrs.url)}
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-30"
+        >
+          <ExternalLink className="h-4 w-4" />
+        </button>
+      </div>
+    </NodeViewWrapper>
+  );
+};
+
+const EmbedBlockView = ({ node, updateAttributes, selected }: any) => {
+  const attrs = normalizeEmbedAttrs(node.attrs);
+  const commentsAttr = getNodeViewCommentsAttr(node.attrs);
+
+  return (
+    <NodeViewWrapper
+      className={`smart-doc-embed my-3 overflow-hidden rounded-md border bg-white transition-colors ${
+        selected ? 'border-gray-400 shadow-sm' : 'border-gray-200 hover:border-gray-300'
+      }`}
+      data-type="embed"
+      data-url={attrs.url}
+      data-title={attrs.title}
+      data-block-id={node.attrs.blockId || undefined}
+      data-comments={commentsAttr}
+      id={blockDomId(node.attrs.blockId)}
+      contentEditable={false}
+    >
+      <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2">
+        <Globe className="h-4 w-4 flex-shrink-0 text-gray-400" />
+        <input
+          value={attrs.title}
+          onMouseDown={(event) => event.stopPropagation()}
+          onChange={(event) => updateAttributes({ title: event.target.value })}
+          className="min-w-0 flex-1 border-none bg-transparent px-0 text-xs font-semibold text-gray-600 outline-none focus:ring-0"
+          aria-label="嵌入标题"
+          placeholder="Embed"
+        />
+        <button
+          type="button"
+          title="打开嵌入链接"
+          disabled={!attrs.url}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => openExternalUrl(attrs.url)}
+          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-700 disabled:cursor-not-allowed disabled:opacity-30"
+        >
+          <ExternalLink className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="border-b border-gray-100 px-3 py-2">
+        <input
+          value={attrs.url}
+          onMouseDown={(event) => event.stopPropagation()}
+          onChange={(event) => updateAttributes({ url: event.target.value })}
+          className="h-7 w-full border-none bg-gray-50 px-2 text-xs text-gray-500 outline-none focus:bg-white focus:ring-0"
+          aria-label="嵌入链接"
+          placeholder="https://example.com"
+        />
+      </div>
+      {attrs.url ? (
+        <iframe
+          src={attrs.url}
+          title={attrs.title}
+          className="h-72 w-full bg-gray-50"
+          loading="lazy"
+          referrerPolicy="no-referrer-when-downgrade"
+          allowFullScreen
+        />
+      ) : (
+        <div className="flex h-40 items-center justify-center bg-gray-50 text-xs text-gray-400">
+          添加链接后显示嵌入预览
+        </div>
+      )}
+    </NodeViewWrapper>
+  );
+};
+
 export const BookmarkBlock = Node.create({
   name: 'bookmarkBlock',
   group: 'block',
@@ -606,21 +768,27 @@ export const BookmarkBlock = Node.create({
   },
 
   renderHTML({ node, HTMLAttributes }) {
-    const url = node.attrs.url || '#';
-    const title = node.attrs.title || url || 'Bookmark';
-    const description = node.attrs.description || url;
+    const attrs = normalizeBookmarkAttrs(node.attrs);
+    const url = attrs.url || '#';
     return [
       'a',
       mergeAttributes(HTMLAttributes, {
         'data-type': 'bookmark',
+        'data-url': attrs.url,
+        'data-title': attrs.title,
+        'data-description': attrs.description || undefined,
         href: url,
         target: '_blank',
         rel: 'noopener noreferrer',
         class: 'smart-doc-bookmark my-3 block rounded-md border border-gray-200 bg-white p-3 text-gray-800 no-underline hover:bg-gray-50',
       }),
-      ['span', { class: 'block text-sm font-semibold text-gray-900' }, title],
-      ['span', { class: 'mt-1 block truncate text-xs text-gray-500' }, description],
+      ['span', { class: 'block text-sm font-semibold text-gray-900' }, attrs.title],
+      ['span', { class: 'mt-1 block truncate text-xs text-gray-500' }, attrs.description],
     ]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(BookmarkBlockView)
   },
 });
 
@@ -649,14 +817,17 @@ export const EmbedBlock = Node.create({
   },
 
   renderHTML({ node, HTMLAttributes }) {
-    const url = node.attrs.url || '';
-    const title = node.attrs.title || 'Embed';
+    const attrs = normalizeEmbedAttrs(node.attrs);
     return [
       'div',
       mergeAttributes(HTMLAttributes, { 'data-type': 'embed', class: 'smart-doc-embed my-3 overflow-hidden rounded-md border border-gray-200 bg-white' }),
-      ['div', { class: 'border-b border-gray-100 px-3 py-2 text-xs font-semibold text-gray-500' }, title],
-      ['iframe', { src: url, class: 'h-72 w-full bg-gray-50', loading: 'lazy', referrerpolicy: 'no-referrer-when-downgrade', allowfullscreen: 'true' }],
+      ['div', { class: 'border-b border-gray-100 px-3 py-2 text-xs font-semibold text-gray-500' }, attrs.title],
+      ['iframe', { src: attrs.url, class: 'h-72 w-full bg-gray-50', loading: 'lazy', referrerpolicy: 'no-referrer-when-downgrade', allowfullscreen: 'true' }],
     ]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(EmbedBlockView)
   },
 });
 
