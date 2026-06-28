@@ -3991,16 +3991,25 @@ const insertUploadedMedia = ({ editor, range, accept, forcedKind }: any) => {
   input.click();
 };
 
-const promptForUrl = (label: string) => {
-  const url = window.prompt(label);
-  if (!url) return '';
-  return url.trim();
+type PromptForTextOptions = {
+  title: string;
+  initialValue?: string;
+  placeholder?: string;
+  allowEmpty?: boolean;
+  confirmLabel?: string;
+  invalidMessage?: string;
+  inputType?: string;
+  readOnly?: boolean;
+  validate?: (value: unknown) => string;
 };
 
-export const normalizeImageUrlInput = (value: unknown) => {
+type PromptForUrlOptions = Omit<PromptForTextOptions, 'inputType' | 'validate'> & {
+  normalize?: (value: unknown) => string;
+};
+
+export const normalizeUrlInput = (value: unknown) => {
   const raw = String(value || '').trim();
   if (!raw || /\s/.test(raw)) return '';
-  if (/^data:image\//i.test(raw) || /^blob:/i.test(raw)) return raw;
   if (raw.startsWith('/')) return raw.startsWith('//') ? `${window.location.protocol}${raw}` : raw;
 
   const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
@@ -4013,7 +4022,24 @@ export const normalizeImageUrlInput = (value: unknown) => {
   }
 };
 
-export const promptForImageUrl = (initialValue: string = ''): Promise<string | null> => {
+export const normalizeImageUrlInput = (value: unknown) => {
+  const raw = String(value || '').trim();
+  if (!raw || /\s/.test(raw)) return '';
+  if (/^data:image\//i.test(raw) || /^blob:/i.test(raw)) return raw;
+  return normalizeUrlInput(raw);
+};
+
+export const promptForText = ({
+  title,
+  initialValue = '',
+  placeholder = '',
+  allowEmpty = false,
+  confirmLabel = '确认',
+  invalidMessage = '请输入内容',
+  inputType = 'text',
+  readOnly = false,
+  validate,
+}: PromptForTextOptions): Promise<string | null> => {
   if (typeof document === 'undefined') return Promise.resolve(null);
 
   return new Promise((resolve) => {
@@ -4023,19 +4049,20 @@ export const promptForImageUrl = (initialValue: string = ''): Promise<string | n
     const panel = document.createElement('div');
     panel.className = 'w-full max-w-md rounded-lg border border-gray-200 bg-white p-4 shadow-xl';
 
-    const title = document.createElement('div');
-    title.className = 'text-sm font-semibold text-gray-900';
-    title.textContent = '插入图片 URL';
+    const heading = document.createElement('div');
+    heading.className = 'text-sm font-semibold text-gray-900';
+    heading.textContent = title;
 
     const input = document.createElement('input');
-    input.type = 'url';
+    input.type = inputType;
     input.value = initialValue;
-    input.placeholder = 'https://example.com/image.png';
+    input.placeholder = placeholder;
+    input.readOnly = readOnly;
     input.className = 'mt-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500';
 
     const error = document.createElement('div');
     error.className = 'mt-2 hidden text-xs text-red-600';
-    error.textContent = '请输入有效的图片 URL';
+    error.textContent = invalidMessage;
 
     const actions = document.createElement('div');
     actions.className = 'mt-4 flex justify-end gap-2';
@@ -4048,10 +4075,10 @@ export const promptForImageUrl = (initialValue: string = ''): Promise<string | n
     const confirmButton = document.createElement('button');
     confirmButton.type = 'button';
     confirmButton.className = 'rounded-md bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-800';
-    confirmButton.textContent = '插入';
+    confirmButton.textContent = confirmLabel;
 
     actions.append(cancelButton, confirmButton);
-    panel.append(title, input, error, actions);
+    panel.append(heading, input, error, actions);
     overlay.append(panel);
     document.body.append(overlay);
 
@@ -4067,13 +4094,18 @@ export const promptForImageUrl = (initialValue: string = ''): Promise<string | n
     };
 
     const confirm = () => {
-      const url = normalizeImageUrlInput(input.value);
-      if (!url) {
+      if (allowEmpty && input.value.trim() === '') {
+        finish('');
+        return;
+      }
+
+      const value = validate ? validate(input.value) : String(input.value || '').trim();
+      if (!value) {
         error.classList.remove('hidden');
         input.focus();
         return;
       }
-      finish(url);
+      finish(value);
     };
 
     function handleOverlayClick(event: MouseEvent) {
@@ -4099,6 +4131,32 @@ export const promptForImageUrl = (initialValue: string = ''): Promise<string | n
     }, 0);
   });
 };
+
+export const promptForUrl = ({
+  normalize = normalizeUrlInput,
+  invalidMessage = '请输入有效的 URL',
+  placeholder = 'https://example.com',
+  ...options
+}: PromptForUrlOptions): Promise<string | null> => (
+  promptForText({
+    ...options,
+    placeholder,
+    invalidMessage,
+    inputType: 'url',
+    validate: (value) => normalize(value),
+  })
+);
+
+export const promptForImageUrl = (initialValue: string = ''): Promise<string | null> => (
+  promptForUrl({
+    title: '插入图片 URL',
+    initialValue,
+    placeholder: 'https://example.com/image.png',
+    confirmLabel: '插入',
+    invalidMessage: '请输入有效的图片 URL',
+    normalize: normalizeImageUrlInput,
+  })
+);
 
 export const getSuggestionItems = ({ query }: { query: string }) => {
   return [
@@ -4249,10 +4307,9 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
       shortcut: '/toggle',
       icon: <ChevronRight className="w-3 h-3" />,
       command: ({ editor, range }: any) => {
-        const title = window.prompt('Toggle title', 'Toggle') || 'Toggle';
         editor.chain().focus().deleteRange(range).insertContent({
           type: 'toggleBlock',
-          attrs: { title, open: true },
+          attrs: { title: 'Toggle', open: true },
           content: [{ type: 'paragraph' }],
         }).run();
       },
@@ -4273,8 +4330,12 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
       title: 'Bookmark',
       shortcut: '/bookmark',
       icon: <Bookmark className="w-3 h-3" />,
-      command: ({ editor, range }: any) => {
-        const url = promptForUrl('Bookmark URL');
+      command: async ({ editor, range }: any) => {
+        const url = await promptForUrl({
+          title: '插入书签',
+          placeholder: 'https://example.com',
+          confirmLabel: '插入',
+        });
         if (!url) return;
         editor.chain().focus().deleteRange(range).insertContent({
           type: 'bookmarkBlock',
@@ -4286,8 +4347,12 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
       title: 'Embed',
       shortcut: '/embed',
       icon: <Globe className="w-3 h-3" />,
-      command: ({ editor, range }: any) => {
-        const url = promptForUrl('Embed URL');
+      command: async ({ editor, range }: any) => {
+        const url = await promptForUrl({
+          title: '插入嵌入',
+          placeholder: 'https://example.com',
+          confirmLabel: '插入',
+        });
         if (!url) return;
         editor.chain().focus().deleteRange(range).insertContent({
           type: 'embedBlock',

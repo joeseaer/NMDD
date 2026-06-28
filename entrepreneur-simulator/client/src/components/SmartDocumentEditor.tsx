@@ -48,6 +48,8 @@ import {
     EquationBlock,
     DatabaseBlock,
     promptForImageUrl,
+    promptForText,
+    promptForUrl,
 } from './TiptapExtensions';
 
 // --- Parsers ---
@@ -1175,14 +1177,24 @@ const NotionImageComponent = (props: any) => {
         if (url) updateAttributes({ src: url });
     };
 
-    const promptAltText = () => {
-        const nextAlt = window.prompt('图片描述 / Alt text', alt);
+    const promptAltText = async () => {
+        const nextAlt = await promptForText({
+            title: '图片描述 / Alt text',
+            initialValue: alt,
+            allowEmpty: true,
+            confirmLabel: '保存',
+        });
         if (nextAlt === null) return;
         updateAttributes({ alt: nextAlt.trim() });
     };
 
-    const promptImageLink = () => {
-        const nextLink = window.prompt('图片链接', link);
+    const promptImageLink = async () => {
+        const nextLink = await promptForUrl({
+            title: '图片链接',
+            initialValue: link,
+            allowEmpty: true,
+            confirmLabel: '保存',
+        });
         if (nextLink === null) return;
         updateAttributes({ link: nextLink.trim() });
     };
@@ -1191,7 +1203,12 @@ const NotionImageComponent = (props: any) => {
         try {
             await navigator.clipboard.writeText(src);
         } catch {
-            window.prompt('复制图片链接', src);
+            await promptForText({
+                title: '复制图片链接',
+                initialValue: src,
+                readOnly: true,
+                confirmLabel: '关闭',
+            });
         }
     };
 
@@ -1439,7 +1456,12 @@ const NotionMediaComponent = (props: any) => {
         try {
             await navigator.clipboard.writeText(url);
         } catch {
-            window.prompt('复制文件链接', url);
+            await promptForText({
+                title: '复制文件链接',
+                initialValue: url,
+                readOnly: true,
+                confirmLabel: '关闭',
+            });
         }
     };
 
@@ -2139,7 +2161,12 @@ export const SmartDocumentEditor = ({
 
         const copied = await copyTextToClipboard(url.toString());
         if (!copied) {
-            window.prompt('Copy block link', url.toString());
+            await promptForText({
+                title: '复制块链接',
+                initialValue: url.toString(),
+                readOnly: true,
+                confirmLabel: '关闭',
+            });
         }
 
         closeBlockMenu();
@@ -2921,9 +2948,14 @@ const EditorToolbar = ({
 }) => {
     if (!editor) return null;
 
-    const setLink = () => {
+    const setLink = async () => {
         const previousUrl = editor.getAttributes('link').href || '';
-        const url = window.prompt('请输入链接地址', previousUrl);
+        const url = await promptForUrl({
+            title: '链接地址',
+            initialValue: previousUrl,
+            allowEmpty: true,
+            confirmLabel: '保存',
+        });
         if (url === null) return;
         if (url.trim() === '') {
             editor.chain().focus().extendMarkRange('link').unsetLink().run();
