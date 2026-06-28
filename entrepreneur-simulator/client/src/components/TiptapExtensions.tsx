@@ -2182,6 +2182,15 @@ const DatabaseRowPageEditor = ({
     input.click();
   };
 
+  const addImageByUrl = async () => {
+    if (!rowPageEditor) return;
+
+    const url = await promptForImageUrl();
+    if (!url) return;
+
+    rowPageEditor.chain().focus().setImage({ src: url, width: '100%', align: 'center' } as any).run();
+  };
+
   if (!rowPageEditor) return null;
 
   return (
@@ -2238,6 +2247,9 @@ const DatabaseRowPageEditor = ({
         </DatabaseRowPageToolbarButton>
         <DatabaseRowPageToolbarButton title="图片" disabled={typeof uploadImage !== 'function'} onClick={addImage}>
           <ImageIcon className="h-3.5 w-3.5" />
+        </DatabaseRowPageToolbarButton>
+        <DatabaseRowPageToolbarButton title="图片 URL" onClick={addImageByUrl}>
+          <Globe className="h-3.5 w-3.5" />
         </DatabaseRowPageToolbarButton>
         <span className="ml-auto hidden text-[11px] text-gray-400 sm:inline">输入 / 插入更多块</span>
       </div>
@@ -3985,6 +3997,109 @@ const promptForUrl = (label: string) => {
   return url.trim();
 };
 
+export const normalizeImageUrlInput = (value: unknown) => {
+  const raw = String(value || '').trim();
+  if (!raw || /\s/.test(raw)) return '';
+  if (/^data:image\//i.test(raw) || /^blob:/i.test(raw)) return raw;
+  if (raw.startsWith('/')) return raw.startsWith('//') ? `${window.location.protocol}${raw}` : raw;
+
+  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+
+  try {
+    const url = new URL(candidate, window.location.origin);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch {
+    return '';
+  }
+};
+
+export const promptForImageUrl = (initialValue: string = ''): Promise<string | null> => {
+  if (typeof document === 'undefined') return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/30 px-4';
+
+    const panel = document.createElement('div');
+    panel.className = 'w-full max-w-md rounded-lg border border-gray-200 bg-white p-4 shadow-xl';
+
+    const title = document.createElement('div');
+    title.className = 'text-sm font-semibold text-gray-900';
+    title.textContent = '插入图片 URL';
+
+    const input = document.createElement('input');
+    input.type = 'url';
+    input.value = initialValue;
+    input.placeholder = 'https://example.com/image.png';
+    input.className = 'mt-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500';
+
+    const error = document.createElement('div');
+    error.className = 'mt-2 hidden text-xs text-red-600';
+    error.textContent = '请输入有效的图片 URL';
+
+    const actions = document.createElement('div');
+    actions.className = 'mt-4 flex justify-end gap-2';
+
+    const cancelButton = document.createElement('button');
+    cancelButton.type = 'button';
+    cancelButton.className = 'rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50';
+    cancelButton.textContent = '取消';
+
+    const confirmButton = document.createElement('button');
+    confirmButton.type = 'button';
+    confirmButton.className = 'rounded-md bg-gray-900 px-3 py-1.5 text-sm text-white hover:bg-gray-800';
+    confirmButton.textContent = '插入';
+
+    actions.append(cancelButton, confirmButton);
+    panel.append(title, input, error, actions);
+    overlay.append(panel);
+    document.body.append(overlay);
+
+    let settled = false;
+
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      overlay.removeEventListener('click', handleOverlayClick);
+      document.removeEventListener('keydown', handleKeyDown);
+      overlay.remove();
+      resolve(value);
+    };
+
+    const confirm = () => {
+      const url = normalizeImageUrlInput(input.value);
+      if (!url) {
+        error.classList.remove('hidden');
+        input.focus();
+        return;
+      }
+      finish(url);
+    };
+
+    function handleOverlayClick(event: MouseEvent) {
+      if (event.target === overlay) finish(null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') finish(null);
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        confirm();
+      }
+    }
+
+    overlay.addEventListener('click', handleOverlayClick);
+    document.addEventListener('keydown', handleKeyDown);
+    cancelButton.addEventListener('click', () => finish(null));
+    confirmButton.addEventListener('click', confirm);
+
+    window.setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  });
+};
+
 export const getSuggestionItems = ({ query }: { query: string }) => {
   return [
     {
@@ -4085,6 +4200,16 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
                 if (url) editor.chain().focus().setImage({ src: url, width: '100%', align: 'center' }).run();
             };
             input.click();
+        },
+    },
+    {
+        title: '图片 URL',
+        shortcut: '/tpurl',
+        icon: <Globe className="w-3 h-3" />,
+        command: async ({ editor, range }: any) => {
+            const url = await promptForImageUrl();
+            if (!url) return;
+            editor.chain().focus().deleteRange(range).setImage({ src: url, width: '100%', align: 'center' }).run();
         },
     },
     {

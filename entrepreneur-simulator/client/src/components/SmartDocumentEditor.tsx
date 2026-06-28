@@ -47,6 +47,7 @@ import {
     PageLinkBlock,
     EquationBlock,
     DatabaseBlock,
+    promptForImageUrl,
 } from './TiptapExtensions';
 
 // --- Parsers ---
@@ -2434,6 +2435,13 @@ export const SmartDocumentEditor = ({
         input.click();
     }, [editor, uploadImage]);
 
+    const addImageByUrl = useCallback(async () => {
+        if (!editor) return;
+        const url = await promptForImageUrl();
+        if (!url) return;
+        editor.chain().focus().setImage({ src: url, width: '100%', align: 'center' } as any).run();
+    }, [editor]);
+
     if (!editor) return null;
 
     const commentPanelComments = commentPanelBlock
@@ -2496,6 +2504,7 @@ export const SmartDocumentEditor = ({
                 <EditorToolbar 
                     editor={editor} 
                     onAddImage={addImage} 
+                    onAddImageUrl={addImageByUrl}
                     showTOC={showTOC} 
                     onToggleTOC={() => setShowTOC(!showTOC)} 
                 />
@@ -2897,7 +2906,19 @@ const TableOfContents = ({ editor }: { editor: any }) => {
     );
 };
 
-const EditorToolbar = ({ editor, onAddImage, showTOC, onToggleTOC }: { editor: any, onAddImage: () => void, showTOC: boolean, onToggleTOC: () => void }) => {
+const EditorToolbar = ({
+    editor,
+    onAddImage,
+    onAddImageUrl,
+    showTOC,
+    onToggleTOC,
+}: {
+    editor: any,
+    onAddImage: () => void,
+    onAddImageUrl: () => void,
+    showTOC: boolean,
+    onToggleTOC: () => void,
+}) => {
     if (!editor) return null;
 
     const setLink = () => {
@@ -3082,6 +3103,11 @@ const EditorToolbar = ({ editor, onAddImage, showTOC, onToggleTOC }: { editor: a
                 onClick={onAddImage}  
                 icon={<ImageIcon className="w-4 h-4"/>} 
                 label="图片"
+            />
+            <ToolbarBtn
+                onClick={onAddImageUrl}
+                icon={<LinkIcon className="w-4 h-4"/>}
+                label="图片URL"
             />
         </div>
     );
