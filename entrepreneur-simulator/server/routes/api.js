@@ -3,6 +3,7 @@ const chatService = require('../services/chatService');
 const dbService = require('../services/dbService');
 const plannerAssistantService = require('../services/plannerAssistantService');
 const secretaryService = require('../services/secretaryService');
+const documentContextService = require('../services/documentContextService');
 const { DEFAULT_USER_ID } = require('../config/currentUser');
 const { parseJsonObject, sendApiError } = require('../utils/aiResponse');
 const crypto = require('crypto');
@@ -377,14 +378,36 @@ async function routes(fastify, options) {
   fastify.post('/assistant/chat', async (request, reply) => {
     try {
       const { userId, query } = request.body;
-      const history = await dbService.getRecentScenes(userId);
-      const sops = await dbService.getSOPs(userId);
+      const uid = userId || DEFAULT_USER_ID;
+      const cleanQuery = String(query || '').trim();
+      if (!cleanQuery) return reply.code(400).send({ error: 'query is required' });
+
+      const [history, documentContext] = await Promise.all([
+        dbService.getRecentScenes(uid),
+        documentContextService.buildDecisionDocumentContext({ userId: uid, query: cleanQuery, maxBlocks: 12 }),
+      ]);
       
-      const response = await chatService.processAssistantMessage({ userId, query, history, sops });
+      const response = await chatService.processAssistantMessage({ userId: uid, query: cleanQuery, history, documentContext });
       return response;
     } catch (err) {
       request.log.error(err);
       return sendApiError(reply, request, { error: 'Assistant failed', err, stage: 'llm_call' });
+    }
+  });
+
+  fastify.get('/assistant/document-context/:userId', async (request, reply) => {
+    try {
+      const { userId } = request.params;
+      const query = String(request.query?.query || '').trim();
+      const limit = Number.parseInt(String(request.query?.limit || '12'), 10);
+      return documentContextService.buildDecisionDocumentContext({
+        userId: userId || DEFAULT_USER_ID,
+        query,
+        maxBlocks: Number.isFinite(limit) ? Math.max(1, Math.min(24, limit)) : 12,
+      });
+    } catch (err) {
+      request.log.error(err);
+      return sendApiError(reply, request, { error: 'Document context failed', err, stage: 'document_context' });
     }
   });
 
@@ -971,13 +994,21 @@ ${JSON.stringify(strategy)}
   fastify.post('/people/consult', async (request, reply) => {
       try {
           const { personId, query } = request.body;
-          const profiles = await dbService.getPeopleProfiles(request.body?.userId || request.query?.userId || DEFAULT_USER_ID);
+          const userId = request.body?.userId || request.query?.userId || DEFAULT_USER_ID;
+          const profiles = await dbService.getPeopleProfiles(userId);
           const profile = profiles.find(p => p.id === personId);
           if (!profile) return reply.code(404).send({ error: 'Person not found' });
           
-          const logs = await dbService.getInteractionLogs(personId);
-          const result = await chatService.consultPerson({ profile, logs, query });
-          return result;
+          const [logs, documentContext] = await Promise.all([
+            dbService.getInteractionLogs(personId),
+            documentContextService.buildDecisionDocumentContext({
+              userId,
+              query: `${profile.name || ''} ${profile.identity || ''} ${query || ''}`,
+              maxBlocks: 8,
+            }),
+          ]);
+          const result = await chatService.consultPerson({ profile, logs, query, documentContext });
+          return { ...result, document_context: { corpus: documentContext.corpus, references: documentContext.references } };
       } catch (err) {
           request.log.error(err);
           return sendApiError(reply, request, { error: 'Consultation failed', err, stage: err?.stage || 'llm_call' });
@@ -1067,9 +1098,16 @@ ${JSON.stringify(strategy)}
         .slice(-12)
         .map((m) => `${m.role === 'assistant' ? '军师' : '我'}：${m.content}`)
         .join('\n');
-      const logs = await dbService.getInteractionLogs(id);
+      const [logs, documentContext] = await Promise.all([
+        dbService.getInteractionLogs(id),
+        documentContextService.buildDecisionDocumentContext({
+          userId,
+          query: `${profile.name || ''} ${profile.identity || ''} ${content}`,
+          maxBlocks: 8,
+        }),
+      ]);
       const query = `请基于以下连续会话进行多轮决策建议。\n${historyText}\n\n请延续上下文回答，并给出可执行建议。`;
-      const result = await chatService.consultPerson({ profile, logs, query });
+      const result = await chatService.consultPerson({ profile, logs, query, documentContext });
       const assistantMsg = {
         id: createId(),
         role: 'assistant',
@@ -1089,7 +1127,12 @@ ${JSON.stringify(strategy)}
       const nextWorkspace = { ...workspace, active_thread_id: threadId, threads: nextThreads };
       const nextPrivate = withAdvisorWorkspace(base, nextWorkspace);
       await dbService.updatePersonPrivateInfo(id, JSON.stringify(nextPrivate));
-      return { user_message: userMsg, assistant_message: assistantMsg, thread: { id: nextThread.id, title: nextThread.title, updated_at: nextThread.updated_at, message_count: nextThread.messages.length } };
+      return {
+        user_message: userMsg,
+        assistant_message: assistantMsg,
+        thread: { id: nextThread.id, title: nextThread.title, updated_at: nextThread.updated_at, message_count: nextThread.messages.length },
+        document_context: { corpus: documentContext.corpus, references: documentContext.references },
+      };
     } catch (err) {
       request.log.error(err);
       reply.code(500).send({ error: 'Failed to process advisor chat' });

@@ -6,7 +6,17 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   related_sops?: string[];
+  document_references?: DocumentReference[];
   timestamp: Date;
+}
+
+interface DocumentReference {
+  ref_id: string;
+  title: string;
+  category?: string;
+  heading?: string;
+  snippet?: string;
+  url?: string;
 }
 
 export default function ChatAssistant() {
@@ -43,8 +53,9 @@ export default function ChatAssistant() {
       
       const aiMsg: ChatMessage = { 
         role: 'assistant', 
-        content: data.content, 
+        content: data.content || data.reply || '',
         related_sops: data.related_sops || [],
+        document_references: data.document_references || data.document_context?.references || [],
         timestamp: new Date() 
       };
       
@@ -99,8 +110,32 @@ export default function ChatAssistant() {
               </div>
               <p className="whitespace-pre-wrap leading-relaxed text-sm">{msg.content}</p>
               
+              {/* Document references */}
+              {msg.document_references && msg.document_references.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-100/50">
+                  <p className="text-xs font-semibold mb-2 flex items-center opacity-80">
+                    <BookOpen className="w-3 h-3 mr-1" /> 参考文档：
+                  </p>
+                  <div className="space-y-2">
+                    {msg.document_references.slice(0, 5).map((ref) => (
+                      <a
+                        key={`${ref.ref_id}-${ref.url || ref.title}`}
+                        href={ref.url || '#'}
+                        className="block px-2 py-1.5 bg-black/5 rounded text-xs hover:bg-black/10 transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold">{ref.ref_id}</span>
+                          <span className="truncate">{ref.title}{ref.heading ? ` / ${ref.heading}` : ''}</span>
+                        </div>
+                        {ref.snippet && <div className="mt-1 opacity-70 line-clamp-2">{ref.snippet}</div>}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Related SOPs */}
-              {msg.related_sops && msg.related_sops.length > 0 && (
+              {(!msg.document_references || msg.document_references.length === 0) && msg.related_sops && msg.related_sops.length > 0 && (
                 <div className="mt-3 pt-3 border-t border-gray-100/50">
                   <p className="text-xs font-semibold mb-2 flex items-center opacity-80">
                     <BookOpen className="w-3 h-3 mr-1" /> 参考资料：

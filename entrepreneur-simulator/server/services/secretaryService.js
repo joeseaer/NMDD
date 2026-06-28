@@ -1,5 +1,6 @@
 const OpenAI = require('openai');
 const dbService = require('./dbService');
+const documentContextService = require('./documentContextService');
 const { getLlmApiKey, getLlmModel, getOpenAIClientOptions } = require('./llmConfig');
 const { resolveUserId } = require('../config/currentUser');
 const { extractJsonObject } = require('../utils/aiResponse');
@@ -53,7 +54,7 @@ async function getSecretaryDaily({ userId, refresh }) {
   const now = new Date();
   const nowText = toDateKeyLocal(now);
 
-  const cacheKey = `${uid}:${nowText}:v2`;
+  const cacheKey = `${uid}:${nowText}:v3`;
   if (!refresh && dailyCache.has(cacheKey)) {
     const cached = dailyCache.get(cacheKey);
     return { ...cached, cached: true, date: nowText };
@@ -87,18 +88,40 @@ async function getSecretaryDaily({ userId, refresh }) {
     tasks: (tasks || []).slice(0, 30).map(t => ({ id: t.id, title: t.title, due: t.due_at }))
   };
 
-  // 3. 获取近期 SOP/笔记摘要（前10条）
-  const sops = await dbService.getSOPs(uid);
-  const sopPayload = (sops || []).slice(0, 10).map(s => ({
-    id: s.id,
-    title: s.title,
-    category: s.category,
-    content_preview: typeof s.content === 'string' ? s.content.slice(0, 100) : ''
+  // 3. Build document memory from notes/SOPs that are relevant to today's decisions.
+  const decisionQuery = [
+    nowText,
+    ...peoplePayload.map((p) => `${p.name || ''} ${p.identity || ''} ${p.last_interaction || ''}`),
+    ...plannerPayload.events.map((e) => e.title || ''),
+    ...plannerPayload.tasks.map((t) => t.title || ''),
+  ].join(' ');
+  const documentContext = await documentContextService.buildDecisionDocumentContext({
+    userId: uid,
+    query: decisionQuery,
+    maxBlocks: 10,
+  });
+  const sopPayload = (documentContext.references || []).map((ref) => ({
+    ref_id: ref.ref_id,
+    id: ref.doc_id,
+    block_id: ref.block_id,
+    title: ref.title,
+    category: ref.category,
+    heading: ref.heading,
+    snippet: ref.snippet,
+    url: ref.url,
   }));
 
   const client = getOpenAIClientOrNull();
   if (!client) {
-    const res = { available: false, suggestions: [], general_reminders: [], message: 'LLM_API_KEY 未配置', cached: false, date: nowText };
+    const res = {
+      available: false,
+      suggestions: [],
+      general_reminders: [],
+      message: 'LLM_API_KEY 未配置',
+      cached: false,
+      date: nowText,
+      document_context: { corpus: documentContext.corpus, references: documentContext.references },
+    };
     dailyCache.set(cacheKey, res);
     return res;
   }
@@ -129,7 +152,8 @@ async function getSecretaryDaily({ userId, refresh }) {
       "type": "task" | "idea" | "warning",
       "title": string (简短标题),
       "content": string (具体的提醒内容，结合了待办或随笔的洞察，50字以内),
-      "priority": "high" | "medium" | "low"
+      "priority": "high" | "medium" | "low",
+      "source_document_refs": string[] (如 ["D1"], 没有则 [])
     }
   ]
 }
@@ -142,11 +166,13 @@ async function getSecretaryDaily({ userId, refresh }) {
   3) relation_positioning 为“降低投入/观察中”时，优先低成本动作。
   4) relation_priority 为 P0 时优先级更高；strategy_roi_score < 50 时不建议继续高投入。
 - general_reminders：最多 3 条；专注【事务与认知提醒】。可以是对某个重要待办的催促、对某个日程的提前准备建议、或者是结合某篇近期随笔给出今天的行为准则（例如"你前天随笔写到要注意情绪控制，今天下午有重要会议，请注意深呼吸"）。如果没有特别要提醒的，可以少于3条。
+- 如果使用了【随笔与经验】中的内容，请在 reason/content 中自然说明依据，并在 source_document_refs 中填入对应 D 编号；不要硬引用弱相关材料。
 
 【数据输入】
 人脉库: ${JSON.stringify(peoplePayload)}
 日程与待办: ${JSON.stringify(plannerPayload)}
 随笔与经验: ${JSON.stringify(sopPayload)}
+文档检索统计: ${JSON.stringify(documentContext.corpus)}
 `;
 
   try {
@@ -156,7 +182,15 @@ async function getSecretaryDaily({ userId, refresh }) {
     });
     const parsed = extractJsonObject(completion?.choices?.[0]?.message?.content);
     if (!parsed || typeof parsed !== 'object') {
-      const res = { available: true, suggestions: [], general_reminders: [], message: 'AI 输出解析失败', cached: false, date: nowText };
+      const res = {
+        available: true,
+        suggestions: [],
+        general_reminders: [],
+        message: 'AI 输出解析失败',
+        cached: false,
+        date: nowText,
+        document_context: { corpus: documentContext.corpus, references: documentContext.references },
+      };
       dailyCache.set(cacheKey, res);
       return res;
     }
@@ -173,6 +207,7 @@ async function getSecretaryDaily({ userId, refresh }) {
           when: String(s.when || ''),
           reason: String(s.reason || ''),
           action: String(s.action || ''),
+          source_document_refs: Array.isArray(s.source_document_refs) ? s.source_document_refs.map((x) => String(x)).filter(Boolean).slice(0, 3) : [],
         }))
         .filter((s) => s.person_name && s.action)
         .slice(0, 3),
@@ -182,16 +217,29 @@ async function getSecretaryDaily({ userId, refresh }) {
           title: String(g.title || ''),
           content: String(g.content || ''),
           priority: String(g.priority || 'medium'),
+          source_document_refs: Array.isArray(g.source_document_refs) ? g.source_document_refs.map((x) => String(x)).filter(Boolean).slice(0, 3) : [],
         }))
         .filter((g) => g.title && g.content)
         .slice(0, 3),
       cached: false,
       date: nowText,
+      document_context: {
+        corpus: documentContext.corpus,
+        references: documentContext.references,
+      },
     };
     dailyCache.set(cacheKey, res);
     return res;
   } catch (e) {
-    const res = { available: true, suggestions: [], general_reminders: [], message: e?.message || 'AI 请求失败', cached: false, date: nowText };
+    const res = {
+      available: true,
+      suggestions: [],
+      general_reminders: [],
+      message: e?.message || 'AI 请求失败',
+      cached: false,
+      date: nowText,
+      document_context: { corpus: documentContext.corpus, references: documentContext.references },
+    };
     dailyCache.set(cacheKey, res);
     return res;
   }

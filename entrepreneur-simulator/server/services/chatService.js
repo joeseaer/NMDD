@@ -105,7 +105,7 @@ function parsePrivateInfoObject(privateInfoRaw) {
   }
 }
 
-async function processAssistantMessage({ userId, query, history, sops }) {
+async function processAssistantMessage({ userId, query, history = [], sops = [], documentContext = null }) {
   if (isMock) {
     return {
       type: 'text',
@@ -114,30 +114,42 @@ async function processAssistantMessage({ userId, query, history, sops }) {
     };
   }
 
-  // RAG: Retrieve relevant scenes and SOPs
-  const context = `
-    用户最近的训练场景：
-    ${history.map(s => `- ${s.scene_type}: 结果${s.final_result.success ? '成功' : '失败'}`).join('\n')}
-    
-    相关的SOP知识库：
-    ${sops.map(s => `- ${s.title} (标签: ${s.tags.join(', ')})`).join('\n')}
-  `;
+  const historyText = (history || []).slice(0, 8).map((s) => {
+    const success = s?.final_result?.success;
+    const result = success === true ? 'success' : (success === false ? 'failed' : 'unknown');
+    return `- ${s?.scene_type || 'scene'}: ${result}; ${s?.initial_context || ''}`;
+  }).join('\n') || 'No recent simulation history.';
+
+  const legacySopText = (sops || []).slice(0, 8).map((s) => {
+    const tags = Array.isArray(s?.tags) ? s.tags.join(', ') : '';
+    return `- ${s?.title || 'Untitled'}${tags ? ` (${tags})` : ''}`;
+  }).join('\n');
+
+  const documentMemory = documentContext?.promptText || [
+    'User document memory: no structured document context was supplied.',
+    legacySopText ? `Legacy SOP titles:\n${legacySopText}` : '',
+  ].filter(Boolean).join('\n\n');
 
   const prompt = `
-    你是一个专业的创业导师AI助手。用户正在向你咨询真实生活中的问题。
-    
-    用户问题：${query}
-    
-    你的任务：
-    1. 分析用户问题，结合其历史训练表现和SOP知识库。
-    2. 给出具体的、可执行的建议。
-    3. 如果有相关的SOP或历史场景，请明确引用。
-    
-    上下文信息：
-    ${context}
-    
-    请用中文回答，语气亲切、专业、鼓励。
-  `;
+You are the user's native decision assistant inside a personal management system.
+The user is asking about a real-life decision. Answer in Chinese.
+
+User id: ${userId || 'unknown'}
+User question:
+${query}
+
+Recent training / review history:
+${historyText}
+
+${documentMemory}
+
+Decision rules:
+1. Treat the document memory as the user's own operating system: notes, SOPs, reviews, templates and personal rules.
+2. When the document memory contains relevant evidence, use it directly and cite the bracket id, such as [D1].
+3. If the documents are only weakly related, say so and avoid overstating.
+4. Give concrete next actions, not generic encouragement.
+5. Keep the tone warm, direct and useful.
+`;
 
   try {
     const openai = getOpenAIClient();
@@ -149,7 +161,9 @@ async function processAssistantMessage({ userId, query, history, sops }) {
     return {
       type: 'text',
       content: completion.choices[0].message.content,
-      // In a real implementation, we would parse structured output to link specific IDs
+      related_sops: documentContext?.related_sops || (sops || []).map((s) => s.title).filter(Boolean).slice(0, 8),
+      document_references: documentContext?.references || [],
+      document_context: documentContext?.corpus || null,
     };
   } catch (err) {
     console.error("Assistant Error:", err);
@@ -814,7 +828,7 @@ async function generateSOPFromReview(reviewData) {
     }
 }
 
-async function consultPerson({ profile, logs, query }) {
+async function consultPerson({ profile, logs, query, documentContext = null }) {
     if (isMock) {
         return {
             reply: `(模拟) 针对关于 ${profile.name} 的这个问题：“${query}”，我的建议是...`
@@ -826,6 +840,7 @@ async function consultPerson({ profile, logs, query }) {
     ).join('\n');
 
     const icebergText = formatIcebergPrivateInfo(profile.private_info);
+    const documentMemory = documentContext?.promptText || 'User document memory: no relevant notes/SOP blocks were supplied.';
 
     const prompt = `
         你是一个高情商的人际关系顾问 AI。用户正在向你咨询关于特定人物的现实问题。
@@ -847,6 +862,9 @@ async function consultPerson({ profile, logs, query }) {
         用户咨询的问题/情境：
         "${query}"
 
+        用户文档记忆（随笔、SOP、复盘、模板、个人规则）：
+        ${documentMemory}
+
         请基于“客观档案 + 主观策略层”给出建议，输出结构必须包含：
         1. 分析利弊：这样做的好处和潜在风险。
         2. 建议动作：具体行动方向或话术。
@@ -854,6 +872,7 @@ async function consultPerson({ profile, logs, query }) {
         4. 策略匹配说明：以“因为...所以...”写一行。
         5. 投入成本提示：low/medium/high 三选一。
         6. 策略版本说明：标注“基于策略版本：xxxx（未设置则写未设置）”。
+        7. 如果用户文档记忆中有直接相关的内容，请引用 [D1] 这样的编号；如果只是弱相关，请明确说明不要硬引用。
 
         请用中文回答，语气客观、专业且有同理心，不要输出 JSON。
     `;
@@ -865,7 +884,11 @@ async function consultPerson({ profile, logs, query }) {
             model: getModel(),
         });
         
-        return { reply: completion.choices[0].message.content };
+        return {
+            reply: completion.choices[0].message.content,
+            document_references: documentContext?.references || [],
+            document_context: documentContext?.corpus || null,
+        };
     } catch (err) {
         console.error("Consultation Error:", err);
         return { reply: "抱歉，AI 咨询服务暂时不可用。" };

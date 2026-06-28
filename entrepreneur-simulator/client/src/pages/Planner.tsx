@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BrainCircuit, ChevronDown, Sparkles } from 'lucide-react';
+import { BookOpen, BrainCircuit, ChevronDown, Sparkles } from 'lucide-react';
 import { api, CURRENT_USER_ID } from '../services/api';
 import PlannerTodoPanel, { PlannerItem } from '../components/planner/PlannerTodoPanel';
 import PlannerCalendarPanel, { PlannerCalendarItem } from '../components/planner/PlannerCalendarPanel';
@@ -404,6 +404,28 @@ export default function Planner() {
                   <div className="text-xs text-gray-400 italic">今日事务井井有条，无需额外提醒。</div>
                 )}
               </div>
+
+              {Array.isArray(secretary?.document_context?.references) && secretary.document_context.references.length > 0 && (
+                <div className="pt-3 border-t border-gray-100">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <BookOpen className="w-3.5 h-3.5 text-emerald-600" />
+                    <div className="text-xs font-bold text-gray-900">AI 文档记忆</div>
+                    <div className="text-[10px] text-gray-400">{secretary.document_context.corpus?.selected_count || secretary.document_context.references.length} 个块</div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {secretary.document_context.references.slice(0, 4).map((ref: any) => (
+                      <a
+                        key={`${ref.ref_id}-${ref.url || ref.title}`}
+                        href={ref.url || '#'}
+                        className="max-w-full truncate rounded border border-emerald-100 bg-emerald-50/40 px-2 py-1 text-[11px] text-emerald-900 hover:bg-emerald-50"
+                        title={ref.snippet || ref.title}
+                      >
+                        {ref.ref_id} · {ref.title}{ref.heading ? ` / ${ref.heading}` : ''}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
