@@ -1958,6 +1958,277 @@ const preserveLegacyMarkdownBlankLines = (value: string) => {
 
 const markdownToHtml = (value: string) => mdParser.render(preserveLegacyMarkdownBlankLines(value || ''));
 
+const ZERO_WIDTH_CLIPBOARD_CHARS = /[\u200b-\u200f\u202a-\u202e\u2060\ufeff]/g;
+const SUPERSCRIPT_DIGITS: Record<string, string> = {
+    '⁰': '^0',
+    '¹': '^1',
+    '²': '^2',
+    '³': '^3',
+    '⁴': '^4',
+    '⁵': '^5',
+    '⁶': '^6',
+    '⁷': '^7',
+    '⁸': '^8',
+    '⁹': '^9',
+};
+const SUBSCRIPT_SYMBOLS: Record<string, string> = {
+    'ᵢ': '_i',
+    'ⱼ': '_j',
+    '₀': '_0',
+    '₁': '_1',
+    '₂': '_2',
+    '₃': '_3',
+    '₄': '_4',
+    '₅': '_5',
+    '₆': '_6',
+    '₇': '_7',
+    '₈': '_8',
+    '₉': '_9',
+};
+
+const escapeHtml = (value: string) => (
+    value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+);
+
+const stripLatexDelimiters = (value: string) => {
+    let formula = value.trim();
+    const pairs: Array<[string, string]> = [
+        ['$$', '$$'],
+        ['\\[', '\\]'],
+        ['\\(', '\\)'],
+    ];
+
+    for (const [open, close] of pairs) {
+        if (formula.startsWith(open) && formula.endsWith(close)) {
+            formula = formula.slice(open.length, formula.length - close.length).trim();
+        }
+    }
+
+    return formula;
+};
+
+const getLatexFromMathElement = (element: Element | null) => {
+    if (!element) return '';
+
+    const annotation = element.querySelector(
+        'annotation[encoding="application/x-tex"], annotation[encoding="application/x-latex"], annotation[encoding="application/tex"]'
+    );
+    if (annotation?.textContent?.trim()) return stripLatexDelimiters(annotation.textContent);
+
+    const attributeNames = ['data-latex', 'data-tex', 'data-value', 'alttext', 'aria-label'];
+    for (const name of attributeNames) {
+        const value = element.getAttribute(name);
+        if (value && /\\|[_^{}]/.test(value)) return stripLatexDelimiters(value);
+    }
+
+    return '';
+};
+
+const createEquationPasteNode = (doc: Document, formula: string) => {
+    const node = doc.createElement('div');
+    node.setAttribute('data-type', 'equation');
+    node.setAttribute('data-equation', stripLatexDelimiters(formula));
+    return node;
+};
+
+const replaceMathElementWithEquation = (element: Element, replacement: HTMLElement) => {
+    const parent = element.parentElement;
+    if (parent?.tagName === 'P') {
+        const clone = parent.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll('.katex-display, .math-display, mjx-container[display="true"], math[display="block"]').forEach((node) => node.remove());
+        if (!clone.textContent?.trim()) {
+            parent.replaceWith(replacement);
+            return;
+        }
+    }
+
+    element.replaceWith(replacement);
+};
+
+const normalizeMathClipboardHtml = (html: string | undefined) => {
+    if (!html || !/(katex|MathJax|mjx-container|application\/x-tex|application\/x-latex|<math|math-display)/i.test(html)) {
+        return null;
+    }
+
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    let replaced = false;
+
+    const displayMath = Array.from(doc.body.querySelectorAll(
+        '.katex-display, .math-display, mjx-container[display="true"], math[display="block"]'
+    ));
+
+    displayMath.forEach((element) => {
+        if (!doc.body.contains(element)) return;
+        const formula = getLatexFromMathElement(element);
+        if (!formula) return;
+
+        replaceMathElementWithEquation(element, createEquationPasteNode(doc, formula));
+        replaced = true;
+    });
+
+    const inlineMath = Array.from(doc.body.querySelectorAll('.katex, .math-inline, mjx-container, math'));
+    inlineMath.forEach((element) => {
+        if (!doc.body.contains(element) || element.closest('[data-type="equation"]')) return;
+        const formula = getLatexFromMathElement(element);
+        if (!formula) return;
+
+        element.replaceWith(doc.createTextNode(`\\(${stripLatexDelimiters(formula)}\\)`));
+        replaced = true;
+    });
+
+    return replaced ? doc.body.innerHTML : null;
+};
+
+const normalizeClipboardPlainText = (value: string) => (
+    value
+        .replace(/\r\n?/g, '\n')
+        .replace(ZERO_WIDTH_CLIPBOARD_CHARS, '')
+        .replace(/\u00a0/g, ' ')
+        .replace(/\t+/g, ' ')
+);
+
+const normalizeFormulaSymbols = (value: string) => {
+    let next = value;
+    Object.entries(SUPERSCRIPT_DIGITS).forEach(([source, target]) => {
+        next = next.split(source).join(target);
+    });
+    Object.entries(SUBSCRIPT_SYMBOLS).forEach(([source, target]) => {
+        next = next.split(source).join(target);
+    });
+    return next
+        .replace(/[−–—]/g, '-')
+        .replace(/[⟨〈<]/g, ' \\langle ')
+        .replace(/[⟩〉>]/g, ' \\rangle ')
+        .replace(/\s+/g, ' ')
+        .trim();
+};
+
+const extractLatexFromMixedFormula = (value: string) => {
+    const normalized = normalizeFormulaSymbols(value);
+    const firstLatexMarker = normalized.search(/\\[a-zA-Z]+|[A-Za-z]_\{?[A-Za-z0-9]+\}?|\^\{?[A-Za-z0-9]+\}?/);
+    if (firstLatexMarker < 0) return '';
+
+    let start = firstLatexMarker;
+    while (start > 0 && /[A-Za-z0-9{}()+\-*/=.,\s]/.test(normalized[start - 1])) start -= 1;
+
+    const rangleEnd = normalized.indexOf('\\rangle', firstLatexMarker);
+    if (rangleEnd >= 0) return normalized.slice(start, rangleEnd + '\\rangle'.length).trim();
+
+    const braceEnd = normalized.indexOf('}', firstLatexMarker);
+    if (braceEnd >= 0) return normalized.slice(start, braceEnd + 1).trim();
+
+    return '';
+};
+
+const normalizePlainFormulaToLatex = (value: string) => {
+    const embeddedLatex = extractLatexFromMixedFormula(value);
+    let formula = embeddedLatex || normalizeFormulaSymbols(value);
+
+    formula = formula
+        .replace(/\b([uU])\s*_\s*\{?([ij])\}?/g, '$1_$2')
+        .replace(/\b([uU])\s+([ij])\b/g, '$1_$2')
+        .replace(/\b([uU])([ij])\b/g, '$1_$2')
+        .replace(/\bC\s*_\s*\{?ij\}?/g, 'C_{ij}')
+        .replace(/\bC\s+ij\b/g, 'C_{ij}')
+        .replace(/\bCij\b/g, 'C_{ij}')
+        .replace(/\)\s*\^?\s*([0-9]+)\b/g, ')^$1')
+        .replace(/([A-Za-z]_[A-Za-z0-9])\s*\^?\s*([0-9]+)\b/g, '$1^$2')
+        .replace(/\s*([+=])\s*/g, ' $1 ')
+        .replace(/\s+-\s*/g, ' - ')
+        .replace(/-\s*([0-9])/g, '- $1')
+        .replace(/\(\s+/g, '(')
+        .replace(/\s+\)/g, ')')
+        .replace(/\\langle\s+/g, '\\langle ')
+        .replace(/\s+\\rangle/g, ' \\rangle')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return formula;
+};
+
+const hasCjkText = (value: string) => /[\u3400-\u9fff]/.test(value);
+
+const isFormulaTextLine = (line: string, hasOpenFormula: boolean) => {
+    const text = line.trim();
+    if (!text) return false;
+    if (hasCjkText(text)) return false;
+    if (hasOpenFormula) return true;
+    if (/[⟨⟩〈〉\\^_+\-=−–—(){}]/.test(text)) return true;
+    if (/^[UuCijIJ0-9\s]+$/.test(text) && text.length <= 8) return true;
+    return false;
+};
+
+const isRenderableFormula = (value: string) => {
+    const formula = normalizePlainFormulaToLatex(value);
+    return /\\langle|\\rangle|[_^{}]|[+\-=]/.test(formula) && /[A-Za-z]/.test(formula);
+};
+
+const plainMathClipboardToHtml = (text: string | undefined) => {
+    const normalized = normalizeClipboardPlainText(text || '');
+    if (!normalized || !/[⟨⟩〈〉\\^_−–—]|(?:\n\s*[UuCijIJ]\s*\n)/.test(normalized)) return null;
+
+    const lines = normalized.split('\n');
+    const parts: Array<{ type: 'paragraph' | 'equation'; value: string }> = [];
+    let paragraph: string[] = [];
+    let formula: string[] = [];
+
+    const flushParagraph = () => {
+        const value = paragraph.join('<br>').trim();
+        if (value) parts.push({ type: 'paragraph', value });
+        paragraph = [];
+    };
+
+    const flushFormula = () => {
+        const value = formula.join(' ').trim();
+        if (value && isRenderableFormula(value)) {
+            parts.push({ type: 'equation', value: normalizePlainFormulaToLatex(value) });
+        } else if (value) {
+            parts.push({ type: 'paragraph', value });
+        }
+        formula = [];
+    };
+
+    lines.forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+            if (formula.length) return;
+            flushParagraph();
+            return;
+        }
+
+        if (isFormulaTextLine(trimmed, formula.length > 0)) {
+            flushParagraph();
+            formula.push(trimmed);
+            return;
+        }
+
+        flushFormula();
+        paragraph.push(trimmed);
+    });
+
+    flushFormula();
+    flushParagraph();
+
+    if (!parts.some((part) => part.type === 'equation')) return null;
+
+    return parts.map((part) => {
+        if (part.type === 'equation') {
+            return `<div data-type="equation" data-equation="${escapeHtml(part.value)}"></div>`;
+        }
+        return `<p>${part.value.split('<br>').map(escapeHtml).join('<br>')}</p>`;
+    }).join('');
+};
+
+const mathClipboardToHtml = (html: string | undefined, text: string | undefined) => {
+    return normalizeMathClipboardHtml(html) || plainMathClipboardToHtml(text);
+};
+
 const normalizeSmartImageLinksForExport = (html: string) => {
     if (!html || typeof document === 'undefined') return html;
 
@@ -2187,6 +2458,19 @@ export const SmartDocumentEditor = ({
             },
             handlePaste: (view, event, _slice) => {
                 const text = event.clipboardData?.getData('text/plain');
+                const html = event.clipboardData?.getData('text/html');
+                const mathPasteHtml = mathClipboardToHtml(html, text);
+                if (mathPasteHtml) {
+                    event.preventDefault();
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(mathPasteHtml, 'text/html');
+                    const pmParser = ProseMirrorDOMParser.fromSchema(view.state.schema);
+                    const slice = pmParser.parseSlice(doc.body);
+                    const transaction = view.state.tr.replaceSelection(slice).scrollIntoView();
+                    view.dispatch(transaction);
+                    return true;
+                }
+
                 if (text) {
                      // Check for Markdown table syntax (Header row + Separator row)
                      if (/^\s*\|.*\|\s*\n\s*\|[-:| ]+\|\s*/m.test(text)) {

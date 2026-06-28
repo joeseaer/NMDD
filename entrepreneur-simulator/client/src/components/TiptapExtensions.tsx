@@ -4208,15 +4208,23 @@ const renderEquation = (formula: string) => {
 
 const decodeEquationAttribute = (value: string | null) => {
   if (!value) return '';
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
+  let decoded = value;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      break;
+    }
   }
+  return decoded;
 };
 
+const normalizeEquationFormula = (value: unknown) => decodeEquationAttribute(String(value || '')).trim();
+
 const EquationBlockView = ({ node, updateAttributes, selected }: any) => {
-  const formula = node.attrs.formula || DEFAULT_EQUATION;
+  const formula = normalizeEquationFormula(node.attrs.formula) || DEFAULT_EQUATION;
   const [draft, setDraft] = useState(formula);
   const previewHtml = useMemo(() => renderEquation(draft), [draft]);
   const commentsAttr = Array.isArray(node.attrs.blockComments) && node.attrs.blockComments.length
@@ -4228,7 +4236,7 @@ const EquationBlockView = ({ node, updateAttributes, selected }: any) => {
   }, [formula]);
 
   const commit = () => {
-    const next = draft.trim() || DEFAULT_EQUATION;
+    const next = normalizeEquationFormula(draft) || DEFAULT_EQUATION;
     setDraft(next);
     if (next !== formula) updateAttributes({ formula: next });
   };
@@ -4239,7 +4247,7 @@ const EquationBlockView = ({ node, updateAttributes, selected }: any) => {
         selected ? 'border-gray-400 shadow-sm' : 'border-gray-200 hover:border-gray-300'
       }`}
       data-type="equation"
-      data-equation={encodeURIComponent(formula)}
+      data-equation={formula}
       data-block-id={node.attrs.blockId || undefined}
       data-comments={commentsAttr}
       id={blockDomId(node.attrs.blockId)}
@@ -4290,7 +4298,7 @@ export const EquationBlock = Node.create({
   },
 
   renderHTML({ node, HTMLAttributes }) {
-    const formula = node.attrs.formula || DEFAULT_EQUATION;
+    const formula = normalizeEquationFormula(node.attrs.formula) || DEFAULT_EQUATION;
     return [
       'div',
       mergeAttributes(HTMLAttributes, {
