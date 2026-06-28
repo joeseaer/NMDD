@@ -2053,6 +2053,7 @@ const DatabaseRowPageEditor = ({
   const rowPageEditor = useEditor({
     extensions: [
       StarterKit.configure({
+        link: false,
         bulletList: {
           keepMarks: true,
           keepAttributes: false,

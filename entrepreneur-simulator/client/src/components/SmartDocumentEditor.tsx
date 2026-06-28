@@ -1833,6 +1833,8 @@ export const SmartDocumentEditor = ({
         extensions: [
             BlockIdentity,
             StarterKit.configure({
+                heading: false,
+                link: false,
                 bulletList: {
                     keepMarks: true,
                     keepAttributes: false,
