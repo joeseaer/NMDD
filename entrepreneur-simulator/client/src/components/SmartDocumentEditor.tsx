@@ -5,7 +5,7 @@ import {
   Link as LinkIcon, Unlink, AlignLeft, AlignCenter, AlignRight, Captions,
   ImagePlus, Download, ExternalLink, Maximize2, Trash2, Copy, GripVertical,
   MoreHorizontal, ArrowUp, ArrowDown, Heading1, Heading2, Heading3, MessageSquare,
-  Paperclip, Video, Music, FileText, RefreshCw, Palette
+  Paperclip, Video, Music, FileText, RefreshCw, Palette, ChevronRight, AlertTriangle
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -354,6 +354,7 @@ type ColumnResizeHandleInfo = {
 };
 
 type TableCellBackgroundScope = 'cell' | 'row' | 'column';
+type TurnIntoTarget = 'paragraph' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'todo' | 'quote' | 'code' | 'toggle' | 'callout';
 
 const TABLE_CELL_NODE_TYPES = new Set(['tableCell', 'tableHeader']);
 
@@ -2266,13 +2267,51 @@ export const SmartDocumentEditor = ({
         closeBlockMenu();
     }, [closeBlockMenu, editor, getLiveBlock]);
 
-    const turnBlockInto = useCallback((block: BlockHandleInfo, target: 'paragraph' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'todo' | 'quote') => {
+    const turnBlockInto = useCallback((block: BlockHandleInfo, target: TurnIntoTarget) => {
         if (!editor) return;
         const live = getLiveBlock(block);
         if (!live || !TEXT_TURN_TYPES.has(live.node.type.name)) return;
 
         const { node, pos } = live;
         const attrs = { ...(node.attrs as Record<string, any>) };
+        const schema = editor.state.schema;
+
+        if (target === 'code') {
+            delete attrs.level;
+            const text = node.textContent || '';
+            const codeContent = text ? schema.text(text) : null;
+            const codeBlock = schema.nodes.codeBlock.create(attrs, codeContent);
+            editor.view.dispatch(editor.state.tr.replaceWith(pos, pos + node.nodeSize, codeBlock).scrollIntoView());
+            closeBlockMenu();
+            return;
+        }
+
+        if (target === 'callout') {
+            delete attrs.level;
+            const innerParagraph = schema.nodes.paragraph.create(
+                { blockId: createBlockId() },
+                node.content,
+            );
+            const callout = schema.nodes.calloutBlock.create(
+                { ...attrs, icon: '!', tone: 'yellow' },
+                [innerParagraph],
+            );
+            editor.view.dispatch(editor.state.tr.replaceWith(pos, pos + node.nodeSize, callout).scrollIntoView());
+            closeBlockMenu();
+            return;
+        }
+
+        if (target === 'toggle') {
+            delete attrs.level;
+            const title = node.textContent.trim() || 'Toggle';
+            const toggle = schema.nodes.toggleBlock.create(
+                { ...attrs, title, open: true },
+                [schema.nodes.paragraph.create({ blockId: createBlockId() })],
+            );
+            editor.view.dispatch(editor.state.tr.replaceWith(pos, pos + node.nodeSize, toggle).scrollIntoView());
+            closeBlockMenu();
+            return;
+        }
 
         if (target === 'paragraph') {
             delete attrs.level;
@@ -2724,7 +2763,7 @@ const BlockHandleLayer = ({
     onDuplicate: (block: BlockHandleInfo) => void;
     onCopyContent: (block: BlockHandleInfo) => void;
     onDelete: (block: BlockHandleInfo) => void;
-    onTurnInto: (block: BlockHandleInfo, target: 'paragraph' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'todo' | 'quote') => void;
+    onTurnInto: (block: BlockHandleInfo, target: TurnIntoTarget) => void;
     onCopyLink: (block: BlockHandleInfo) => void;
     onOpenComments: (block: BlockHandleInfo) => void;
     onDragStart: (event: React.MouseEvent, block: BlockHandleInfo) => void;
@@ -2779,7 +2818,7 @@ const BlockHandleLayer = ({
 
                 {menuOpen && (
                     <div
-                        className="absolute left-8 top-0 w-56 rounded-lg border border-gray-200 bg-white p-1 shadow-xl"
+                        className="absolute left-8 top-0 max-h-[360px] w-56 overflow-y-auto rounded-lg border border-gray-200 bg-white p-1 shadow-xl"
                         onMouseDown={(event) => event.preventDefault()}
                     >
                         <button className={menuButtonClass} disabled={!block.canMoveUp} onClick={() => onMove(block, 'up')}>
@@ -2829,6 +2868,15 @@ const BlockHandleLayer = ({
                                 </button>
                                 <button className={menuButtonClass} onClick={() => onTurnInto(block, 'quote')}>
                                     <Quote className="h-3.5 w-3.5" /> 引用
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'code')}>
+                                    <Code className="h-3.5 w-3.5" /> 代码块
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'toggle')}>
+                                    <ChevronRight className="h-3.5 w-3.5" /> Toggle
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'callout')}>
+                                    <AlertTriangle className="h-3.5 w-3.5" /> Callout
                                 </button>
                             </>
                         )}
