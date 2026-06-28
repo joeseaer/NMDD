@@ -87,7 +87,7 @@ const BLOCK_ID_TYPES = [
 
 const LIST_CONTAINER_TYPES = new Set(['bulletList', 'orderedList', 'taskList']);
 const LIST_ITEM_TYPES = new Set(['listItem', 'taskItem']);
-const TEXT_TURN_TYPES = new Set(['paragraph', 'heading']);
+const TEXT_TURN_TYPES = new Set(['paragraph', 'heading', 'blockquote', 'codeBlock']);
 const TEXT_STYLE_BLOCK_TYPES = new Set(['paragraph', 'heading', 'blockquote', 'codeBlock', 'listItem', 'taskItem']);
 const TABLE_CELL_BACKGROUND_ATTRIBUTE = 'backgroundColor';
 const BLOCK_TEXT_COLOR_ATTRIBUTE = 'blockTextColor';
@@ -565,6 +565,48 @@ const createEmptySiblingBlock = (editor: any, sourceNode: ProseMirrorNode) => {
     }
 
     return createEmptyTextBlock(schema);
+};
+
+const getTextTurnAttrs = (node: ProseMirrorNode) => {
+    const attrs = { ...(node.attrs as Record<string, any>) };
+    delete attrs.level;
+    delete attrs.checked;
+    return attrs;
+};
+
+const getTextTurnInlineContent = (schema: any, node: ProseMirrorNode) => {
+    if (node.type.name === 'paragraph' || node.type.name === 'heading') return node.content;
+
+    const text = node.textBetween(0, node.content.size, '\n');
+    return text ? schema.text(text) : null;
+};
+
+const createTextTurnParagraph = (schema: any, node: ProseMirrorNode, attrs: Record<string, any>) => (
+    schema.nodes.paragraph.create(attrs, getTextTurnInlineContent(schema, node))
+);
+
+const createTextTurnList = (schema: any, node: ProseMirrorNode, attrs: Record<string, any>, target: Extract<TurnIntoTarget, 'bullet' | 'ordered' | 'todo'>) => {
+    const listType = target === 'ordered'
+        ? schema.nodes.orderedList
+        : target === 'todo'
+            ? schema.nodes.taskList
+            : schema.nodes.bulletList;
+    const itemType = target === 'todo' ? schema.nodes.taskItem : schema.nodes.listItem;
+    const itemAttrs = target === 'todo' ? { ...attrs, checked: false } : attrs;
+    const paragraph = schema.nodes.paragraph.create(
+        { blockId: createBlockId() },
+        getTextTurnInlineContent(schema, node),
+    );
+
+    return listType.create(
+        { blockId: createBlockId() },
+        itemType.create(itemAttrs, paragraph),
+    );
+};
+
+const createTextTurnContainerContent = (schema: any, node: ProseMirrorNode) => {
+    if (node.type.name === 'blockquote') return node.content;
+    return [schema.nodes.paragraph.create({ blockId: createBlockId() }, getTextTurnInlineContent(schema, node))];
 };
 
 const getBlockElementScore = (element: HTMLElement) => {
@@ -2536,72 +2578,65 @@ export const SmartDocumentEditor = ({
         if (!live || !TEXT_TURN_TYPES.has(live.node.type.name)) return;
 
         const { node, pos } = live;
-        const attrs = { ...(node.attrs as Record<string, any>) };
         const schema = editor.state.schema;
+        const attrs = getTextTurnAttrs(node);
+
+        const replaceCurrentBlock = (nextNode: ProseMirrorNode) => {
+            editor.view.dispatch(editor.state.tr.replaceWith(pos, pos + node.nodeSize, nextNode).scrollIntoView());
+            closeBlockMenu();
+        };
 
         if (target === 'code') {
-            delete attrs.level;
             const text = node.textContent || '';
             const codeContent = text ? schema.text(text) : null;
-            const codeBlock = schema.nodes.codeBlock.create(attrs, codeContent);
-            editor.view.dispatch(editor.state.tr.replaceWith(pos, pos + node.nodeSize, codeBlock).scrollIntoView());
-            closeBlockMenu();
+            replaceCurrentBlock(schema.nodes.codeBlock.create(attrs, codeContent));
             return;
         }
 
         if (target === 'callout') {
-            delete attrs.level;
-            const innerParagraph = schema.nodes.paragraph.create(
-                { blockId: createBlockId() },
-                node.content,
-            );
             const callout = schema.nodes.calloutBlock.create(
                 { ...attrs, icon: '!', tone: 'yellow' },
-                [innerParagraph],
+                createTextTurnContainerContent(schema, node),
             );
-            editor.view.dispatch(editor.state.tr.replaceWith(pos, pos + node.nodeSize, callout).scrollIntoView());
-            closeBlockMenu();
+            replaceCurrentBlock(callout);
             return;
         }
 
         if (target === 'toggle') {
-            delete attrs.level;
             const title = node.textContent.trim() || 'Toggle';
             const toggle = schema.nodes.toggleBlock.create(
                 { ...attrs, title, open: true },
                 [schema.nodes.paragraph.create({ blockId: createBlockId() })],
             );
-            editor.view.dispatch(editor.state.tr.replaceWith(pos, pos + node.nodeSize, toggle).scrollIntoView());
-            closeBlockMenu();
+            replaceCurrentBlock(toggle);
             return;
         }
 
         if (target === 'paragraph') {
-            delete attrs.level;
-            const tr = editor.state.tr.setNodeMarkup(pos, editor.state.schema.nodes.paragraph, attrs, node.marks);
-            editor.view.dispatch(tr.scrollIntoView());
-            closeBlockMenu();
+            replaceCurrentBlock(createTextTurnParagraph(schema, node, attrs));
             return;
         }
 
         if (target === 'h1' || target === 'h2' || target === 'h3') {
             const level = target === 'h1' ? 1 : target === 'h2' ? 2 : 3;
-            const tr = editor.state.tr.setNodeMarkup(pos, editor.state.schema.nodes.heading, {
+            replaceCurrentBlock(schema.nodes.heading.create({
                 ...attrs,
                 level,
-            }, node.marks);
-            editor.view.dispatch(tr.scrollIntoView());
-            closeBlockMenu();
+            }, getTextTurnInlineContent(schema, node)));
             return;
         }
 
-        const chain = editor.chain().focus(pos + 1);
-        if (node.type.name === 'heading') chain.setParagraph();
-        if (target === 'bullet') chain.toggleBulletList().run();
-        if (target === 'ordered') chain.toggleOrderedList().run();
-        if (target === 'todo') chain.toggleTaskList().run();
-        if (target === 'quote') chain.toggleBlockquote().run();
-        closeBlockMenu();
+        if (target === 'bullet' || target === 'ordered' || target === 'todo') {
+            replaceCurrentBlock(createTextTurnList(schema, node, attrs, target));
+            return;
+        }
+
+        if (target === 'quote') {
+            replaceCurrentBlock(schema.nodes.blockquote.create(
+                attrs,
+                createTextTurnContainerContent(schema, node),
+            ));
+        }
     }, [closeBlockMenu, editor, getLiveBlock]);
 
     const copyBlockLink = useCallback(async (block: BlockHandleInfo) => {
