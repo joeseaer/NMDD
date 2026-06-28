@@ -1184,6 +1184,8 @@ const NotionImageComponent = (props: any) => {
     const fileInputRef = React.useRef<HTMLInputElement | null>(null);
     const [width, setWidth] = useState(normalizeImageWidth(node.attrs.width));
     const [resizing, setResizing] = useState(false);
+    const [hovered, setHovered] = useState(false);
+    const [focusWithin, setFocusWithin] = useState(false);
     const [showCaption, setShowCaption] = useState(Boolean(node.attrs.caption));
     const [previewOpen, setPreviewOpen] = useState(false);
 
@@ -1296,7 +1298,14 @@ const NotionImageComponent = (props: any) => {
         link.click();
     };
 
-    const toolbarVisible = selected || resizing;
+    const controlsVisible = selected || resizing || hovered || focusWithin;
+
+    const handleBlurCapture = (event: React.FocusEvent<HTMLElement>) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+            setFocusWithin(false);
+        }
+    };
 
     return (
         <NodeViewWrapper
@@ -1314,6 +1323,10 @@ const NotionImageComponent = (props: any) => {
                 ...getImageAlignmentStyle(align),
             }}
             ref={wrapperRef}
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+            onFocusCapture={() => setFocusWithin(true)}
+            onBlurCapture={handleBlurCapture}
         >
             <div className={`relative ${shapeClass} ${selected ? 'ring-2 ring-primary/80 ring-offset-2' : ''}`}>
                 <div
@@ -1339,107 +1352,105 @@ const NotionImageComponent = (props: any) => {
                     />
                 </div>
 
-                <div
-                    className={`absolute left-0 top-1/2 h-16 w-1.5 -translate-x-2 -translate-y-1/2 cursor-ew-resize rounded-full bg-gray-900 transition-opacity ${
-                        toolbarVisible ? 'opacity-90' : 'opacity-0 group-hover:opacity-80'
-                    }`}
-                    aria-hidden="true"
-                    data-smart-doc-ui="resize-handle"
-                    onMouseDown={(event) => handleResizeMouseDown(event, 'left')}
-                    title="拖拽调整宽度"
-                />
-                <div
-                    className={`absolute right-0 top-1/2 h-16 w-1.5 translate-x-2 -translate-y-1/2 cursor-ew-resize rounded-full bg-gray-900 transition-opacity ${
-                        toolbarVisible ? 'opacity-90' : 'opacity-0 group-hover:opacity-80'
-                    }`}
-                    aria-hidden="true"
-                    data-smart-doc-ui="resize-handle"
-                    onMouseDown={(event) => handleResizeMouseDown(event, 'right')}
-                    title="拖拽调整宽度"
-                />
-
-                <div
-                    className={`absolute right-2 top-2 z-10 flex max-w-[min(680px,calc(100vw-3rem))] items-center gap-1 overflow-x-auto rounded-md border border-gray-200 bg-white/95 p-1 shadow-lg backdrop-blur transition-opacity ${
-                        toolbarVisible ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
-                    }`}
-                    contentEditable={false}
-                    data-smart-doc-ui="image-toolbar"
-                    role="toolbar"
-                    aria-label="图片操作"
-                >
-                    <ImageActionButton title="左对齐" active={align === 'left'} onClick={() => updateAttributes({ align: 'left' })}>
-                        <AlignLeft className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="居中" active={align === 'center'} onClick={() => updateAttributes({ align: 'center' })}>
-                        <AlignCenter className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="右对齐" active={align === 'right'} onClick={() => updateAttributes({ align: 'right' })}>
-                        <AlignRight className="h-4 w-4" />
-                    </ImageActionButton>
-                    {[50, 75, 100].map((percent) => (
-                        <ImageActionButton
-                            key={percent}
-                            title={`${percent}% 宽度`}
-                            label={String(percent)}
-                            active={width === `${percent}%`}
-                            onClick={() => commitWidth(`${percent}%`)}
+                {controlsVisible && (
+                    <>
+                        <div
+                            className="absolute left-0 top-1/2 h-16 w-1.5 -translate-x-2 -translate-y-1/2 cursor-ew-resize rounded-full bg-gray-900 opacity-90"
+                            aria-hidden="true"
+                            data-smart-doc-ui="resize-handle"
+                            onMouseDown={(event) => handleResizeMouseDown(event, 'left')}
+                            title="拖拽调整宽度"
                         />
-                    ))}
-                    <ImageActionButton
-                        title="原始比例"
-                        label="原"
-                        active={!aspectRatio && shape === 'rounded'}
-                        onClick={() => updateAttributes({ aspectRatio: '', fit: 'contain', shape: 'rounded' })}
-                    />
-                    <ImageActionButton
-                        title="裁剪 16:9"
-                        label="16:9"
-                        active={aspectRatio === '16 / 9' && fit === 'cover'}
-                        onClick={() => updateAttributes({ aspectRatio: '16 / 9', fit: 'cover', shape: 'rounded' })}
-                    />
-                    <ImageActionButton
-                        title="裁剪 1:1"
-                        label="1:1"
-                        active={aspectRatio === '1 / 1' && fit === 'cover' && shape !== 'circle'}
-                        onClick={() => updateAttributes({ aspectRatio: '1 / 1', fit: 'cover', shape: 'rounded' })}
-                    />
-                    <ImageActionButton
-                        title="圆形遮罩"
-                        label="圆"
-                        active={shape === 'circle'}
-                        onClick={() => updateAttributes({ aspectRatio: '1 / 1', fit: 'cover', shape: 'circle' })}
-                    />
-                    <ImageActionButton title="添加说明" active={showCaption || Boolean(caption)} onClick={() => setShowCaption(true)}>
-                        <Captions className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="替换图片" onClick={() => fileInputRef.current?.click()}>
-                        <ImagePlus className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="Alt 文本" label="ALT" active={Boolean(alt)} onClick={promptAltText} />
-                    <ImageActionButton title="图片链接" active={Boolean(link)} onClick={promptImageLink}>
-                        <LinkIcon className="h-4 w-4" />
-                    </ImageActionButton>
-                    {link && (
-                        <ImageActionButton title="打开图片链接" onClick={openImageLink}>
-                            <ExternalLink className="h-4 w-4" />
-                        </ImageActionButton>
-                    )}
-                    <ImageActionButton title="复制图片链接" onClick={copyImageLink}>
-                        <Copy className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="查看原图" onClick={() => window.open(src, '_blank', 'noopener,noreferrer')}>
-                        <ExternalLink className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="全屏预览" onClick={() => setPreviewOpen(true)}>
-                        <Maximize2 className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="下载" onClick={downloadImage}>
-                        <Download className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="删除" danger onClick={() => deleteNode?.()}>
-                        <Trash2 className="h-4 w-4" />
-                    </ImageActionButton>
-                </div>
+                        <div
+                            className="absolute right-0 top-1/2 h-16 w-1.5 translate-x-2 -translate-y-1/2 cursor-ew-resize rounded-full bg-gray-900 opacity-90"
+                            aria-hidden="true"
+                            data-smart-doc-ui="resize-handle"
+                            onMouseDown={(event) => handleResizeMouseDown(event, 'right')}
+                            title="拖拽调整宽度"
+                        />
+
+                        <div
+                            className="absolute right-2 top-2 z-10 flex max-w-[min(680px,calc(100vw-3rem))] items-center gap-1 overflow-x-auto rounded-md border border-gray-200 bg-white/95 p-1 opacity-100 shadow-lg backdrop-blur"
+                            contentEditable={false}
+                            data-smart-doc-ui="image-toolbar"
+                            role="toolbar"
+                            aria-label="图片操作"
+                        >
+                            <ImageActionButton title="左对齐" active={align === 'left'} onClick={() => updateAttributes({ align: 'left' })}>
+                                <AlignLeft className="h-4 w-4" />
+                            </ImageActionButton>
+                            <ImageActionButton title="居中" active={align === 'center'} onClick={() => updateAttributes({ align: 'center' })}>
+                                <AlignCenter className="h-4 w-4" />
+                            </ImageActionButton>
+                            <ImageActionButton title="右对齐" active={align === 'right'} onClick={() => updateAttributes({ align: 'right' })}>
+                                <AlignRight className="h-4 w-4" />
+                            </ImageActionButton>
+                            {[50, 75, 100].map((percent) => (
+                                <ImageActionButton
+                                    key={percent}
+                                    title={`${percent}% 宽度`}
+                                    label={String(percent)}
+                                    active={width === `${percent}%`}
+                                    onClick={() => commitWidth(`${percent}%`)}
+                                />
+                            ))}
+                            <ImageActionButton
+                                title="原始比例"
+                                label="原"
+                                active={!aspectRatio && shape === 'rounded'}
+                                onClick={() => updateAttributes({ aspectRatio: '', fit: 'contain', shape: 'rounded' })}
+                            />
+                            <ImageActionButton
+                                title="裁剪 16:9"
+                                label="16:9"
+                                active={aspectRatio === '16 / 9' && fit === 'cover'}
+                                onClick={() => updateAttributes({ aspectRatio: '16 / 9', fit: 'cover', shape: 'rounded' })}
+                            />
+                            <ImageActionButton
+                                title="裁剪 1:1"
+                                label="1:1"
+                                active={aspectRatio === '1 / 1' && fit === 'cover' && shape !== 'circle'}
+                                onClick={() => updateAttributes({ aspectRatio: '1 / 1', fit: 'cover', shape: 'rounded' })}
+                            />
+                            <ImageActionButton
+                                title="圆形遮罩"
+                                label="圆"
+                                active={shape === 'circle'}
+                                onClick={() => updateAttributes({ aspectRatio: '1 / 1', fit: 'cover', shape: 'circle' })}
+                            />
+                            <ImageActionButton title="添加说明" active={showCaption || Boolean(caption)} onClick={() => setShowCaption(true)}>
+                                <Captions className="h-4 w-4" />
+                            </ImageActionButton>
+                            <ImageActionButton title="替换图片" onClick={() => fileInputRef.current?.click()}>
+                                <ImagePlus className="h-4 w-4" />
+                            </ImageActionButton>
+                            <ImageActionButton title="Alt 文本" label="ALT" active={Boolean(alt)} onClick={promptAltText} />
+                            <ImageActionButton title="图片链接" active={Boolean(link)} onClick={promptImageLink}>
+                                <LinkIcon className="h-4 w-4" />
+                            </ImageActionButton>
+                            {link && (
+                                <ImageActionButton title="打开图片链接" onClick={openImageLink}>
+                                    <ExternalLink className="h-4 w-4" />
+                                </ImageActionButton>
+                            )}
+                            <ImageActionButton title="复制图片链接" onClick={copyImageLink}>
+                                <Copy className="h-4 w-4" />
+                            </ImageActionButton>
+                            <ImageActionButton title="查看原图" onClick={() => window.open(src, '_blank', 'noopener,noreferrer')}>
+                                <ExternalLink className="h-4 w-4" />
+                            </ImageActionButton>
+                            <ImageActionButton title="全屏预览" onClick={() => setPreviewOpen(true)}>
+                                <Maximize2 className="h-4 w-4" />
+                            </ImageActionButton>
+                            <ImageActionButton title="下载" onClick={downloadImage}>
+                                <Download className="h-4 w-4" />
+                            </ImageActionButton>
+                            <ImageActionButton title="删除" danger onClick={() => deleteNode?.()}>
+                                <Trash2 className="h-4 w-4" />
+                            </ImageActionButton>
+                        </div>
+                    </>
+                )}
 
                 <input
                     ref={fileInputRef}
@@ -1497,6 +1508,8 @@ const NotionImageComponent = (props: any) => {
 const NotionMediaComponent = (props: any) => {
     const { node, updateAttributes, selected, deleteNode, editor } = props;
     const fileInputRef = React.useRef<HTMLInputElement | null>(null);
+    const [hovered, setHovered] = useState(false);
+    const [focusWithin, setFocusWithin] = useState(false);
 
     const url = node.attrs.url || '';
     const kind = normalizeMediaKind(node.attrs.kind);
@@ -1610,6 +1623,15 @@ const NotionMediaComponent = (props: any) => {
         return null;
     };
 
+    const controlsVisible = selected || hovered || focusWithin;
+
+    const handleBlurCapture = (event: React.FocusEvent<HTMLElement>) => {
+        const nextTarget = event.relatedTarget;
+        if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
+            setFocusWithin(false);
+        }
+    };
+
     return (
         <NodeViewWrapper
             className={`smart-doc-media group relative my-3 overflow-hidden rounded-md border bg-white transition-colors ${
@@ -1628,6 +1650,10 @@ const NotionMediaComponent = (props: any) => {
                     ? encodeURIComponent(JSON.stringify(normalizeBlockComments(node.attrs.blockComments)))
                     : undefined
             }
+            onMouseEnter={() => setHovered(true)}
+            onMouseLeave={() => setHovered(false)}
+            onFocusCapture={() => setFocusWithin(true)}
+            onBlurCapture={handleBlurCapture}
         >
             <div className="flex items-start gap-3 px-3 py-3" contentEditable={false}>
                 <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-md border border-gray-200 bg-gray-50 text-gray-500">
@@ -1643,33 +1669,33 @@ const NotionMediaComponent = (props: any) => {
                     />
                     <div className="truncate text-xs text-gray-400">{meta || url}</div>
                 </div>
-                <div
-                    className={`flex flex-shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white/95 p-1 shadow-sm transition-opacity ${
-                        selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
-                    }`}
-                    data-smart-doc-ui="media-toolbar"
-                    role="toolbar"
-                    aria-label="媒体操作"
-                >
-                    <ImageActionButton title="替换文件" onClick={() => fileInputRef.current?.click()}>
-                        <RefreshCw className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="替换链接" onClick={replaceMediaUrl}>
-                        <LinkIcon className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="复制链接" onClick={copyMediaLink}>
-                        <Copy className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="打开原文件" onClick={() => url && window.open(url, '_blank', 'noopener,noreferrer')}>
-                        <ExternalLink className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="下载" onClick={downloadMedia}>
-                        <Download className="h-4 w-4" />
-                    </ImageActionButton>
-                    <ImageActionButton title="删除" danger onClick={() => deleteNode?.()}>
-                        <Trash2 className="h-4 w-4" />
-                    </ImageActionButton>
-                </div>
+                {controlsVisible && (
+                    <div
+                        className="flex flex-shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white/95 p-1 opacity-100 shadow-sm"
+                        data-smart-doc-ui="media-toolbar"
+                        role="toolbar"
+                        aria-label="媒体操作"
+                    >
+                        <ImageActionButton title="替换文件" onClick={() => fileInputRef.current?.click()}>
+                            <RefreshCw className="h-4 w-4" />
+                        </ImageActionButton>
+                        <ImageActionButton title="替换链接" onClick={replaceMediaUrl}>
+                            <LinkIcon className="h-4 w-4" />
+                        </ImageActionButton>
+                        <ImageActionButton title="复制链接" onClick={copyMediaLink}>
+                            <Copy className="h-4 w-4" />
+                        </ImageActionButton>
+                        <ImageActionButton title="打开原文件" onClick={() => url && window.open(url, '_blank', 'noopener,noreferrer')}>
+                            <ExternalLink className="h-4 w-4" />
+                        </ImageActionButton>
+                        <ImageActionButton title="下载" onClick={downloadMedia}>
+                            <Download className="h-4 w-4" />
+                        </ImageActionButton>
+                        <ImageActionButton title="删除" danger onClick={() => deleteNode?.()}>
+                            <Trash2 className="h-4 w-4" />
+                        </ImageActionButton>
+                    </div>
+                )}
             </div>
 
             {renderPreview()}
