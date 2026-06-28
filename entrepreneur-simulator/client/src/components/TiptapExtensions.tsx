@@ -22,7 +22,7 @@ import {
   Bold, Heading1, Heading2, Heading3, Italic, List, ListOrdered, CheckSquare,
   Quote, Minus, Code, Layout, Image as ImageIcon, Strikethrough,
   Type, Network, ChevronRight, AlertTriangle, Bookmark, Globe,
-  Paperclip, Video, Music, FileText, Sigma, RefreshCw, CalendarDays, X, ExternalLink,
+  Paperclip, Video, Music, FileText, Sigma, RefreshCw, CalendarDays, X, ExternalLink, Copy, Unlink,
   Database, Plus, Trash2, Table as TableIcon
 } from 'lucide-react';
 import { MindMapComponent } from './MindMapExtension';
@@ -1131,6 +1131,92 @@ const createSyncedContentFragment = (node: any, schema: any) => {
   return Fragment.fromArray(contentJson.map((child) => schema.nodeFromJSON(child)));
 };
 
+const refreshSyncedCloneRuntimeAttrs = (value: any): any => {
+  if (Array.isArray(value)) return value.map(refreshSyncedCloneRuntimeAttrs);
+  if (!value || typeof value !== 'object') return value;
+
+  const next: any = { ...value };
+  if (next.attrs && typeof next.attrs === 'object') {
+    next.attrs = { ...next.attrs };
+    if (next.attrs.blockId) next.attrs.blockId = createSmartDocumentId('blk');
+    if (next.attrs.blockComments) delete next.attrs.blockComments;
+  }
+  if (Array.isArray(next.content)) next.content = next.content.map(refreshSyncedCloneRuntimeAttrs);
+  return next;
+};
+
+const createSyncedBlockCloneJson = (node: any, syncIdOverride?: string) => {
+  const json = refreshSyncedCloneRuntimeAttrs(node.toJSON());
+  if (!json.attrs) json.attrs = {};
+  json.attrs.syncId = syncIdOverride || node.attrs.syncId || createSyncedBlockId();
+  return json;
+};
+
+const SyncedBlockView = ({ node, editor, getPos, updateAttributes, selected }: any) => {
+  const syncId = String(node.attrs.syncId || '');
+  const commentsAttr = getNodeViewCommentsAttr(node.attrs);
+  const shortId = syncId ? syncId.replace(/^sync_/, '').slice(-6) : 'new';
+
+  const copySyncedBlock = () => {
+    if (!editor || typeof getPos !== 'function') return;
+    const nextSyncId = syncId || createSyncedBlockId();
+    if (!syncId) updateAttributes({ syncId: nextSyncId });
+    const insertAt = getPos() + node.nodeSize;
+    editor.chain().focus().insertContentAt(insertAt, createSyncedBlockCloneJson(node, nextSyncId)).run();
+  };
+
+  const unsyncBlock = () => {
+    updateAttributes({ syncId: createSyncedBlockId() });
+  };
+
+  return (
+    <NodeViewWrapper
+      className={`smart-doc-synced-block my-3 rounded-md border bg-white transition-colors ${
+        selected ? 'border-blue-300 shadow-sm ring-1 ring-blue-100' : 'border-gray-200 hover:border-gray-300'
+      }`}
+      data-type="synced-block"
+      data-sync-id={syncId || undefined}
+      data-block-id={node.attrs.blockId || undefined}
+      data-comments={commentsAttr}
+      id={blockDomId(node.attrs.blockId)}
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-blue-100 bg-blue-50/60 px-3 py-1.5" contentEditable={false}>
+        <div className="flex min-w-0 items-center gap-2 text-xs font-medium text-blue-700">
+          <RefreshCw className="h-3.5 w-3.5 flex-shrink-0" />
+          <span className="truncate">同步块</span>
+          <span className="rounded bg-white/80 px-1.5 py-0.5 font-mono text-[10px] text-blue-500">{shortId}</span>
+        </div>
+        <div className="flex flex-shrink-0 items-center gap-1">
+          <button
+            type="button"
+            title="复制同步副本"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={copySyncedBlock}
+            className="flex h-6 items-center gap-1 rounded px-1.5 text-[11px] font-medium text-blue-700 hover:bg-white"
+          >
+            <Copy className="h-3.5 w-3.5" />
+            同步副本
+          </button>
+          <button
+            type="button"
+            title="解绑当前块"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={unsyncBlock}
+            className="flex h-6 items-center gap-1 rounded px-1.5 text-[11px] font-medium text-gray-500 hover:bg-white hover:text-gray-800"
+          >
+            <Unlink className="h-3.5 w-3.5" />
+            解绑
+          </button>
+        </div>
+      </div>
+      <NodeViewContent
+        data-synced-content="true"
+        className="px-3 py-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0"
+      />
+    </NodeViewWrapper>
+  );
+};
+
 export const SyncedBlock = Node.create({
   name: 'syncedBlock',
   group: 'block',
@@ -1162,6 +1248,10 @@ export const SyncedBlock = Node.create({
       ['div', { contenteditable: 'false', class: 'border-b border-gray-100 px-3 py-1.5 text-xs font-medium text-gray-500' }, '同步块'],
       ['div', { 'data-synced-content': 'true', class: 'px-3 py-2 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0' }, 0],
     ]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(SyncedBlockView)
   },
 
   addProseMirrorPlugins() {
