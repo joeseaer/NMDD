@@ -326,11 +326,13 @@ type BlockHandleInfo = {
     height: number;
 };
 
+type BlockDropPlacement = 'before' | 'after' | 'inside-start' | 'inside-end';
+
 type DragBlockState = {
     source: BlockHandleInfo;
     drop?: {
         target: BlockHandleInfo;
-        placement: 'before' | 'after';
+        placement: BlockDropPlacement;
         top: number;
         left: number;
         width: number;
@@ -700,8 +702,76 @@ const copyTextToClipboard = async (text: string) => {
     return copied;
 };
 
-const canMoveBlockToTarget = (editor: any, sourceBlock: BlockHandleInfo, targetBlock: BlockHandleInfo, placement: 'before' | 'after') => {
+const isInsideColumnPlacement = (placement: BlockDropPlacement) => placement === 'inside-start' || placement === 'inside-end';
+
+const isEmptyParagraphNode = (node: ProseMirrorNode) => {
+    return node.type.name === 'paragraph' && node.content.size === 0;
+};
+
+const getColumnDropPlan = (editor: any, sourceBlock: BlockHandleInfo, targetBlock: BlockHandleInfo, placement: BlockDropPlacement) => {
+    if (!editor || !isInsideColumnPlacement(placement) || targetBlock.nodeType !== 'column') return null;
+
+    const source = findBlockById(editor, sourceBlock.id);
+    const target = findBlockById(editor, targetBlock.id);
+    if (!source || !target || target.node.type.name !== 'column') return null;
+    if (sourceBlock.id === targetBlock.id) return null;
+    if (target.pos > source.pos && target.pos < source.pos + source.node.nodeSize) return null;
+
+    const sourceContext = getBlockContext(editor, source.pos);
+    const sourceIsAlreadyOnlyChild = sourceContext.parent.attrs?.blockId === targetBlock.id && sourceContext.parent.childCount <= 1;
+    if (sourceIsAlreadyOnlyChild) return null;
+
+    const shouldReplaceEmptyPlaceholder = (
+        sourceContext.parent.attrs?.blockId !== targetBlock.id &&
+        target.node.childCount === 1 &&
+        isEmptyParagraphNode(target.node.child(0))
+    );
+
+    if (shouldReplaceEmptyPlaceholder) {
+        if (!target.node.canReplaceWith(0, 1, source.node.type, source.node.marks)) return null;
+        const from = target.pos + 1;
+        return {
+            insertPos: from,
+            replaceFrom: from,
+            replaceTo: from + target.node.child(0).nodeSize,
+        };
+    }
+
+    const insertIndex = placement === 'inside-start' ? 0 : target.node.childCount;
+    if (!target.node.canReplaceWith(insertIndex, insertIndex, source.node.type, source.node.marks)) return null;
+
+    return {
+        insertPos: placement === 'inside-start' ? target.pos + 1 : target.pos + target.node.nodeSize - 1,
+        replaceFrom: null,
+        replaceTo: null,
+    };
+};
+
+const getColumnPlaceholderDropPlan = (editor: any, sourceBlock: BlockHandleInfo, targetBlock: BlockHandleInfo) => {
+    if (!editor || sourceBlock.id === targetBlock.id || targetBlock.nodeType !== 'paragraph') return null;
+
+    const source = findBlockById(editor, sourceBlock.id);
+    const target = findBlockById(editor, targetBlock.id);
+    if (!source || !target || !isEmptyParagraphNode(target.node)) return null;
+
+    const targetContext = getBlockContext(editor, target.pos);
+    if (targetContext.parent.type.name !== 'column' || targetContext.parent.childCount !== 1) return null;
+
+    const sourceContext = getBlockContext(editor, source.pos);
+    if (sourceContext.parent.attrs?.blockId === targetContext.parent.attrs?.blockId) return null;
+    if (!targetContext.parent.canReplaceWith(targetContext.index, targetContext.index + 1, source.node.type, source.node.marks)) return null;
+
+    return {
+        insertPos: target.pos,
+        replaceFrom: target.pos,
+        replaceTo: target.pos + target.node.nodeSize,
+    };
+};
+
+const canMoveBlockToTarget = (editor: any, sourceBlock: BlockHandleInfo, targetBlock: BlockHandleInfo, placement: BlockDropPlacement) => {
     if (!editor || sourceBlock.id === targetBlock.id) return false;
+    if (isInsideColumnPlacement(placement)) return Boolean(getColumnDropPlan(editor, sourceBlock, targetBlock, placement));
+    if (getColumnPlaceholderDropPlan(editor, sourceBlock, targetBlock)) return true;
 
     const source = findBlockById(editor, sourceBlock.id);
     const target = findBlockById(editor, targetBlock.id);
@@ -713,6 +783,30 @@ const canMoveBlockToTarget = (editor: any, sourceBlock: BlockHandleInfo, targetB
     const targetContext = getBlockContext(editor, target.pos);
     const insertIndex = placement === 'before' ? targetContext.index : targetContext.index + 1;
     return targetContext.parent.canReplaceWith(insertIndex, insertIndex, source.node.type, source.node.marks);
+};
+
+const getBlockDropPlacement = (target: BlockHandleInfo, clientY: number, shellTop: number): BlockDropPlacement => {
+    if (target.nodeType === 'column') {
+        return clientY < target.top + shellTop + target.height / 2 ? 'inside-start' : 'inside-end';
+    }
+
+    return clientY < target.top + shellTop + target.height / 2 ? 'before' : 'after';
+};
+
+const getBlockDropIndicator = (target: BlockHandleInfo, placement: BlockDropPlacement) => {
+    if (isInsideColumnPlacement(placement)) {
+        return {
+            top: placement === 'inside-start' ? target.top + 8 : target.top + Math.max(8, target.height - 8),
+            left: target.left + 52,
+            width: Math.max(24, target.width - 16),
+        };
+    }
+
+    return {
+        top: placement === 'before' ? target.top : target.top + target.height,
+        left: target.left + 44,
+        width: target.width,
+    };
 };
 
 const deleteSourceForMove = (editor: any, tr: any, source: { node: ProseMirrorNode; pos: number; context: ReturnType<typeof getBlockContext> }) => {
@@ -1898,7 +1992,7 @@ export const SmartDocumentEditor = ({
         closeBlockMenu();
     }, [closeBlockMenu, editor, getLiveBlock]);
 
-    const moveBlockToTarget = useCallback((sourceBlock: BlockHandleInfo, targetBlock: BlockHandleInfo, placement: 'before' | 'after') => {
+    const moveBlockToTarget = useCallback((sourceBlock: BlockHandleInfo, targetBlock: BlockHandleInfo, placement: BlockDropPlacement) => {
         if (!editor || !shellRef.current || sourceBlock.id === targetBlock.id) return;
 
         const source = getLiveBlock(sourceBlock);
@@ -1908,6 +2002,37 @@ export const SmartDocumentEditor = ({
         const sourceInfo = getBlockInfoById(editor, sourceBlock.id, shellRef.current as HTMLElement);
         const targetInfo = getBlockInfoById(editor, targetBlock.id, shellRef.current as HTMLElement);
         if (!sourceInfo || !targetInfo || !canMoveBlockToTarget(editor, sourceInfo, targetInfo, placement)) return;
+
+        if (isInsideColumnPlacement(placement)) {
+            const plan = getColumnDropPlan(editor, sourceInfo, targetInfo, placement);
+            if (!plan) return;
+            if (plan.insertPos >= source.pos && plan.insertPos <= source.pos + source.node.nodeSize) return;
+
+            const tr = editor.state.tr;
+            deleteSourceForMove(editor, tr, source);
+
+            if (plan.replaceFrom !== null && plan.replaceTo !== null) {
+                tr.replaceWith(tr.mapping.map(plan.replaceFrom), tr.mapping.map(plan.replaceTo), source.node);
+            } else {
+                tr.insert(tr.mapping.map(plan.insertPos), source.node);
+            }
+
+            editor.view.dispatch(tr.scrollIntoView());
+            closeBlockMenu();
+            return;
+        }
+
+        const placeholderPlan = getColumnPlaceholderDropPlan(editor, sourceInfo, targetInfo);
+        if (placeholderPlan) {
+            if (placeholderPlan.insertPos >= source.pos && placeholderPlan.insertPos <= source.pos + source.node.nodeSize) return;
+
+            const tr = editor.state.tr;
+            deleteSourceForMove(editor, tr, source);
+            tr.replaceWith(tr.mapping.map(placeholderPlan.replaceFrom), tr.mapping.map(placeholderPlan.replaceTo), source.node);
+            editor.view.dispatch(tr.scrollIntoView());
+            closeBlockMenu();
+            return;
+        }
 
         const rawInsertPos = placement === 'before'
             ? target.pos
@@ -2212,17 +2337,18 @@ export const SmartDocumentEditor = ({
             }
 
             const shellTop = shellRef.current?.getBoundingClientRect().top || 0;
-            const placement = clientY < target.top + shellTop + target.height / 2 ? 'before' : 'after';
+            const placement = getBlockDropPlacement(target, clientY, shellTop);
             const allowed = canMoveBlockToTarget(editor, source, target, placement);
+            const indicator = getBlockDropIndicator(target, placement);
 
             currentDrag = {
                 source,
                 drop: {
                     target,
                     placement,
-                    top: placement === 'before' ? target.top : target.top + target.height,
-                    left: target.left + 44,
-                    width: target.width,
+                    top: indicator.top,
+                    left: indicator.left,
+                    width: indicator.width,
                     allowed,
                 },
             };
@@ -2257,10 +2383,9 @@ export const SmartDocumentEditor = ({
         const target = getBlockInfoFromEvent(editor, event as unknown as React.MouseEvent, shellRef.current);
         if (!target || target.id === dragBlock.source.id) return;
 
-        const placement = event.clientY < target.top + shellRef.current.getBoundingClientRect().top + target.height / 2
-            ? 'before'
-            : 'after';
+        const placement = getBlockDropPlacement(target, event.clientY, shellRef.current.getBoundingClientRect().top);
         const allowed = canMoveBlockToTarget(editor, dragBlock.source, target, placement);
+        const indicator = getBlockDropIndicator(target, placement);
 
         event.preventDefault();
         event.dataTransfer.dropEffect = allowed ? 'move' : 'none';
@@ -2270,9 +2395,9 @@ export const SmartDocumentEditor = ({
             drop: {
                 target,
                 placement,
-                top: placement === 'before' ? target.top : target.top + target.height,
-                left: target.left + 44,
-                width: target.width,
+                top: indicator.top,
+                left: indicator.left,
+                width: indicator.width,
                 allowed,
             },
         });
