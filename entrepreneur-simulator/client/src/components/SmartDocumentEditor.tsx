@@ -1049,6 +1049,21 @@ const getMediaKindFromFile = (file: File) => {
     return 'file';
 };
 
+const getMediaKindFromUrl = (url: string, fallbackKind: string = 'file') => {
+    const pathname = (() => {
+        try {
+            return new URL(url, window.location.origin).pathname.toLowerCase();
+        } catch {
+            return url.toLowerCase();
+        }
+    })();
+
+    if (/\.(mp4|webm|mov|m4v|ogv)$/i.test(pathname)) return 'video';
+    if (/\.(mp3|wav|m4a|aac|ogg|flac)$/i.test(pathname)) return 'audio';
+    if (/\.pdf$/i.test(pathname)) return 'pdf';
+    return normalizeMediaKind(fallbackKind);
+};
+
 const normalizeMediaKind = (value: unknown) => {
     const kind = typeof value === 'string' ? value : '';
     return ['video', 'audio', 'pdf', 'file'].includes(kind) ? kind : 'file';
@@ -1075,7 +1090,10 @@ const getMediaDisplayName = (name: string, url: string, kind: string) => {
     if (url) {
         try {
             const pathname = new URL(url, window.location.origin).pathname;
-            const last = decodeURIComponent(pathname.split('/').filter(Boolean).pop() || '');
+            let last = pathname.split('/').filter(Boolean).pop() || '';
+            try {
+                last = decodeURIComponent(last);
+            } catch {}
             if (last) return last;
         } catch {}
     }
@@ -1090,6 +1108,22 @@ const getMediaKindLabel = (kind: string) => {
     if (kind === 'audio') return '音频';
     if (kind === 'pdf') return 'PDF';
     return '文件';
+};
+
+const getMediaMimeFromUrl = (url: string, kind: string) => {
+    const lower = url.toLowerCase();
+    if (kind === 'video') {
+        if (lower.includes('.webm')) return 'video/webm';
+        if (lower.includes('.mov')) return 'video/quicktime';
+        return 'video/mp4';
+    }
+    if (kind === 'audio') {
+        if (lower.includes('.wav')) return 'audio/wav';
+        if (lower.includes('.ogg')) return 'audio/ogg';
+        return 'audio/mpeg';
+    }
+    if (kind === 'pdf') return 'application/pdf';
+    return '';
 };
 
 const getMediaAccept = (kind: string) => {
@@ -1482,6 +1516,28 @@ const NotionMediaComponent = (props: any) => {
         });
     };
 
+    const replaceMediaUrl = async () => {
+        const nextUrl = await promptForUrl({
+            title: '替换媒体链接',
+            initialValue: url,
+            confirmLabel: '保存',
+        });
+        if (!nextUrl) return;
+
+        const previousDefaultName = getMediaDisplayName('', url, kind);
+        const nextKind = getMediaKindFromUrl(nextUrl, kind);
+        const nextDefaultName = getMediaDisplayName('', nextUrl, nextKind);
+        const shouldUpdateName = !name.trim() || name.trim() === previousDefaultName || name.trim() === url;
+
+        updateAttributes({
+            url: nextUrl,
+            name: shouldUpdateName ? nextDefaultName : name,
+            mime: getMediaMimeFromUrl(nextUrl, nextKind),
+            size: 0,
+            kind: kind === 'file' ? nextKind : kind,
+        });
+    };
+
     const copyMediaLink = async () => {
         if (!url) return;
         try {
@@ -1585,6 +1641,9 @@ const NotionMediaComponent = (props: any) => {
                 }`}>
                     <ImageActionButton title="替换文件" onClick={() => fileInputRef.current?.click()}>
                         <RefreshCw className="h-4 w-4" />
+                    </ImageActionButton>
+                    <ImageActionButton title="替换链接" onClick={replaceMediaUrl}>
+                        <LinkIcon className="h-4 w-4" />
                     </ImageActionButton>
                     <ImageActionButton title="复制链接" onClick={copyMediaLink}>
                         <Copy className="h-4 w-4" />

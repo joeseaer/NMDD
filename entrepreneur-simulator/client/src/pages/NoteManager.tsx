@@ -109,8 +109,21 @@ export default function NoteManager() {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
 
   const selectedNote = items.find(n => n.id === selectedNoteId) || null;
+  const docParamTarget = docParam ? items.find((item) => item.id === docParam) || null : null;
+  const isDeepLinkLoading = Boolean(docParam && loading && !docParamTarget && !selectedNote);
+  const missingDocumentId = !loading
+    ? (
+        docParam && !docParamTarget
+          ? docParam
+          : selectedNoteId && !selectedNote
+            ? selectedNoteId
+            : null
+      )
+    : null;
+  const showMissingDocument = Boolean(missingDocumentId);
+  const showMainContent = Boolean(selectedNote || selectedNoteId || isDeepLinkLoading || showMissingDocument);
 
-  const shouldShowSidebar = showMobileSidebar || !selectedNoteId;
+  const shouldShowSidebar = showMobileSidebar || !showMainContent;
 
   const documentPages = useMemo<SmartDocumentPageLink[]>(() => (
     items.map((item) => ({
@@ -373,7 +386,7 @@ export default function NoteManager() {
       </div>
 
       {/* Main Content Area */}
-      <div className={`flex-1 flex flex-col min-w-0 bg-white ${!selectedNoteId ? 'hidden lg:flex' : 'flex'}`}>
+      <div className={`flex-1 flex flex-col min-w-0 bg-white ${!showMainContent ? 'hidden lg:flex' : 'flex'}`}>
         {selectedNote ? (
             <NoteDetailView 
                 note={selectedNote}
@@ -395,12 +408,72 @@ export default function NoteManager() {
                 }}
                 pages={documentPages}
             />
+        ) : isDeepLinkLoading ? (
+            <DocumentLoadingState />
+        ) : showMissingDocument ? (
+            <DocumentMissingState
+                documentId={missingDocumentId || ''}
+                onBack={handleBack}
+                onCreate={handleCreateNote}
+            />
         ) : (
             <div className="flex-1 flex flex-col items-center justify-center h-full text-gray-400 bg-gray-50/30">
                 <FileText className="w-16 h-16 mb-4 opacity-20" />
                 <p>选择或创建一个文档开始记录</p>
             </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function DocumentLoadingState() {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center h-full bg-gray-50/30 px-6 text-center">
+      <div className="mb-4 h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-t-primary" />
+      <div className="text-sm font-medium text-gray-700">正在打开文档...</div>
+      <div className="mt-1 text-xs text-gray-400">正在根据链接定位页面</div>
+    </div>
+  );
+}
+
+function DocumentMissingState({
+  documentId,
+  onBack,
+  onCreate,
+}: {
+  documentId: string;
+  onBack: () => void;
+  onCreate: () => void;
+}) {
+  return (
+    <div className="flex-1 flex flex-col items-center justify-center h-full bg-gray-50/30 px-6 text-center">
+      <FileText className="w-14 h-14 mb-4 text-gray-300" />
+      <div className="text-base font-semibold text-gray-900">找不到这个文档</div>
+      <div className="mt-2 max-w-md text-sm leading-6 text-gray-500">
+        这个链接指向的文档可能已经被删除、移动，或者不在当前账号的数据里。
+      </div>
+      {documentId && (
+        <div className="mt-3 max-w-md truncate rounded-md bg-white px-3 py-1.5 text-xs text-gray-400 shadow-sm">
+          {documentId}
+        </div>
+      )}
+      <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+        <button
+          type="button"
+          onClick={onBack}
+          className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          返回文档列表
+        </button>
+        <button
+          type="button"
+          onClick={onCreate}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-white hover:bg-primary/90"
+        >
+          <Plus className="h-4 w-4" />
+          新建文档
+        </button>
       </div>
     </div>
   );
