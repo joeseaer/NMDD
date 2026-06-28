@@ -1,7 +1,7 @@
 
 import { Node, mergeAttributes, InputRule, Extension, type JSONContent } from '@tiptap/core';
 import Suggestion from '@tiptap/suggestion';
-import { EditorContent, ReactRenderer, ReactNodeViewRenderer, NodeViewWrapper, useEditor } from '@tiptap/react';
+import { EditorContent, ReactRenderer, ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import LinkExtension from '@tiptap/extension-link';
 import TiptapImage from '@tiptap/extension-image';
@@ -325,6 +325,171 @@ export const MindMap = Node.create({
 
 // --- Smart Document Blocks ---
 
+const normalizeToggleAttrs = (attrs: any) => ({
+  title: String(attrs?.title || 'Toggle').trim() || 'Toggle',
+  open: attrs?.open !== false,
+});
+
+type CalloutTone = 'gray' | 'yellow' | 'blue' | 'green' | 'red' | 'purple';
+
+const CALLOUT_TONE_OPTIONS: Array<{
+  value: CalloutTone;
+  label: string;
+  className: string;
+  iconClassName: string;
+  swatchClassName: string;
+}> = [
+  {
+    value: 'gray',
+    label: '灰色',
+    className: 'border-gray-200 bg-gray-50 text-gray-800',
+    iconClassName: 'border-gray-200 bg-white text-gray-600',
+    swatchClassName: 'bg-gray-300',
+  },
+  {
+    value: 'yellow',
+    label: '黄色',
+    className: 'border-amber-200 bg-amber-50 text-gray-800',
+    iconClassName: 'border-amber-200 bg-white text-amber-700',
+    swatchClassName: 'bg-amber-300',
+  },
+  {
+    value: 'blue',
+    label: '蓝色',
+    className: 'border-blue-200 bg-blue-50 text-gray-800',
+    iconClassName: 'border-blue-200 bg-white text-blue-700',
+    swatchClassName: 'bg-blue-300',
+  },
+  {
+    value: 'green',
+    label: '绿色',
+    className: 'border-emerald-200 bg-emerald-50 text-gray-800',
+    iconClassName: 'border-emerald-200 bg-white text-emerald-700',
+    swatchClassName: 'bg-emerald-300',
+  },
+  {
+    value: 'red',
+    label: '红色',
+    className: 'border-red-200 bg-red-50 text-gray-800',
+    iconClassName: 'border-red-200 bg-white text-red-700',
+    swatchClassName: 'bg-red-300',
+  },
+  {
+    value: 'purple',
+    label: '紫色',
+    className: 'border-purple-200 bg-purple-50 text-gray-800',
+    iconClassName: 'border-purple-200 bg-white text-purple-700',
+    swatchClassName: 'bg-purple-300',
+  },
+];
+
+const normalizeCalloutTone = (value: unknown): CalloutTone => {
+  const token = String(value || '').trim().toLowerCase();
+  return CALLOUT_TONE_OPTIONS.some((option) => option.value === token) ? token as CalloutTone : 'gray';
+};
+
+const normalizeCalloutAttrs = (attrs: any) => ({
+  icon: String(attrs?.icon || '!').trim() || '!',
+  tone: normalizeCalloutTone(attrs?.tone),
+});
+
+const getCalloutToneOption = (value: unknown) => (
+  CALLOUT_TONE_OPTIONS.find((option) => option.value === normalizeCalloutTone(value)) || CALLOUT_TONE_OPTIONS[0]
+);
+
+const getNodeViewCommentsAttr = (attrs: any) => (
+  Array.isArray(attrs?.blockComments) && attrs.blockComments.length
+    ? encodeJsonAttribute(attrs.blockComments)
+    : undefined
+);
+
+const ToggleBlockView = ({ node, updateAttributes, selected }: any) => {
+  const attrs = normalizeToggleAttrs(node.attrs);
+  const commentsAttr = getNodeViewCommentsAttr(node.attrs);
+
+  return (
+    <NodeViewWrapper
+      className={`smart-doc-toggle my-3 rounded-md border bg-white transition-colors ${
+        selected ? 'border-gray-400 shadow-sm' : 'border-gray-200 hover:border-gray-300'
+      }`}
+      data-type="toggle"
+      data-title={attrs.title}
+      data-open={attrs.open ? 'true' : 'false'}
+      data-block-id={node.attrs.blockId || undefined}
+      data-comments={commentsAttr}
+      id={blockDomId(node.attrs.blockId)}
+    >
+      <div className="flex items-center gap-1 px-2 py-1.5" contentEditable={false}>
+        <button
+          type="button"
+          title={attrs.open ? '收起' : '展开'}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => updateAttributes({ open: !attrs.open })}
+          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-800"
+        >
+          <ChevronRight className={`h-4 w-4 transition-transform ${attrs.open ? 'rotate-90' : ''}`} />
+        </button>
+        <input
+          value={attrs.title}
+          onChange={(event) => updateAttributes({ title: event.target.value })}
+          className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-1 text-sm font-medium text-gray-800 outline-none hover:border-gray-200 focus:border-gray-300 focus:bg-white"
+          aria-label="Toggle 标题"
+          placeholder="Toggle"
+        />
+      </div>
+      <NodeViewContent
+        className={`smart-doc-toggle-content px-4 pb-3 pt-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 ${attrs.open ? '' : 'hidden'}`}
+      />
+    </NodeViewWrapper>
+  );
+};
+
+const CalloutBlockView = ({ node, updateAttributes, selected }: any) => {
+  const attrs = normalizeCalloutAttrs(node.attrs);
+  const tone = getCalloutToneOption(attrs.tone);
+  const commentsAttr = getNodeViewCommentsAttr(node.attrs);
+
+  return (
+    <NodeViewWrapper
+      className={`smart-doc-callout my-3 flex gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
+        tone.className
+      } ${selected ? 'shadow-sm ring-1 ring-gray-300' : ''}`}
+      data-type="callout"
+      data-icon={attrs.icon}
+      data-tone={attrs.tone}
+      data-block-id={node.attrs.blockId || undefined}
+      data-comments={commentsAttr}
+      id={blockDomId(node.attrs.blockId)}
+    >
+      <div className="flex flex-shrink-0 flex-col items-center gap-2" contentEditable={false}>
+        <input
+          value={attrs.icon}
+          onChange={(event) => updateAttributes({ icon: Array.from(event.target.value).slice(0, 2).join('') })}
+          className={`flex h-7 w-7 rounded border px-0 text-center text-sm font-semibold outline-none focus:ring-2 focus:ring-white/70 ${tone.iconClassName}`}
+          aria-label="Callout 图标"
+        />
+        <div className="flex flex-col gap-1">
+          {CALLOUT_TONE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              title={`Callout ${option.label}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => updateAttributes({ tone: option.value })}
+              className={`flex h-4 w-4 items-center justify-center rounded-full border ${
+                option.value === attrs.tone ? 'border-gray-900' : 'border-white/70'
+              }`}
+            >
+              <span className={`h-2.5 w-2.5 rounded-full ${option.swatchClassName}`} />
+            </button>
+          ))}
+        </div>
+      </div>
+      <NodeViewContent className="smart-doc-callout-content min-w-0 flex-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0" />
+    </NodeViewWrapper>
+  );
+};
+
 export const ToggleBlock = Node.create({
   name: 'toggleBlock',
   group: 'block',
@@ -350,14 +515,18 @@ export const ToggleBlock = Node.create({
     return [{ tag: 'details[data-type="toggle"]' }]
   },
 
-  renderHTML({ HTMLAttributes }) {
-    const title = HTMLAttributes['data-title'] || 'Toggle';
+  renderHTML({ node, HTMLAttributes }) {
+    const attrs = normalizeToggleAttrs(node.attrs);
     return [
       'details',
-      mergeAttributes(HTMLAttributes, { 'data-type': 'toggle', class: 'smart-doc-toggle my-3 rounded-md border border-gray-200 bg-white' }),
-      ['summary', { class: 'smart-doc-toggle-summary cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-800' }, title],
+      mergeAttributes(HTMLAttributes, { 'data-type': 'toggle', 'data-title': attrs.title, class: 'smart-doc-toggle my-3 rounded-md border border-gray-200 bg-white' }),
+      ['summary', { class: 'smart-doc-toggle-summary cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-800' }, attrs.title],
       ['div', { class: 'smart-doc-toggle-content px-4 pb-3 pt-1' }, 0],
     ]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(ToggleBlockView)
   },
 });
 
@@ -386,14 +555,24 @@ export const CalloutBlock = Node.create({
     return [{ tag: 'div[data-type="callout"]' }]
   },
 
-  renderHTML({ HTMLAttributes }) {
-    const icon = HTMLAttributes['data-icon'] || '!';
+  renderHTML({ node, HTMLAttributes }) {
+    const attrs = normalizeCalloutAttrs(node.attrs);
+    const tone = getCalloutToneOption(attrs.tone);
     return [
       'div',
-      mergeAttributes(HTMLAttributes, { 'data-type': 'callout', class: 'smart-doc-callout my-3 flex gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-gray-800' }),
-      ['div', { class: 'smart-doc-callout-icon mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-white text-xs font-bold text-amber-700' }, icon],
+      mergeAttributes(HTMLAttributes, {
+        'data-type': 'callout',
+        'data-icon': attrs.icon,
+        'data-tone': attrs.tone,
+        class: `smart-doc-callout my-3 flex gap-3 rounded-md border px-3 py-3 text-sm ${tone.className}`,
+      }),
+      ['div', { class: `smart-doc-callout-icon mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border text-xs font-bold ${tone.iconClassName}` }, attrs.icon],
       ['div', { class: 'smart-doc-callout-content min-w-0 flex-1' }, 0],
     ]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(CalloutBlockView)
   },
 });
 
@@ -550,15 +729,17 @@ export const MediaBlock = Node.create({
 
 const DEFAULT_EQUATION = 'E = mc^2';
 
-const blockDomId = (blockId?: string | null) => blockId ? `block-${blockId}` : undefined;
+function blockDomId(blockId?: string | null) {
+  return blockId ? `block-${blockId}` : undefined;
+}
 
-const encodeJsonAttribute = (value: unknown) => {
+function encodeJsonAttribute(value: unknown) {
   try {
     return encodeURIComponent(JSON.stringify(value));
   } catch {
     return undefined;
   }
-};
+}
 
 const decodeJsonAttribute = (value: string | null) => {
   if (!value) return null;
