@@ -1,49 +1,668 @@
-import { useEffect, useMemo, useState } from 'react';
-import { BookOpen, BrainCircuit, ChevronDown, Sparkles } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  BookOpen,
+  BrainCircuit,
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ClipboardPaste,
+  Loader2,
+  Plus,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import { api, CURRENT_USER_ID } from '../services/api';
-import PlannerTodoPanel, { PlannerItem } from '../components/planner/PlannerTodoPanel';
-import PlannerCalendarPanel, { PlannerCalendarItem } from '../components/planner/PlannerCalendarPanel';
 
 type PlannerList = { id: string; name: string; is_default_inbox?: boolean };
-type PersonLite = { id: string; name?: string; birthday?: string | null; last_interaction?: string | null; last_interaction_date?: string | null };
+type PersonLite = { id: string; name?: string; birthday?: string | null };
+type ViewMode = 'day' | 'week' | 'month';
+type TaskStatus = 'open' | 'done' | 'archived';
+
+type PlannerTask = {
+  id: string;
+  type: 'task' | 'event';
+  title: string;
+  due_at?: string | null;
+  status: TaskStatus;
+  list_id?: string | null;
+  created_at?: string | null;
+};
+
+type ParsedImportItem = {
+  dateKey: string;
+  title: string;
+  status: TaskStatus;
+};
+
+const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+
+const startOfDay = (date: Date) => {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const endOfDay = (date: Date) => {
+  const d = new Date(date);
+  d.setHours(23, 59, 59, 999);
+  return d;
+};
+
+const addDays = (date: Date, days: number) => {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+};
+
+const addMonths = (date: Date, months: number) => {
+  const d = new Date(date);
+  const day = d.getDate();
+  const target = new Date(d.getFullYear(), d.getMonth() + months, 1);
+  const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+  target.setDate(Math.min(day, lastDay));
+  return target;
+};
+
+const toDateKey = (date: Date) => {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
+const dateKeyFromIso = (iso?: string | null) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return toDateKey(d);
+};
+
+const fromDateKey = (key: string) => {
+  const [yyyy, mm, dd] = String(key).split('-').map((x) => parseInt(x, 10));
+  const d = new Date();
+  if ([yyyy, mm, dd].every(Number.isFinite)) {
+    d.setFullYear(yyyy, mm - 1, dd);
+  }
+  d.setHours(0, 0, 0, 0);
+  return d;
+};
+
+const formatDateTitle = (date: Date) => {
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')} 周${weekdays[date.getDay()]}`;
+};
+
+const formatShortDate = (date: Date) => {
+  return `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}`;
+};
+
+const formatCompactDate = (date: Date) => {
+  return `${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+};
+
+const taskDueIso = (dateKey: string, orderIndex: number) => {
+  const d = fromDateKey(dateKey);
+  const minutes = Math.min(12 * 60, Math.max(0, orderIndex));
+  d.setHours(9 + Math.floor(minutes / 60), minutes % 60, 0, 0);
+  return d.toISOString();
+};
+
+const taskSortValue = (task: PlannerTask) => {
+  const dueTime = task.due_at ? new Date(task.due_at).getTime() : 0;
+  const createdTime = task.created_at ? new Date(task.created_at).getTime() : 0;
+  return Number.isFinite(dueTime) ? dueTime : createdTime;
+};
+
+const sortTasks = (items: PlannerTask[]) => {
+  return [...items].sort((a, b) => {
+    const statusA = a.status === 'done' ? 1 : 0;
+    const statusB = b.status === 'done' ? 1 : 0;
+    if (statusA !== statusB) return statusA - statusB;
+    return taskSortValue(a) - taskSortValue(b);
+  });
+};
+
+const getWeekStart = (date: Date) => {
+  const d = startOfDay(date);
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+};
+
+const getMonthGridStart = (date: Date) => {
+  const first = new Date(date.getFullYear(), date.getMonth(), 1);
+  first.setDate(first.getDate() - first.getDay());
+  first.setHours(0, 0, 0, 0);
+  return first;
+};
+
+const getViewRange = (date: Date, mode: ViewMode) => {
+  if (mode === 'month') {
+    const start = getMonthGridStart(date);
+    const end = addDays(start, 42);
+    return { start, end };
+  }
+  if (mode === 'week') {
+    const start = getWeekStart(date);
+    return { start, end: addDays(start, 7) };
+  }
+  return { start: startOfDay(date), end: endOfDay(date) };
+};
+
+const parseDateToken = (token: string, baseYear: number) => {
+  const raw = String(token || '').trim();
+  if (!raw) return '';
+
+  const ymd = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  if (ymd) {
+    const yyyy = parseInt(ymd[1], 10);
+    const mm = parseInt(ymd[2], 10);
+    const dd = parseInt(ymd[3], 10);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return toDateKey(new Date(yyyy, mm - 1, dd));
+    }
+  }
+
+  const md = raw.match(/^(\d{1,2})[-/.](\d{1,2})$/);
+  if (md) {
+    const mm = parseInt(md[1], 10);
+    const dd = parseInt(md[2], 10);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return toDateKey(new Date(baseYear, mm - 1, dd));
+    }
+  }
+
+  const compact = raw.match(/^(\d{2})(\d{2})$/);
+  if (compact) {
+    const mm = parseInt(compact[1], 10);
+    const dd = parseInt(compact[2], 10);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      return toDateKey(new Date(baseYear, mm - 1, dd));
+    }
+  }
+
+  return '';
+};
+
+const parseImportText = (text: string, fallbackDateKey: string) => {
+  const baseYear = fromDateKey(fallbackDateKey).getFullYear();
+  let currentDateKey = fallbackDateKey;
+  const items: ParsedImportItem[] = [];
+
+  String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .forEach((line) => {
+      if (!line) return;
+
+      const parsedDate = parseDateToken(line, baseYear);
+      if (parsedDate) {
+        currentDateKey = parsedDate;
+        return;
+      }
+
+      const statusMatch = line.match(/^(.*?)([01])$/);
+      const title = statusMatch ? statusMatch[1].trim() : line;
+      const status: TaskStatus = statusMatch?.[2] === '1' ? 'done' : 'open';
+      if (!title) return;
+
+      items.push({ dateKey: currentDateKey, title, status });
+    });
+
+  return items;
+};
+
+function DateNav({
+  focusDay,
+  viewMode,
+  setFocusDay,
+  setViewMode,
+}: {
+  focusDay: Date;
+  viewMode: ViewMode;
+  setFocusDay: (date: Date) => void;
+  setViewMode: (mode: ViewMode) => void;
+}) {
+  const focusKey = toDateKey(focusDay);
+  const shift = (direction: number) => {
+    if (viewMode === 'month') setFocusDay(addMonths(focusDay, direction));
+    else if (viewMode === 'week') setFocusDay(addDays(focusDay, direction * 7));
+    else setFocusDay(addDays(focusDay, direction));
+  };
+
+  return (
+    <div className="flex flex-col gap-3 border-b border-gray-200 bg-white px-4 py-4 sm:px-6">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex items-center gap-2 text-lg font-bold text-gray-900">
+            <CalendarDays className="h-5 w-5 text-primary" />
+            {formatDateTitle(focusDay)}
+          </div>
+          <div className="mt-1 text-xs text-gray-500">打开就写，写完就勾；过去没做完的事会自动带到今天前面。</div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => shift(-1)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+            title="上一段"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => setFocusDay(startOfDay(new Date()))}
+            className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            今天
+          </button>
+          <button
+            onClick={() => shift(1)}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+            title="下一段"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          <input
+            type="date"
+            value={focusKey}
+            onChange={(event) => setFocusDay(fromDateKey(event.target.value))}
+            className="h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-700 outline-none focus:ring-2 focus:ring-primary/20"
+          />
+        </div>
+      </div>
+
+      <div className="flex w-fit rounded-lg border border-gray-200 bg-gray-50 p-1">
+        {[
+          ['day', '日'],
+          ['week', '周'],
+          ['month', '月'],
+        ].map(([mode, label]) => (
+          <button
+            key={mode}
+            onClick={() => setViewMode(mode as ViewMode)}
+            className={`h-8 rounded-md px-4 text-sm font-medium transition-colors ${
+              viewMode === mode ? 'bg-white text-primary shadow-sm' : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function TaskRow({
+  task,
+  onToggle,
+  onUpdateTitle,
+  onDelete,
+  onMoveToToday,
+}: {
+  task: PlannerTask;
+  onToggle: (task: PlannerTask) => void;
+  onUpdateTitle: (task: PlannerTask, title: string) => void;
+  onDelete: (task: PlannerTask) => void;
+  onMoveToToday?: (task: PlannerTask) => void;
+}) {
+  const [draft, setDraft] = useState(task.title || '');
+
+  useEffect(() => {
+    setDraft(task.title || '');
+  }, [task.id, task.title]);
+
+  const commit = () => {
+    const title = draft.trim();
+    if (!title) {
+      onDelete(task);
+      return;
+    }
+    if (title !== task.title) onUpdateTitle(task, title);
+  };
+
+  return (
+    <div className="group flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-50">
+      <button
+        onClick={() => onToggle(task)}
+        className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
+          task.status === 'done' ? 'border-emerald-600 bg-emerald-600' : 'border-gray-300 bg-white hover:border-gray-500'
+        }`}
+        title={task.status === 'done' ? '标记未完成' : '标记完成'}
+      >
+        {task.status === 'done' && <Check className="h-3.5 w-3.5 text-white" />}
+      </button>
+      <input
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.currentTarget.blur();
+          if (event.key === 'Escape') {
+            setDraft(task.title || '');
+            event.currentTarget.blur();
+          }
+        }}
+        className={`min-h-7 flex-1 bg-transparent text-[15px] leading-7 outline-none ${
+          task.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-900'
+        }`}
+      />
+      {onMoveToToday && task.status !== 'done' && (
+        <button
+          onClick={() => onMoveToToday(task)}
+          className="mt-1 hidden rounded-md border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500 hover:text-primary group-hover:block"
+        >
+          移到今天
+        </button>
+      )}
+      <button
+        onClick={() => onDelete(task)}
+        className="mt-1 hidden h-6 w-6 items-center justify-center rounded-md text-gray-400 hover:bg-red-50 hover:text-red-600 group-hover:flex"
+        title="删除"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function DayChecklist({
+  date,
+  tasks,
+  title,
+  subtitle,
+  compact = false,
+  showDateBadge = true,
+  onCreate,
+  onBulkImport,
+  onToggle,
+  onUpdateTitle,
+  onDelete,
+  onMoveToToday,
+}: {
+  date: Date;
+  tasks: PlannerTask[];
+  title?: string;
+  subtitle?: string;
+  compact?: boolean;
+  showDateBadge?: boolean;
+  onCreate: (dateKey: string, title: string) => Promise<void>;
+  onBulkImport: (text: string, fallbackDateKey: string) => Promise<void>;
+  onToggle: (task: PlannerTask) => void;
+  onUpdateTitle: (task: PlannerTask, title: string) => void;
+  onDelete: (task: PlannerTask) => void;
+  onMoveToToday?: (task: PlannerTask) => void;
+}) {
+  const dateKey = toDateKey(date);
+  const [draft, setDraft] = useState('');
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const ordered = useMemo(() => sortTasks(tasks), [tasks]);
+  const openCount = ordered.filter((task) => task.status !== 'done').length;
+
+  const create = async () => {
+    const text = draft.trim();
+    if (!text) return;
+    await onCreate(dateKey, text);
+    setDraft('');
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  return (
+    <section className="rounded-xl border border-gray-200 bg-white">
+      <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            {showDateBadge && (
+              <div className="rounded-md bg-gray-100 px-2 py-1 text-xs font-bold text-gray-700">{formatCompactDate(date)}</div>
+            )}
+            <h2 className={`${compact ? 'text-sm' : 'text-base'} font-bold text-gray-900`}>{title || formatDateTitle(date)}</h2>
+          </div>
+          {subtitle && <div className="mt-1 text-xs text-gray-500">{subtitle}</div>}
+        </div>
+        <div className="shrink-0 text-xs text-gray-500">{openCount}/{ordered.length} 未完成</div>
+      </div>
+
+      <div className={`${compact ? 'p-2' : 'p-3'}`}>
+        {ordered.length === 0 ? (
+          <div className="px-2 py-4 text-sm text-gray-400">暂无</div>
+        ) : (
+          <div className="space-y-0.5">
+            {ordered.map((task) => (
+              <TaskRow
+                key={task.id}
+                task={task}
+                onToggle={onToggle}
+                onUpdateTitle={onUpdateTitle}
+                onDelete={onDelete}
+                onMoveToToday={onMoveToToday}
+              />
+            ))}
+          </div>
+        )}
+
+        <div className="mt-2 flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-50">
+          <Plus className="h-4 w-4 shrink-0 text-gray-400" />
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') create();
+            }}
+            onPaste={(event) => {
+              const text = event.clipboardData.getData('text');
+              if (text.includes('\n')) {
+                event.preventDefault();
+                onBulkImport(text, dateKey);
+              }
+            }}
+            className="min-h-7 flex-1 bg-transparent text-[15px] outline-none placeholder:text-gray-400"
+            placeholder="继续输入，回车新增..."
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function LegacySection({
+  tasksByDate,
+  onToggle,
+  onUpdateTitle,
+  onDelete,
+  onMoveToToday,
+}: {
+  tasksByDate: Record<string, PlannerTask[]>;
+  onToggle: (task: PlannerTask) => void;
+  onUpdateTitle: (task: PlannerTask, title: string) => void;
+  onDelete: (task: PlannerTask) => void;
+  onMoveToToday: (task: PlannerTask) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const dates = Object.keys(tasksByDate).sort((a, b) => b.localeCompare(a));
+  const visibleDates = expanded ? dates : dates.slice(0, 2);
+  const hiddenCount = dates.slice(2).reduce((sum, key) => sum + tasksByDate[key].length, 0);
+
+  if (dates.length === 0) return null;
+
+  return (
+    <section className="rounded-xl border border-amber-200 bg-amber-50/40">
+      <div className="flex items-center justify-between gap-3 border-b border-amber-100 px-4 py-3">
+        <div>
+          <div className="text-sm font-bold text-amber-950">遗留未完成</div>
+          <div className="mt-1 text-xs text-amber-800">过去没做完的事先放在这里，勾掉或移到今天。</div>
+        </div>
+        {dates.length > 2 && (
+          <button onClick={() => setExpanded((value) => !value)} className="text-xs font-medium text-amber-900 hover:underline">
+            {expanded ? '收起' : `展开更早 ${hiddenCount} 条`}
+          </button>
+        )}
+      </div>
+      <div className="space-y-3 p-3">
+        {visibleDates.map((dateKey) => (
+          <div key={dateKey} className="rounded-lg border border-amber-100 bg-white/80">
+            <div className="border-b border-amber-50 px-3 py-2 text-xs font-bold text-gray-700">
+              {formatShortDate(fromDateKey(dateKey))} 周{weekdays[fromDateKey(dateKey).getDay()]}
+            </div>
+            <div className="p-2">
+              {sortTasks(tasksByDate[dateKey]).map((task) => (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  onToggle={onToggle}
+                  onUpdateTitle={onUpdateTitle}
+                  onDelete={onDelete}
+                  onMoveToToday={onMoveToToday}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function AssistantPanel({
+  peopleLoading,
+  birthdayReminders,
+  secretary,
+  secretaryLoading,
+  onRefreshSecretary,
+}: {
+  peopleLoading: boolean;
+  birthdayReminders: any[];
+  secretary: any;
+  secretaryLoading: boolean;
+  onRefreshSecretary: () => void;
+}) {
+  return (
+    <aside className="space-y-4">
+      <section className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="text-sm font-bold text-gray-900">7 天内生日</div>
+        {peopleLoading ? (
+          <div className="mt-3 text-xs text-gray-400">同步中...</div>
+        ) : birthdayReminders.length === 0 ? (
+          <div className="mt-3 text-xs text-gray-400">暂无</div>
+        ) : (
+          <div className="mt-3 space-y-2">
+            {birthdayReminders.slice(0, 5).map((item) => (
+              <div key={item.id} className="flex items-center justify-between gap-2 text-xs text-gray-700">
+                <span className="truncate">{item.name}</span>
+                <span className="shrink-0 text-gray-500">{item.days === 0 ? '今天' : `${item.days} 天后`}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5">
+            <Sparkles className="h-4 w-4 text-blue-600" />
+            <div className="text-sm font-bold text-gray-900">AI 建议</div>
+          </div>
+          <button onClick={onRefreshSecretary} className="text-xs text-gray-500 hover:underline">
+            刷新
+          </button>
+        </div>
+        {secretaryLoading ? (
+          <div className="flex items-center gap-2 text-xs text-gray-400">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            思考中...
+          </div>
+        ) : secretary?.available === false ? (
+          <div className="text-xs text-red-500">{secretary?.message || '服务不可用'}</div>
+        ) : Array.isArray(secretary?.suggestions) && secretary.suggestions.length > 0 ? (
+          <div className="space-y-2">
+            {secretary.suggestions.slice(0, 3).map((item: any, index: number) => (
+              <div key={item.person_id || index} className="rounded-lg border border-blue-100 bg-blue-50/30 p-2 text-xs">
+                <div className="font-bold text-gray-900">{item.person_name}</div>
+                <div className="mt-1 text-gray-600">{item.reason}</div>
+                <div className="mt-1 font-medium text-blue-800">{item.action}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-gray-400">暂无特别建议</div>
+        )}
+      </section>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-4">
+        <div className="mb-3 flex items-center gap-1.5">
+          <BrainCircuit className="h-4 w-4 text-purple-600" />
+          <div className="text-sm font-bold text-gray-900">综合提醒</div>
+        </div>
+        {secretaryLoading ? (
+          <div className="text-xs text-gray-400">分析上下文中...</div>
+        ) : Array.isArray(secretary?.general_reminders) && secretary.general_reminders.length > 0 ? (
+          <div className="space-y-2">
+            {secretary.general_reminders.slice(0, 3).map((item: any, index: number) => (
+              <div key={index} className="rounded-lg border border-purple-100 bg-purple-50/30 p-2 text-xs">
+                <div className="font-bold text-gray-900">{item.title}</div>
+                <div className="mt-1 text-gray-600">{item.content}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-xs text-gray-400">暂无</div>
+        )}
+      </section>
+
+      {Array.isArray(secretary?.document_context?.references) && secretary.document_context.references.length > 0 && (
+        <section className="rounded-xl border border-emerald-100 bg-emerald-50/30 p-4">
+          <div className="mb-3 flex items-center gap-1.5">
+            <BookOpen className="h-4 w-4 text-emerald-600" />
+            <div className="text-sm font-bold text-gray-900">AI 文档记忆</div>
+          </div>
+          <div className="space-y-1.5">
+            {secretary.document_context.references.slice(0, 4).map((ref: any) => (
+              <a
+                key={`${ref.ref_id}-${ref.url || ref.title}`}
+                href={ref.url || '#'}
+                className="block truncate rounded-md border border-emerald-100 bg-white/70 px-2 py-1 text-xs text-emerald-900 hover:bg-white"
+                title={ref.snippet || ref.title}
+              >
+                {ref.ref_id} · {ref.title}
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+    </aside>
+  );
+}
 
 export default function Planner() {
   const userId = CURRENT_USER_ID;
   const [lists, setLists] = useState<PlannerList[]>([]);
-  const [selectedListId, setSelectedListId] = useState<string>('');
-
-  const [calendarMode, setCalendarMode] = useState<'week' | 'month'>('week');
-
-  const [overdue, setOverdue] = useState<PlannerItem[]>([]);
-  const [upcoming, setUpcoming] = useState<PlannerItem[]>([]);
+  const [selectedListId, setSelectedListId] = useState('');
+  const [viewMode, setViewMode] = useState<ViewMode>('day');
+  const [focusDay, setFocusDay] = useState(() => startOfDay(new Date()));
+  const [rangeTasks, setRangeTasks] = useState<PlannerTask[]>([]);
+  const [pastOpenTasks, setPastOpenTasks] = useState<PlannerTask[]>([]);
   const [loading, setLoading] = useState(false);
-
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [importText, setImportText] = useState('');
+  const [importOpen, setImportOpen] = useState(false);
   const [people, setPeople] = useState<PersonLite[]>([]);
   const [peopleLoading, setPeopleLoading] = useState(false);
-
   const [secretary, setSecretary] = useState<any>(null);
   const [secretaryLoading, setSecretaryLoading] = useState(false);
 
-  const [creatingTask, setCreatingTask] = useState(false);
-  const [creatingEvent, setCreatingEvent] = useState(false);
-
-  const [focusDay, setFocusDay] = useState(() => new Date());
-  const [calendarItems, setCalendarItems] = useState<PlannerCalendarItem[]>([]);
-  const [calendarLoadError, setCalendarLoadError] = useState<string | null>(null);
-  const [listLoadError, setListLoadError] = useState<string | null>(null);
-
-  const inboxId = useMemo(() => {
-    const inbox = lists.find(l => l.is_default_inbox);
-    return inbox?.id || '';
-  }, [lists]);
-
+  const inboxId = useMemo(() => lists.find((list) => list.is_default_inbox)?.id || '', [lists]);
   const activeListId = selectedListId || inboxId;
+  const today = useMemo(() => startOfDay(new Date()), []);
+  const todayKey = toDateKey(today);
+  const focusDayKey = toDateKey(focusDay);
+
+  const loadLists = async () => {
+    const result = await api.getPlannerLists(userId);
+    setLists(Array.isArray(result) ? result : []);
+  };
 
   const loadPeople = async () => {
     setPeopleLoading(true);
     try {
-      const res = await api.getAllPeople(userId);
-      setPeople(Array.isArray(res) ? res : []);
+      const result = await api.getAllPeople(userId);
+      setPeople(Array.isArray(result) ? result : []);
     } catch {
       setPeople([]);
     } finally {
@@ -54,8 +673,8 @@ export default function Planner() {
   const loadSecretary = async (opts?: { refresh?: boolean }) => {
     setSecretaryLoading(true);
     try {
-      const res = await api.getSecretaryDaily(userId, { refresh: !!opts?.refresh });
-      setSecretary(res || null);
+      const result = await api.getSecretaryDaily(userId, { refresh: !!opts?.refresh });
+      setSecretary(result || null);
     } catch {
       setSecretary(null);
     } finally {
@@ -63,500 +682,355 @@ export default function Planner() {
     }
   };
 
-  const toDateKey = (iso: string | null | undefined) => {
-    if (!iso) return '';
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return '';
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  };
-
-  const refresh = async () => {
+  const loadTasks = async () => {
     setLoading(true);
     try {
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
-      const dueBefore = now.toISOString();
-
-      const [l, o, u] = await Promise.all([
-        api.getPlannerLists(userId),
-        api.getPlannerItems(userId, { view: 'overdue', listId: activeListId || undefined, dueBefore }),
-        api.getPlannerItems(userId, { view: 'upcoming', listId: activeListId || undefined }),
+      const range = getViewRange(focusDay, viewMode);
+      const todayStart = startOfDay(new Date()).toISOString();
+      const [rangeResult, overdueResult] = await Promise.all([
+        api.getPlannerCalendarItems(userId, {
+          startAt: range.start.toISOString(),
+          endAt: range.end.toISOString(),
+          listId: activeListId || undefined,
+        }),
+        api.getPlannerItems(userId, {
+          view: 'overdue',
+          listId: activeListId || undefined,
+          dueBefore: todayStart,
+        }),
       ]);
-      setLists(Array.isArray(l) ? l : []);
-      setOverdue(Array.isArray(o) ? o : []);
-      setUpcoming(Array.isArray(u) ? u : []);
-      setListLoadError(null);
-    } catch (e: any) {
-      setListLoadError(e?.message ? String(e.message) : '待办数据加载失败');
+
+      setRangeTasks((Array.isArray(rangeResult) ? rangeResult : []).filter((item: PlannerTask) => item.type === 'task'));
+      setPastOpenTasks((Array.isArray(overdueResult) ? overdueResult : []).filter((item: PlannerTask) => item.type === 'task'));
+      setError(null);
+    } catch (err: any) {
+      setRangeTasks([]);
+      setPastOpenTasks([]);
+      setError(err?.message ? String(err.message) : '待办加载失败');
     } finally {
       setLoading(false);
     }
   };
 
-  const [isDragging, setIsDragging] = useState(false);
-
-  const refreshEvents = async (day: Date) => {
-    const d = new Date(day);
-    let start: Date;
-    let end: Date;
-
-    if (calendarMode === 'month') {
-      const first = new Date(d.getFullYear(), d.getMonth(), 1);
-      const gridStart = new Date(first);
-      gridStart.setDate(first.getDate() - first.getDay());
-      gridStart.setHours(0, 0, 0, 0);
-
-      const last = new Date(d.getFullYear(), d.getMonth() + 1, 0);
-      const gridEnd = new Date(last);
-      gridEnd.setDate(last.getDate() + (6 - last.getDay()) + 1);
-      gridEnd.setHours(0, 0, 0, 0);
-
-      start = gridStart;
-      end = gridEnd;
-    } else {
-      start = new Date(d);
-      start.setDate(d.getDate() - d.getDay());
-      start.setHours(0, 0, 0, 0);
-      end = new Date(start);
-      end.setDate(start.getDate() + 7);
-    }
-
-    try {
-      const res = await api.getPlannerCalendarItems(userId, { startAt: start.toISOString(), endAt: end.toISOString(), listId: activeListId || undefined });
-      setCalendarItems(Array.isArray(res) ? res : []);
-      setCalendarLoadError(null);
-    } catch (e: any) {
-      setCalendarItems([]);
-      setCalendarLoadError(e?.message ? String(e.message) : '日历数据加载失败');
-    }
-  };
-
   useEffect(() => {
-    refresh();
+    loadLists();
     loadPeople();
     loadSecretary();
   }, []);
 
   useEffect(() => {
-    if (!lists.length) return;
-    refresh();
-    refreshEvents(focusDay);
-  }, [activeListId]);
+    loadTasks();
+  }, [activeListId, focusDayKey, viewMode]);
 
-  useEffect(() => {
-    refreshEvents(focusDay);
-  }, [focusDay, calendarMode]);
-
-  const dayEvents = useMemo(() => {
-    const s = new Date(focusDay);
-    s.setHours(0, 0, 0, 0);
-    const e = new Date(focusDay);
-    e.setHours(23, 59, 59, 999);
-    return calendarItems
-      .filter((it) => {
-        if (it.type === 'task') {
-          const iso = it.due_at;
-          const t = iso ? new Date(iso).getTime() : NaN;
-          if (Number.isNaN(t)) return false;
-          return t >= s.getTime() && t <= e.getTime();
-        }
-
-        const startIso = it.start_at;
-        const endIso = it.end_at;
-        const ts = startIso ? new Date(startIso).getTime() : NaN;
-        const te = endIso ? new Date(endIso).getTime() : NaN;
-        if (Number.isNaN(ts) || Number.isNaN(te)) return false;
-        return ts <= e.getTime() && te >= s.getTime();
-      })
-      .sort((a, b) => {
-        const aIsTask = a.type === 'task' ? 1 : 0;
-        const bIsTask = b.type === 'task' ? 1 : 0;
-        if (aIsTask !== bIsTask) return aIsTask - bIsTask;
-        if (a.type === 'task' && b.type === 'task') {
-          const sa = a.status === 'done' ? 1 : 0;
-          const sb = b.status === 'done' ? 1 : 0;
-          if (sa !== sb) return sa - sb;
-        }
-        const ia = a.type === 'task' ? a.due_at : a.start_at;
-        const ib = b.type === 'task' ? b.due_at : b.start_at;
-        const ta = ia ? new Date(ia).getTime() : 0;
-        const tb = ib ? new Date(ib).getTime() : 0;
-        return ta - tb;
-      });
-  }, [calendarItems, focusDay]);
-
-  const focusDayKey = useMemo(() => {
-    const d = new Date(focusDay);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }, [focusDay]);
-
-  const handleMoveTaskToDate = async (taskId: string, date: string) => {
-    const all = [...overdue, ...upcoming, ...focusDayTasks, ...(calendarItems.filter(it => it.type === 'task') as unknown as PlannerItem[])];
-    const target = all.find(it => it.id === taskId);
-    
-    const parts = date.split('-').map(x => parseInt(x, 10));
-    const d = new Date();
-    d.setFullYear(parts[0], parts[1] - 1, parts[2]);
-
-    if (target && target.due_at) {
-        const old = new Date(target.due_at);
-        if (!Number.isNaN(old.getTime())) {
-            d.setHours(old.getHours(), old.getMinutes(), 0, 0);
-        }
-    }
-
-    const nextDueAt = d.toISOString();
-    await api.updatePlannerItem(taskId, userId, { due_at: nextDueAt });
-    await Promise.all([refresh(), refreshEvents(focusDay)]);
-  };
-
-  const handleReorderTask = async (sourceId: string, targetId: string) => {
-    // A simplified UI reorder logic by slightly modifying due_at time
-    const all = [...overdue, ...upcoming, ...focusDayTasks, ...(calendarItems.filter(it => it.type === 'task') as unknown as PlannerItem[])];
-    const source = all.find(it => it.id === sourceId);
-    const target = all.find(it => it.id === targetId);
-    if (!source || !target || !target.due_at) return;
-    
-    const targetDate = new Date(target.due_at);
-    // Put source slightly before target
-    targetDate.setMinutes(targetDate.getMinutes() - 1);
-    
-    await api.updatePlannerItem(sourceId, userId, { due_at: targetDate.toISOString() });
-    await Promise.all([refresh(), refreshEvents(focusDay)]);
-  };
-
-  const focusDayTasks = useMemo(() => {
-    return dayEvents.filter((it) => it.type === 'task') as unknown as PlannerItem[];
-  }, [dayEvents]);
-
-  const weekTasksByDate = useMemo(() => {
-    const map: Record<string, PlannerItem[]> = {};
-    calendarItems.forEach((it: any) => {
-      if (it?.type !== 'task') return;
-      const key = toDateKey(it.due_at);
+  const tasksByDate = useMemo(() => {
+    const map: Record<string, PlannerTask[]> = {};
+    rangeTasks.forEach((task) => {
+      const key = dateKeyFromIso(task.due_at);
       if (!key) return;
       if (!map[key]) map[key] = [];
-      map[key].push(it);
-    });
-    Object.keys(map).forEach((k) => {
-      map[k] = map[k].sort((a, b) => {
-        const sa = a.status === 'done' ? 1 : 0;
-        const sb = b.status === 'done' ? 1 : 0;
-        if (sa !== sb) return sa - sb;
-        return 0;
-      });
+      map[key].push(task);
     });
     return map;
-  }, [calendarItems]);
+  }, [rangeTasks]);
+
+  const pastOpenByDate = useMemo(() => {
+    const map: Record<string, PlannerTask[]> = {};
+    pastOpenTasks.forEach((task) => {
+      const key = dateKeyFromIso(task.due_at);
+      if (!key) return;
+      if (key >= todayKey) return;
+      if (!map[key]) map[key] = [];
+      map[key].push(task);
+    });
+    return map;
+  }, [pastOpenTasks, todayKey]);
 
   const birthdayReminders = useMemo(() => {
-    const base = new Date();
-    base.setHours(0, 0, 0, 0);
+    const base = startOfDay(new Date());
     const items = (people || [])
-      .map((p) => {
-        const raw = String(p.birthday || '').trim();
+      .map((person) => {
+        const raw = String(person.birthday || '').trim();
         if (!raw) return null;
         const parts = raw.split('-').map((x) => parseInt(x, 10));
-        if (parts.length < 3 || parts.some((n) => Number.isNaN(n))) return null;
-        const mm = parts[1];
-        const dd = parts[2];
-        if (!mm || !dd) return null;
-
+        if (parts.length < 3 || parts.some(Number.isNaN)) return null;
         const next = new Date(base);
-        next.setFullYear(base.getFullYear(), mm - 1, dd);
-        const diffDays = Math.round((next.getTime() - base.getTime()) / 86400000);
-        const useNext = diffDays < 0 ? (() => { const d = new Date(next); d.setFullYear(d.getFullYear() + 1); return d; })() : next;
-        const days = Math.round((useNext.getTime() - base.getTime()) / 86400000);
+        next.setFullYear(base.getFullYear(), parts[1] - 1, parts[2]);
+        if (next.getTime() < base.getTime()) next.setFullYear(next.getFullYear() + 1);
+        const days = Math.round((next.getTime() - base.getTime()) / 86400000);
         if (days < 0 || days > 7) return null;
-
-        return {
-          id: p.id,
-          name: p.name || '未命名',
-          days,
-          dateText: `${mm}月${dd}日`,
-        };
+        return { id: person.id, name: person.name || '未命名', days };
       })
       .filter(Boolean) as any[];
-    items.sort((a, b) => a.days - b.days);
-    return items;
+    return items.sort((a, b) => a.days - b.days);
   }, [people]);
 
-  return (
-    <div className="h-full flex flex-col gap-4">
-      <div className="bg-white border border-gray-200 rounded-2xl p-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="text-xl font-bold text-gray-900">日程与待办</div>
-            <div className="text-sm text-gray-500 mt-1">用清单管理待办，并用周视图记录日程。</div>
-            {(calendarLoadError || listLoadError) && (
-              <div className="mt-2 text-xs text-red-600">
-                {calendarLoadError || listLoadError}
-              </div>
-            )}
-          </div>
-        </div>
+  const reloadAfterWrite = async () => {
+    await loadTasks();
+  };
 
-        <div className="mt-4 flex flex-col lg:flex-row gap-3 lg:items-center">
-          <div className="relative">
-            <select
-              value={selectedListId}
-              onChange={(e) => setSelectedListId(e.target.value)}
-              className="appearance-none bg-white border border-gray-200 rounded-lg pl-3 pr-9 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
-            >
-              <option value="">当前清单：{inboxId ? '收集箱(默认)' : '全部'}</option>
-              {lists.map((l) => (
-                <option key={l.id} value={l.id}>{l.name}{l.is_default_inbox ? '（收集箱）' : ''}</option>
-              ))}
-            </select>
-            <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          </div>
-          <div className="flex-1" />
-        </div>
+  const createTask = async (dateKey: string, title: string, status: TaskStatus = 'open') => {
+    const clean = title.trim();
+    if (!clean) return;
+    setSaving(true);
+    try {
+      const existingCount = (tasksByDate[dateKey] || []).length;
+      await api.createPlannerItem(userId, {
+        type: 'task',
+        title: clean,
+        due_at: taskDueIso(dateKey, existingCount),
+        status,
+        priority: 'medium',
+        list_id: activeListId || null,
+      });
+      await reloadAfterWrite();
+    } finally {
+      setSaving(false);
+    }
+  };
 
-        <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50/40 p-4">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <div className="text-sm font-bold text-gray-900">今日秘书</div>
-              <div className="text-xs text-gray-600 mt-1">用于提醒：待办里不容易被你看到的信息。</div>
-            </div>
-            <div className="text-xs text-gray-500">
-              {peopleLoading ? '同步人物信息中…' : `今日待办：${focusDayTasks.filter((t: any) => t.status !== 'done').length} 条未完成`}
-            </div>
-          </div>
+  const importTasks = async (text: string, fallbackDateKey: string) => {
+    const parsed = parseImportText(text, fallbackDateKey);
+    if (!parsed.length) return;
+    setSaving(true);
+    try {
+      const counts: Record<string, number> = {};
+      parsed.forEach((item) => {
+        if (counts[item.dateKey] === undefined) counts[item.dateKey] = (tasksByDate[item.dateKey] || []).length;
+      });
 
-          <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <div className="bg-white rounded-lg border border-gray-100 p-3">
-              <div className="text-xs font-bold text-gray-900">7 天内生日</div>
-              {birthdayReminders.length === 0 ? (
-                <div className="mt-2 text-xs text-gray-400 italic">暂无</div>
-              ) : (
-                <div className="mt-2 space-y-1">
-                  {birthdayReminders.slice(0, 5).map((b) => (
-                    <div key={b.id} className="text-xs text-gray-700 flex items-center justify-between gap-2">
-                      <div className="truncate">{b.name}</div>
-                      <div className="text-gray-500 shrink-0">{b.days === 0 ? '今天' : `${b.days}天后`} · {b.dateText}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+      for (const item of parsed) {
+        const orderIndex = counts[item.dateKey] || 0;
+        counts[item.dateKey] = orderIndex + 1;
+        await api.createPlannerItem(userId, {
+          type: 'task',
+          title: item.title,
+          due_at: taskDueIso(item.dateKey, orderIndex),
+          status: item.status,
+          priority: 'medium',
+          list_id: activeListId || null,
+        });
+      }
+      setImportText('');
+      setImportOpen(false);
+      await reloadAfterWrite();
+    } finally {
+      setSaving(false);
+    }
+  };
 
-            <div className="bg-white rounded-lg border border-gray-100 p-3 lg:col-span-2 flex flex-col gap-4">
-              {/* Section 1: AI Suggestions */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-                    <div className="text-xs font-bold text-gray-900">AI 建议（人脉维护）</div>
-                  </div>
-                  <button onClick={() => loadSecretary({ refresh: true })} className="text-xs text-gray-500 hover:underline">刷新</button>
-                </div>
-                {secretaryLoading ? (
-                  <div className="text-xs text-gray-400">正在思考中…</div>
-                ) : secretary?.available === false ? (
-                  <div className="text-xs text-red-500">{secretary?.message || '服务不可用'}</div>
-                ) : (Array.isArray(secretary?.suggestions) && secretary.suggestions.length > 0) ? (
-                  <div className="space-y-2">
-                    {secretary.suggestions.map((s: any, idx: number) => (
-                      <div key={s.person_id || idx} className="text-xs text-gray-700 bg-blue-50/30 p-2 rounded border border-blue-100/50">
-                        <div className="flex justify-between items-start">
-                          <span className="font-bold text-gray-900">{s.person_name}</span>
-                          <span className="text-[10px] text-blue-600 bg-blue-100/50 px-1.5 py-0.5 rounded">{s.when === 'today' ? '今天' : s.when === 'tomorrow' ? '明天' : '本周'}</span>
-                        </div>
-                        <div className="text-gray-500 mt-0.5">{s.reason}</div>
-                        <div className="mt-1 font-medium text-blue-800">建议：{s.action}</div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-xs text-gray-400 italic">目前人脉维护良好，暂无特别建议。</div>
-                )}
-              </div>
+  const toggleTask = async (task: PlannerTask) => {
+    const nextStatus = task.status === 'done' ? 'open' : 'done';
+    setRangeTasks((items) => items.map((item) => (item.id === task.id ? { ...item, status: nextStatus } : item)));
+    setPastOpenTasks((items) => items.filter((item) => item.id !== task.id));
+    await api.updatePlannerItem(task.id, userId, { status: nextStatus });
+    await reloadAfterWrite();
+  };
 
-              {/* Section 2: AI Comprehensive Reminders */}
-              <div className="pt-3 border-t border-gray-100">
-                <div className="flex items-center gap-1.5 mb-2">
-                  <BrainCircuit className="w-3.5 h-3.5 text-purple-600" />
-                  <div className="text-xs font-bold text-gray-900">AI 综合提醒（事务与认知）</div>
-                </div>
-                {secretaryLoading ? (
-                  <div className="text-xs text-gray-400">正在分析上下文…</div>
-                ) : (Array.isArray(secretary?.general_reminders) && secretary.general_reminders.length > 0) ? (
-                  <div className="space-y-2">
-                    {secretary.general_reminders.map((r: any, idx: number) => {
-                      const isHigh = r.priority === 'high';
-                      const tone = isHigh ? 'red' : r.type === 'idea' ? 'purple' : 'gray';
-                      const bg = tone === 'red' ? 'bg-red-50/30 border-red-100/50' : tone === 'purple' ? 'bg-purple-50/30 border-purple-100/50' : 'bg-gray-50/50 border-gray-100';
-                      const text = tone === 'red' ? 'text-red-900' : tone === 'purple' ? 'text-purple-900' : 'text-gray-900';
-                      
-                      return (
-                        <div key={idx} className={`text-xs p-2 rounded border ${bg}`}>
-                          <div className={`font-bold ${text} mb-0.5 flex justify-between`}>
-                            <span>{r.title}</span>
-                            {isHigh && <span className="text-[10px] text-red-600 bg-red-100/50 px-1.5 py-0.5 rounded">重要</span>}
-                          </div>
-                          <div className="text-gray-600 leading-relaxed">{r.content}</div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div className="text-xs text-gray-400 italic">今日事务井井有条，无需额外提醒。</div>
-                )}
-              </div>
+  const updateTaskTitle = async (task: PlannerTask, title: string) => {
+    const clean = title.trim();
+    if (!clean) return;
+    setRangeTasks((items) => items.map((item) => (item.id === task.id ? { ...item, title: clean } : item)));
+    setPastOpenTasks((items) => items.map((item) => (item.id === task.id ? { ...item, title: clean } : item)));
+    await api.updatePlannerItem(task.id, userId, { title: clean });
+    await loadTasks();
+  };
 
-              {Array.isArray(secretary?.document_context?.references) && secretary.document_context.references.length > 0 && (
-                <div className="pt-3 border-t border-gray-100">
-                  <div className="flex items-center gap-1.5 mb-2">
-                    <BookOpen className="w-3.5 h-3.5 text-emerald-600" />
-                    <div className="text-xs font-bold text-gray-900">AI 文档记忆</div>
-                    <div className="text-[10px] text-gray-400">{secretary.document_context.corpus?.selected_count || secretary.document_context.references.length} 个块</div>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {secretary.document_context.references.slice(0, 4).map((ref: any) => (
-                      <a
-                        key={`${ref.ref_id}-${ref.url || ref.title}`}
-                        href={ref.url || '#'}
-                        className="max-w-full truncate rounded border border-emerald-100 bg-emerald-50/40 px-2 py-1 text-[11px] text-emerald-900 hover:bg-emerald-50"
-                        title={ref.snippet || ref.title}
-                      >
-                        {ref.ref_id} · {ref.title}{ref.heading ? ` / ${ref.heading}` : ''}
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+  const deleteTask = async (task: PlannerTask) => {
+    setRangeTasks((items) => items.filter((item) => item.id !== task.id));
+    setPastOpenTasks((items) => items.filter((item) => item.id !== task.id));
+    await api.deletePlannerItem(task.id, userId);
+    await reloadAfterWrite();
+  };
 
-      <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
-        <PlannerCalendarPanel
-          focusDay={focusDay}
-          setFocusDay={setFocusDay}
-          dayEvents={dayEvents}
-          calendarMode={calendarMode}
-          setCalendarMode={setCalendarMode}
-          tasksByDate={weekTasksByDate as any}
-          creating={creatingEvent}
-          onCreateEvent={async ({ title, startLocal, endLocal }) => {
-            const s = new Date(startLocal);
-            const e = new Date(endLocal);
-            if (Number.isNaN(s.getTime()) || Number.isNaN(e.getTime()) || e.getTime() <= s.getTime()) return;
-            setCreatingEvent(true);
-            try {
-              await api.createPlannerItem(userId, {
-                type: 'event',
-                title: String(title || '').trim(),
-                start_at: s.toISOString(),
-                end_at: e.toISOString(),
-                status: 'open',
-                priority: 'medium',
-                list_id: activeListId || null,
-              });
-              await refreshEvents(focusDay);
-            } finally {
-              setCreatingEvent(false);
-            }
-          }}
-          onDeleteEvent={async (id, title) => {
-            const ok = window.confirm(`确认删除「${title}」？`);
-            if (!ok) return;
-            await api.deletePlannerItem(id, userId);
-            await refreshEvents(focusDay);
-          }}
-          onToggleTaskDone={async (it) => {
-            const next = it.status === 'done' ? 'open' : 'done';
-            await api.updatePlannerItem(it.id, userId, { status: next });
-            await Promise.all([refreshEvents(focusDay), refresh()]);
-          }}
-          onDeleteTask={async (it) => {
-            const ok = window.confirm(`确认删除「${it.title}」？`);
-            if (!ok) return;
-            await api.deletePlannerItem(it.id, userId);
-            await Promise.all([refreshEvents(focusDay), refresh()]);
-          }}
-          onMoveTaskToDate={handleMoveTaskToDate}
-          isDragging={isDragging}
-          setIsDragging={setIsDragging}
+  const moveTaskToToday = async (task: PlannerTask) => {
+    const existingCount = (tasksByDate[todayKey] || []).length;
+    await api.updatePlannerItem(task.id, userId, { due_at: taskDueIso(todayKey, existingCount), status: 'open' });
+    await reloadAfterWrite();
+  };
+
+  const weekDays = useMemo(() => {
+    const start = getWeekStart(focusDay);
+    return Array.from({ length: 7 }).map((_, index) => addDays(start, index));
+  }, [focusDayKey]);
+
+  const monthDays = useMemo(() => {
+    const start = getMonthGridStart(focusDay);
+    return Array.from({ length: 42 }).map((_, index) => addDays(start, index));
+  }, [focusDayKey]);
+
+  const renderDayView = () => (
+    <div className="space-y-4">
+      {focusDayKey === todayKey && Object.keys(pastOpenByDate).length > 0 && (
+        <LegacySection
+          tasksByDate={pastOpenByDate}
+          onToggle={toggleTask}
+          onUpdateTitle={updateTaskTitle}
+          onDelete={deleteTask}
+          onMoveToToday={moveTaskToToday}
         />
-
-        <PlannerTodoPanel
-          activeListId={activeListId}
-          focusDayLabel={focusDayKey}
-          focusDayTasks={focusDayTasks}
-          overdue={overdue}
-          upcoming={upcoming}
-          creating={creatingTask}
-          onCreateTask={async ({ title, dueDate, listId }) => {
-            const t = String(title || '').trim();
-            if (!t) return;
-            setCreatingTask(true);
-            try {
-              let dueAt: string | null = null;
-              if (dueDate) {
-                const base = new Date();
-                const parts = String(dueDate).split('-').map((x) => parseInt(x, 10));
-                if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
-                  const d = new Date(base);
-                  d.setFullYear(parts[0], parts[1] - 1, parts[2]);
-                  d.setHours(base.getHours(), base.getMinutes(), 0, 0);
-                  dueAt = d.toISOString();
-                }
-              }
-              await api.createPlannerItem(userId, {
-                type: 'task',
-                title: t,
-                due_at: dueAt,
-                status: 'open',
-                priority: 'medium',
-                list_id: listId || null,
-              });
-              await Promise.all([refresh(), refreshEvents(focusDay)]);
-            } finally {
-              setCreatingTask(false);
-            }
-          }}
-          onToggleDone={async (it) => {
-            const next = it.status === 'done' ? 'open' : 'done';
-            await api.updatePlannerItem(it.id, userId, { status: next });
-            await Promise.all([refresh(), refreshEvents(focusDay)]);
-          }}
-          onUpdate={async (it, patch) => {
-            const nextPatch: any = {};
-            if (typeof patch.title === 'string') nextPatch.title = patch.title;
-            if ('dueDate' in patch) {
-              if (!patch.dueDate) {
-                nextPatch.due_at = null;
-              } else {
-                const base = new Date();
-                const parts = String(patch.dueDate).split('-').map((x) => parseInt(x, 10));
-                if (parts.length === 3 && parts.every((n) => Number.isFinite(n))) {
-                  const d = new Date(base);
-                  d.setFullYear(parts[0], parts[1] - 1, parts[2]);
-                  d.setHours(base.getHours(), base.getMinutes(), 0, 0);
-                  nextPatch.due_at = d.toISOString();
-                }
-              }
-            }
-            await api.updatePlannerItem(it.id, userId, nextPatch);
-            await Promise.all([refresh(), refreshEvents(focusDay)]);
-          }}
-          onDelete={async (it) => {
-            const ok = window.confirm(`确认删除「${it.title}」？`);
-            if (!ok) return;
-            await api.deletePlannerItem(it.id, userId);
-            await Promise.all([refresh(), refreshEvents(focusDay)]);
-          }}
-          setIsDragging={setIsDragging}
-          onReorder={handleReorderTask}
-        />
-      </div>
-
-      {loading && (
-        <div className="text-xs text-gray-400">加载中…</div>
       )}
+      <DayChecklist
+        date={focusDay}
+        title={focusDayKey === todayKey ? '今天' : formatDateTitle(focusDay)}
+        subtitle={focusDayKey === todayKey ? formatDateTitle(focusDay) : undefined}
+        tasks={tasksByDate[focusDayKey] || []}
+        onCreate={createTask}
+        onBulkImport={importTasks}
+        onToggle={toggleTask}
+        onUpdateTitle={updateTaskTitle}
+        onDelete={deleteTask}
+      />
+    </div>
+  );
+
+  const renderWeekView = () => (
+    <div className="overflow-x-auto pb-2">
+      <div className="grid min-w-[980px] grid-cols-7 gap-3">
+        {weekDays.map((day) => {
+          const key = toDateKey(day);
+          return (
+            <DayChecklist
+              key={key}
+              date={day}
+              title={`周${weekdays[day.getDay()]}`}
+              subtitle={formatShortDate(day)}
+              compact
+              tasks={tasksByDate[key] || []}
+              onCreate={createTask}
+              onBulkImport={importTasks}
+              onToggle={toggleTask}
+              onUpdateTitle={updateTaskTitle}
+              onDelete={deleteTask}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const renderMonthView = () => (
+    <div className="rounded-xl border border-gray-200 bg-white p-3">
+      <div className="grid grid-cols-7 gap-2">
+        {monthDays.map((day) => {
+          const key = toDateKey(day);
+          const tasks = sortTasks(tasksByDate[key] || []);
+          const openCount = tasks.filter((task) => task.status !== 'done').length;
+          const isInMonth = day.getMonth() === focusDay.getMonth();
+          const isToday = key === todayKey;
+          return (
+            <button
+              key={key}
+              onClick={() => {
+                setFocusDay(day);
+                setViewMode('day');
+              }}
+              className={`min-h-[124px] rounded-lg border p-2 text-left transition-colors hover:bg-gray-50 ${
+                isToday ? 'border-primary bg-primary/5' : 'border-gray-200 bg-white'
+              } ${!isInMonth ? 'opacity-45' : ''}`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className={`text-sm font-bold ${isToday ? 'text-primary' : 'text-gray-900'}`}>{day.getDate()}</div>
+                {tasks.length > 0 && <div className="text-[10px] text-gray-500">{openCount}/{tasks.length}</div>}
+              </div>
+              <div className="mt-2 space-y-1">
+                {tasks.slice(0, 4).map((task) => (
+                  <div
+                    key={task.id}
+                    className={`truncate rounded px-1.5 py-0.5 text-[11px] ${
+                      task.status === 'done' ? 'bg-gray-50 text-gray-400 line-through' : 'bg-gray-100 text-gray-700'
+                    }`}
+                  >
+                    {task.title}
+                  </div>
+                ))}
+                {tasks.length > 4 && <div className="text-[10px] text-gray-400">+{tasks.length - 4}</div>}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-full overflow-hidden rounded-2xl border border-gray-200 bg-gray-50">
+      <DateNav focusDay={focusDay} viewMode={viewMode} setFocusDay={setFocusDay} setViewMode={setViewMode} />
+
+      <div className="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <main className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <select
+                  value={selectedListId}
+                  onChange={(event) => setSelectedListId(event.target.value)}
+                  className="h-9 appearance-none rounded-lg border border-gray-200 bg-white py-1 pl-3 pr-9 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="">当前清单：{inboxId ? '收集箱' : '全部'}</option>
+                  {lists.map((list) => (
+                    <option key={list.id} value={list.id}>
+                      {list.name}{list.is_default_inbox ? '（收集箱）' : ''}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              </div>
+              {(loading || saving) && (
+                <div className="flex items-center gap-1.5 text-xs text-gray-400">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  {saving ? '保存中' : '加载中'}
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => setImportOpen((value) => !value)}
+              className="inline-flex h-9 items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              <ClipboardPaste className="h-4 w-4" />
+              批量粘贴
+            </button>
+          </div>
+
+          {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+
+          {importOpen && (
+            <section className="rounded-xl border border-indigo-200 bg-white p-4">
+              <textarea
+                value={importText}
+                onChange={(event) => setImportText(event.target.value)}
+                rows={8}
+                className="w-full resize-y rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder={'0524\n完成拟合分析 1\n训练模型\n\n0612\n完成计算材料学作业'}
+              />
+              <div className="mt-3 flex justify-end gap-2">
+                <button onClick={() => setImportOpen(false)} className="h-9 rounded-lg border border-gray-200 px-3 text-sm text-gray-600 hover:bg-gray-50">
+                  取消
+                </button>
+                <button
+                  onClick={() => importTasks(importText, focusDayKey)}
+                  disabled={saving || !importText.trim()}
+                  className="h-9 rounded-lg bg-primary px-4 text-sm font-medium text-white hover:bg-primary/90 disabled:opacity-50"
+                >
+                  导入
+                </button>
+              </div>
+            </section>
+          )}
+
+          {viewMode === 'day' && renderDayView()}
+          {viewMode === 'week' && renderWeekView()}
+          {viewMode === 'month' && renderMonthView()}
+        </main>
+
+        <AssistantPanel
+          peopleLoading={peopleLoading}
+          birthdayReminders={birthdayReminders}
+          secretary={secretary}
+          secretaryLoading={secretaryLoading}
+          onRefreshSecretary={() => loadSecretary({ refresh: true })}
+        />
+      </div>
     </div>
   );
 }
