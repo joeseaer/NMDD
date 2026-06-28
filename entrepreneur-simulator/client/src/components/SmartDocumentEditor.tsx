@@ -900,7 +900,7 @@ turndownService.addRule('keepSmartDocumentBlocks', {
     return (
       (nodeName === 'details' && dataType === 'toggle') ||
       (nodeName === 'div' && ['callout', 'embed', 'media', 'template-button', 'equation', 'synced-block', 'database'].includes(dataType || '')) ||
-      (nodeName === 'a' && ['bookmark', 'page-link'].includes(dataType || ''))
+      (nodeName === 'a' && ['bookmark', 'page-link', 'image-link'].includes(dataType || ''))
     );
   },
   replacement: (_content, node) => {
@@ -1199,6 +1199,11 @@ const NotionImageComponent = (props: any) => {
         updateAttributes({ link: nextLink.trim() });
     };
 
+    const openImageLink = () => {
+        if (!link) return;
+        window.open(link, '_blank', 'noopener,noreferrer');
+    };
+
     const copyImageLink = async () => {
         try {
             await navigator.clipboard.writeText(src);
@@ -1245,32 +1250,23 @@ const NotionImageComponent = (props: any) => {
                     className={`overflow-hidden border border-gray-100 bg-gray-50 shadow-sm ${shapeClass}`}
                     style={aspectRatio ? { aspectRatio } : undefined}
                 >
-                    {link ? (
-                        <a
-                            href={link}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block"
-                            contentEditable={false}
-                            onMouseDown={(event) => event.stopPropagation()}
-                        >
-                            <img
-                                src={src}
-                                alt={alt || caption}
-                                title={node.attrs.title || alt || caption}
-                                className={`block w-full ${aspectRatio ? `h-full ${fit === 'cover' ? 'object-cover' : 'object-contain'}` : 'h-auto'}`}
-                                draggable={false}
-                            />
-                        </a>
-                    ) : (
-                        <img
-                            src={src}
-                            alt={alt || caption}
-                            title={node.attrs.title || alt || caption}
-                            className={`block w-full ${aspectRatio ? `h-full ${fit === 'cover' ? 'object-cover' : 'object-contain'}` : 'h-auto'}`}
-                            draggable={false}
-                        />
-                    )}
+                    <img
+                        src={src}
+                        alt={alt || caption}
+                        title={link ? '打开图片链接' : node.attrs.title || alt || caption}
+                        role={link ? 'link' : undefined}
+                        tabIndex={link ? 0 : undefined}
+                        className={`block w-full ${link ? 'cursor-pointer' : ''} ${aspectRatio ? `h-full ${fit === 'cover' ? 'object-cover' : 'object-contain'}` : 'h-auto'}`}
+                        draggable={false}
+                        onMouseDown={link ? (event) => event.stopPropagation() : undefined}
+                        onClick={link ? openImageLink : undefined}
+                        onKeyDown={link ? (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                openImageLink();
+                            }
+                        } : undefined}
+                    />
                 </div>
 
                 <div
@@ -1353,6 +1349,11 @@ const NotionImageComponent = (props: any) => {
                     <ImageActionButton title="图片链接" active={Boolean(link)} onClick={promptImageLink}>
                         <LinkIcon className="h-4 w-4" />
                     </ImageActionButton>
+                    {link && (
+                        <ImageActionButton title="打开图片链接" onClick={openImageLink}>
+                            <ExternalLink className="h-4 w-4" />
+                        </ImageActionButton>
+                    )}
                     <ImageActionButton title="复制图片链接" onClick={copyImageLink}>
                         <Copy className="h-4 w-4" />
                     </ImageActionButton>
@@ -1649,8 +1650,44 @@ const preserveLegacyMarkdownBlankLines = (value: string) => {
 
 const markdownToHtml = (value: string) => mdParser.render(preserveLegacyMarkdownBlankLines(value || ''));
 
+const normalizeSmartImageLinksForExport = (html: string) => {
+    if (!html || typeof document === 'undefined') return html;
+
+    const template = document.createElement('template');
+    template.innerHTML = html;
+
+    template.content.querySelectorAll('img[data-link]').forEach((image) => {
+        const link = image.getAttribute('data-link')?.trim();
+        if (!link) return;
+
+        const parent = image.parentElement;
+        if (!parent) return;
+
+        if (parent.matches('a[data-type="image-link"]')) {
+            parent.setAttribute('href', link);
+            parent.setAttribute('target', '_blank');
+            parent.setAttribute('rel', 'noopener noreferrer');
+            parent.setAttribute('data-link', link);
+            return;
+        }
+
+        const anchor = document.createElement('a');
+        anchor.setAttribute('href', link);
+        anchor.setAttribute('target', '_blank');
+        anchor.setAttribute('rel', 'noopener noreferrer');
+        anchor.setAttribute('data-type', 'image-link');
+        anchor.setAttribute('data-link', link);
+        anchor.className = 'smart-doc-image-link';
+
+        parent.replaceChild(anchor, image);
+        anchor.appendChild(image);
+    });
+
+    return template.innerHTML;
+};
+
 const editorToMarkdown = (editor: any) => {
-    const html = editor.getHTML();
+    const html = normalizeSmartImageLinksForExport(editor.getHTML());
     return turndownService.turndown(normalizeMindMapHtmlForTurndown(html));
 };
 
@@ -1773,7 +1810,11 @@ export const SmartDocumentEditor = ({
                         },
                         link: {
                             default: '',
-                            parseHTML: element => element.getAttribute('data-link') || '',
+                            parseHTML: element => (
+                                element.getAttribute('data-link')
+                                || (element.closest('a[data-type="image-link"],a[data-image-link],a[href]') as HTMLAnchorElement | null)?.getAttribute('href')
+                                || ''
+                            ),
                             renderHTML: attributes => ({
                                 'data-link': attributes.link || undefined,
                             }),
@@ -1909,7 +1950,7 @@ export const SmartDocumentEditor = ({
             }
         },
         onUpdate: ({ editor }) => {
-             const html = editor.getHTML();
+             const html = normalizeSmartImageLinksForExport(editor.getHTML());
              const normalizedHtml = normalizeMindMapHtmlForTurndown(html);
              const markdown = turndownService.turndown(normalizedHtml);
              const json = editor.getJSON();
