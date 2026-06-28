@@ -318,7 +318,7 @@ function TaskRow({
   };
 
   return (
-    <div className="group flex items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-50">
+    <div className="group flex min-w-0 items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-50">
       <button
         onClick={() => onToggle(task)}
         className={`mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
@@ -339,7 +339,7 @@ function TaskRow({
             event.currentTarget.blur();
           }
         }}
-        className={`min-h-7 flex-1 bg-transparent text-[15px] leading-7 outline-none ${
+        className={`min-h-7 min-w-0 flex-1 bg-transparent text-[15px] leading-7 outline-none ${
           task.status === 'done' ? 'text-gray-400 line-through' : 'text-gray-900'
         }`}
       />
@@ -404,18 +404,35 @@ function DayChecklist({
   };
 
   return (
-    <section className="rounded-xl border border-gray-200 bg-white">
-      <div className="flex items-start justify-between gap-3 border-b border-gray-100 px-4 py-3">
+    <section className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <div
+        className={`flex items-start justify-between border-b border-gray-100 ${
+          compact ? 'gap-2 px-3 py-3' : 'gap-3 px-4 py-3'
+        }`}
+      >
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
             {showDateBadge && (
-              <div className="rounded-md bg-gray-100 px-2 py-1 text-xs font-bold text-gray-700">{formatCompactDate(date)}</div>
+              <div className="shrink-0 rounded-md bg-gray-100 px-2 py-1 text-xs font-bold text-gray-700">
+                {formatCompactDate(date)}
+              </div>
             )}
-            <h2 className={`${compact ? 'text-sm' : 'text-base'} font-bold text-gray-900`}>{title || formatDateTitle(date)}</h2>
+            <h2 className={`${compact ? 'text-sm' : 'text-base'} truncate font-bold text-gray-900`}>
+              {title || formatDateTitle(date)}
+            </h2>
           </div>
           {subtitle && <div className="mt-1 text-xs text-gray-500">{subtitle}</div>}
         </div>
-        <div className="shrink-0 text-xs text-gray-500">{openCount}/{ordered.length} 未完成</div>
+        <div className={`shrink-0 text-xs text-gray-500 ${compact ? 'text-right leading-4' : ''}`}>
+          {compact ? (
+            <>
+              <span className="block">{openCount}/{ordered.length}</span>
+              <span className="block">未完成</span>
+            </>
+          ) : (
+            `${openCount}/${ordered.length} 未完成`
+          )}
+        </div>
       </div>
 
       <div className={`${compact ? 'p-2' : 'p-3'}`}>
@@ -452,8 +469,8 @@ function DayChecklist({
                 onBulkImport(text, dateKey);
               }
             }}
-            className="min-h-7 flex-1 bg-transparent text-[15px] outline-none placeholder:text-gray-400"
-            placeholder="继续输入，回车新增..."
+            className="min-h-7 min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-gray-400"
+            placeholder={compact ? '新增，回车' : '继续输入，回车新增...'}
           />
         </div>
       </div>
@@ -885,7 +902,7 @@ export default function Planner() {
 
   const renderWeekView = () => (
     <div className="overflow-x-auto pb-2">
-      <div className="grid min-w-[980px] grid-cols-7 gap-3">
+      <div className="grid min-w-[1680px] grid-cols-7 gap-3">
         {weekDays.map((day) => {
           const key = toDateKey(day);
           return (
