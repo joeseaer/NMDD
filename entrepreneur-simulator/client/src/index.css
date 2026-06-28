@@ -80,3 +80,7 @@
 .resize-cursor {
   cursor: col-resize;
 }
+
+.smart-doc-action-label::before {
+  content: attr(data-label);
+}

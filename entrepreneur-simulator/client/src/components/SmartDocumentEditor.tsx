@@ -1141,12 +1141,14 @@ const safeDownloadName = (value: string) => {
 
 const ImageActionButton = ({
     children,
+    label,
     title,
     onClick,
     active,
     danger,
 }: {
-    children: React.ReactNode;
+    children?: React.ReactNode;
+    label?: string;
     title: string;
     onClick: () => void;
     active?: boolean;
@@ -1155,6 +1157,9 @@ const ImageActionButton = ({
     <button
         type="button"
         title={title}
+        aria-label={title}
+        data-smart-doc-ui="button"
+        data-label={label || undefined}
         onMouseDown={(event) => event.preventDefault()}
         onClick={(event) => {
             event.preventDefault();
@@ -1169,7 +1174,7 @@ const ImageActionButton = ({
                     : 'text-gray-600 hover:bg-gray-100'
         }`}
     >
-        {children}
+        {label ? <span aria-hidden="true" className="smart-doc-action-label" data-label={label} /> : children}
     </button>
 );
 
@@ -1338,6 +1343,8 @@ const NotionImageComponent = (props: any) => {
                     className={`absolute left-0 top-1/2 h-16 w-1.5 -translate-x-2 -translate-y-1/2 cursor-ew-resize rounded-full bg-gray-900 transition-opacity ${
                         toolbarVisible ? 'opacity-90' : 'opacity-0 group-hover:opacity-80'
                     }`}
+                    aria-hidden="true"
+                    data-smart-doc-ui="resize-handle"
                     onMouseDown={(event) => handleResizeMouseDown(event, 'left')}
                     title="拖拽调整宽度"
                 />
@@ -1345,6 +1352,8 @@ const NotionImageComponent = (props: any) => {
                     className={`absolute right-0 top-1/2 h-16 w-1.5 translate-x-2 -translate-y-1/2 cursor-ew-resize rounded-full bg-gray-900 transition-opacity ${
                         toolbarVisible ? 'opacity-90' : 'opacity-0 group-hover:opacity-80'
                     }`}
+                    aria-hidden="true"
+                    data-smart-doc-ui="resize-handle"
                     onMouseDown={(event) => handleResizeMouseDown(event, 'right')}
                     title="拖拽调整宽度"
                 />
@@ -1354,6 +1363,9 @@ const NotionImageComponent = (props: any) => {
                         toolbarVisible ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
                     }`}
                     contentEditable={false}
+                    data-smart-doc-ui="image-toolbar"
+                    role="toolbar"
+                    aria-label="图片操作"
                 >
                     <ImageActionButton title="左对齐" active={align === 'left'} onClick={() => updateAttributes({ align: 'left' })}>
                         <AlignLeft className="h-4 w-4" />
@@ -1368,49 +1380,42 @@ const NotionImageComponent = (props: any) => {
                         <ImageActionButton
                             key={percent}
                             title={`${percent}% 宽度`}
+                            label={String(percent)}
                             active={width === `${percent}%`}
                             onClick={() => commitWidth(`${percent}%`)}
-                        >
-                            {percent}
-                        </ImageActionButton>
+                        />
                     ))}
                     <ImageActionButton
                         title="原始比例"
+                        label="原"
                         active={!aspectRatio && shape === 'rounded'}
                         onClick={() => updateAttributes({ aspectRatio: '', fit: 'contain', shape: 'rounded' })}
-                    >
-                        原
-                    </ImageActionButton>
+                    />
                     <ImageActionButton
                         title="裁剪 16:9"
+                        label="16:9"
                         active={aspectRatio === '16 / 9' && fit === 'cover'}
                         onClick={() => updateAttributes({ aspectRatio: '16 / 9', fit: 'cover', shape: 'rounded' })}
-                    >
-                        16:9
-                    </ImageActionButton>
+                    />
                     <ImageActionButton
                         title="裁剪 1:1"
+                        label="1:1"
                         active={aspectRatio === '1 / 1' && fit === 'cover' && shape !== 'circle'}
                         onClick={() => updateAttributes({ aspectRatio: '1 / 1', fit: 'cover', shape: 'rounded' })}
-                    >
-                        1:1
-                    </ImageActionButton>
+                    />
                     <ImageActionButton
                         title="圆形遮罩"
+                        label="圆"
                         active={shape === 'circle'}
                         onClick={() => updateAttributes({ aspectRatio: '1 / 1', fit: 'cover', shape: 'circle' })}
-                    >
-                        圆
-                    </ImageActionButton>
+                    />
                     <ImageActionButton title="添加说明" active={showCaption || Boolean(caption)} onClick={() => setShowCaption(true)}>
                         <Captions className="h-4 w-4" />
                     </ImageActionButton>
                     <ImageActionButton title="替换图片" onClick={() => fileInputRef.current?.click()}>
                         <ImagePlus className="h-4 w-4" />
                     </ImageActionButton>
-                    <ImageActionButton title="Alt 文本" active={Boolean(alt)} onClick={promptAltText}>
-                        ALT
-                    </ImageActionButton>
+                    <ImageActionButton title="Alt 文本" label="ALT" active={Boolean(alt)} onClick={promptAltText} />
                     <ImageActionButton title="图片链接" active={Boolean(link)} onClick={promptImageLink}>
                         <LinkIcon className="h-4 w-4" />
                     </ImageActionButton>
@@ -1464,6 +1469,7 @@ const NotionImageComponent = (props: any) => {
                 <div
                     className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 p-8"
                     contentEditable={false}
+                    data-smart-doc-ui="image-preview"
                     onMouseDown={(event) => {
                         event.preventDefault();
                         event.stopPropagation();
@@ -1637,9 +1643,14 @@ const NotionMediaComponent = (props: any) => {
                     />
                     <div className="truncate text-xs text-gray-400">{meta || url}</div>
                 </div>
-                <div className={`flex flex-shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white/95 p-1 shadow-sm transition-opacity ${
-                    selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
-                }`}>
+                <div
+                    className={`flex flex-shrink-0 items-center gap-1 rounded-md border border-gray-200 bg-white/95 p-1 shadow-sm transition-opacity ${
+                        selected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100'
+                    }`}
+                    data-smart-doc-ui="media-toolbar"
+                    role="toolbar"
+                    aria-label="媒体操作"
+                >
                     <ImageActionButton title="替换文件" onClick={() => fileInputRef.current?.click()}>
                         <RefreshCw className="h-4 w-4" />
                     </ImageActionButton>
