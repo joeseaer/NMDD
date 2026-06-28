@@ -20,7 +20,7 @@ import TaskItem from '@tiptap/extension-task-item';
 import Placeholder from '@tiptap/extension-placeholder';
 import Heading from '@tiptap/extension-heading';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
-import { DOMParser as ProseMirrorDOMParser } from 'prosemirror-model';
+import { DOMParser as ProseMirrorDOMParser, DOMSerializer } from 'prosemirror-model';
 import { Extension, type JSONContent } from '@tiptap/core';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
@@ -703,6 +703,36 @@ const copyTextToClipboard = async (text: string) => {
     }
 
     return copied;
+};
+
+const getBlockClipboardPayload = (editor: any, node: ProseMirrorNode) => {
+    const serializer = DOMSerializer.fromSchema(editor.state.schema);
+    const wrapper = document.createElement('div');
+    wrapper.appendChild(serializer.serializeNode(node, { document }));
+
+    const html = normalizeSmartImageLinksForExport(wrapper.innerHTML);
+    const markdown = turndownService.turndown(normalizeMindMapHtmlForTurndown(html)).trim();
+    const text = node.textBetween(0, node.content.size, '\n').trim() || markdown || html.trim();
+
+    return { html, markdown, text };
+};
+
+const copyRichBlockToClipboard = async (payload: { html: string; text: string }) => {
+    const clipboardItem = (window as any).ClipboardItem;
+
+    if (navigator.clipboard?.write && clipboardItem) {
+        try {
+            await navigator.clipboard.write([
+                new clipboardItem({
+                    'text/html': new Blob([payload.html], { type: 'text/html' }),
+                    'text/plain': new Blob([payload.text], { type: 'text/plain' }),
+                }),
+            ]);
+            return true;
+        } catch {}
+    }
+
+    return copyTextToClipboard(payload.text);
 };
 
 const isInsideColumnPlacement = (placement: BlockDropPlacement) => placement === 'inside-start' || placement === 'inside-end';
@@ -2122,6 +2152,29 @@ export const SmartDocumentEditor = ({
         closeBlockMenu();
     }, [closeBlockMenu, editor, getLiveBlock]);
 
+    const copyBlockContent = useCallback(async (block: BlockHandleInfo) => {
+        if (!editor) return;
+        const live = getLiveBlock(block);
+        if (!live) return;
+
+        const payload = getBlockClipboardPayload(editor, live.node);
+        const copied = await copyRichBlockToClipboard({
+            html: payload.html,
+            text: payload.text || payload.markdown,
+        });
+
+        if (!copied) {
+            await promptForText({
+                title: '复制块内容',
+                initialValue: payload.markdown || payload.text || payload.html,
+                readOnly: true,
+                confirmLabel: '关闭',
+            });
+        }
+
+        closeBlockMenu();
+    }, [closeBlockMenu, editor, getLiveBlock]);
+
     const deleteBlock = useCallback((block: BlockHandleInfo) => {
         if (!editor) return;
         const live = getLiveBlock(block);
@@ -2530,6 +2583,7 @@ export const SmartDocumentEditor = ({
                 onMenuOpenChange={setBlockMenuOpen}
                 onMove={moveBlock}
                 onDuplicate={duplicateBlock}
+                onCopyContent={copyBlockContent}
                 onDelete={deleteBlock}
                 onTurnInto={turnBlockInto}
                 onCopyLink={copyBlockLink}
@@ -2597,6 +2651,7 @@ const BlockHandleLayer = ({
     onMenuOpenChange,
     onMove,
     onDuplicate,
+    onCopyContent,
     onDelete,
     onTurnInto,
     onCopyLink,
@@ -2608,6 +2663,7 @@ const BlockHandleLayer = ({
     onMenuOpenChange: (open: boolean) => void;
     onMove: (block: BlockHandleInfo, direction: 'up' | 'down') => void;
     onDuplicate: (block: BlockHandleInfo) => void;
+    onCopyContent: (block: BlockHandleInfo) => void;
     onDelete: (block: BlockHandleInfo) => void;
     onTurnInto: (block: BlockHandleInfo, target: 'paragraph' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'todo' | 'quote') => void;
     onCopyLink: (block: BlockHandleInfo) => void;
@@ -2673,8 +2729,11 @@ const BlockHandleLayer = ({
                         <button className={menuButtonClass} disabled={!block.canMoveDown} onClick={() => onMove(block, 'down')}>
                             <ArrowDown className="h-3.5 w-3.5" /> 下移
                         </button>
+                        <button className={menuButtonClass} onClick={() => onCopyContent(block)}>
+                            <Copy className="h-3.5 w-3.5" /> 复制内容
+                        </button>
                         <button className={menuButtonClass} onClick={() => onDuplicate(block)}>
-                            <Copy className="h-3.5 w-3.5" /> 复制块
+                            <Copy className="h-3.5 w-3.5" /> 复制一份
                         </button>
                         <button className={menuButtonClass} onClick={() => onCopyLink(block)}>
                             <LinkIcon className="h-3.5 w-3.5" /> 复制块链接
