@@ -46,6 +46,7 @@ import {
     TemplateButtonBlock,
     SyncedBlock,
     PageLinkBlock,
+    InlineEquation,
     EquationBlock,
     DatabaseBlock,
     promptForImageUrl,
@@ -1054,6 +1055,25 @@ const turndownService = new TurndownService({
 });
 turndownService.use(gfm);
 
+const decodeSmartFormulaAttribute = (value: string | null) => {
+    if (!value) return '';
+    let decoded = value;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+            const next = decodeURIComponent(decoded);
+            if (next === decoded) break;
+            decoded = next;
+        } catch {
+            break;
+        }
+    }
+    return decoded.trim();
+};
+
+const getSmartEquationFormula = (node: HTMLElement) => {
+    return decodeSmartFormulaAttribute(node.getAttribute('data-equation')) || node.textContent?.trim() || '';
+};
+
 function normalizeMindMapHtmlForTurndown(html: string) {
     if (!html || !html.includes('data-type="mind-map"')) return html;
 
@@ -1102,6 +1122,27 @@ turndownService.addRule('keepColumns', {
   }
 });
 
+turndownService.addRule('smartEquations', {
+  filter: (node) => {
+    const el: any = node as any;
+    const nodeName = String(el.nodeName || el.tagName || '').toLowerCase();
+    const getAttr = (name: string) => (typeof el.getAttribute === 'function' ? el.getAttribute(name) : null);
+    const dataType = getAttr('data-type');
+    return (
+      (nodeName === 'div' && dataType === 'equation') ||
+      (nodeName === 'span' && dataType === 'inline-equation')
+    );
+  },
+  replacement: (_content, node) => {
+    const el = node as HTMLElement;
+    const formula = getSmartEquationFormula(el);
+    if (!formula) return '';
+    return el.getAttribute('data-type') === 'inline-equation'
+      ? `\\(${formula}\\)`
+      : `\n\n\\[\n${formula}\n\\]\n\n`;
+  }
+});
+
 turndownService.addRule('keepSmartDocumentBlocks', {
   filter: (node) => {
     const el: any = node as any;
@@ -1111,7 +1152,7 @@ turndownService.addRule('keepSmartDocumentBlocks', {
 
     return (
       (nodeName === 'details' && dataType === 'toggle') ||
-      (nodeName === 'div' && ['callout', 'embed', 'media', 'template-button', 'equation', 'synced-block', 'database'].includes(dataType || '')) ||
+      (nodeName === 'div' && ['callout', 'embed', 'media', 'template-button', 'synced-block', 'database'].includes(dataType || '')) ||
       (nodeName === 'a' && ['bookmark', 'page-link', 'image-link'].includes(dataType || ''))
     );
   },
@@ -2036,6 +2077,13 @@ const createEquationPasteNode = (doc: Document, formula: string) => {
     return node;
 };
 
+const createInlineEquationPasteNode = (doc: Document, formula: string) => {
+    const node = doc.createElement('span');
+    node.setAttribute('data-type', 'inline-equation');
+    node.setAttribute('data-equation', stripLatexDelimiters(formula));
+    return node;
+};
+
 const replaceMathElementWithEquation = (element: Element, replacement: HTMLElement) => {
     const parent = element.parentElement;
     if (parent?.tagName === 'P') {
@@ -2078,7 +2126,7 @@ const normalizeMathClipboardHtml = (html: string | undefined) => {
         const formula = getLatexFromMathElement(element);
         if (!formula) return;
 
-        element.replaceWith(doc.createTextNode(`\\(${stripLatexDelimiters(formula)}\\)`));
+        element.replaceWith(createInlineEquationPasteNode(doc, formula));
         replaced = true;
     });
 
@@ -2169,6 +2217,96 @@ const isRenderableFormula = (value: string) => {
     return /\\langle|\\rangle|[_^{}]|[+\-=]/.test(formula) && /[A-Za-z]/.test(formula);
 };
 
+const paragraphWithInlineLatexToHtml = (line: string) => {
+    const inlineLatexPattern = /\\\(([\s\S]+?)\\\)/g;
+    let cursor = 0;
+    let replaced = false;
+    let html = '';
+
+    line.replace(inlineLatexPattern, (match, formula: string, offset: number) => {
+        html += escapeHtml(line.slice(cursor, offset));
+        const normalizedFormula = stripLatexDelimiters(formula || '');
+        if (normalizedFormula) {
+            html += `<span data-type="inline-equation" data-equation="${escapeHtml(normalizedFormula)}"></span>`;
+            replaced = true;
+        } else {
+            html += escapeHtml(match);
+        }
+        cursor = offset + match.length;
+        return match;
+    });
+
+    html += escapeHtml(line.slice(cursor));
+    return { html, replaced };
+};
+
+const textSegmentToHtml = (segment: string) => {
+    const lines = segment
+        .replace(/\n{3,}/g, '\n\n')
+        .split(/\n+/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+    let replaced = false;
+
+    const html = lines.map((line) => {
+        const rendered = paragraphWithInlineLatexToHtml(line);
+        replaced = replaced || rendered.replaced;
+        return `<p>${rendered.html}</p>`;
+    }).join('');
+
+    return { html, replaced };
+};
+
+const findNextDisplayFormulaStart = (value: string, from: number) => {
+    const bracketIndex = value.indexOf('\\[', from);
+    const dollarIndex = value.indexOf('$$', from);
+    const candidates = [
+        bracketIndex >= 0 ? { index: bracketIndex, open: '\\[', close: '\\]' } : null,
+        dollarIndex >= 0 ? { index: dollarIndex, open: '$$', close: '$$' } : null,
+    ].filter(Boolean) as Array<{ index: number; open: string; close: string }>;
+
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => a.index - b.index);
+    return candidates[0];
+};
+
+const latexDelimitedClipboardToHtml = (text: string | undefined) => {
+    const normalized = normalizeClipboardPlainText(text || '');
+    if (!normalized || !/(\\\[|\\\(|\$\$)/.test(normalized)) return null;
+
+    const htmlParts: string[] = [];
+    let cursor = 0;
+    let replaced = false;
+
+    const appendText = (segment: string) => {
+        const rendered = textSegmentToHtml(segment);
+        if (rendered.html) htmlParts.push(rendered.html);
+        replaced = replaced || rendered.replaced;
+    };
+
+    while (cursor < normalized.length) {
+        const next = findNextDisplayFormulaStart(normalized, cursor);
+        if (!next) break;
+
+        appendText(normalized.slice(cursor, next.index));
+
+        const formulaStart = next.index + next.open.length;
+        const formulaEnd = normalized.indexOf(next.close, formulaStart);
+        if (formulaEnd < 0) return null;
+
+        const formula = normalized.slice(formulaStart, formulaEnd).trim();
+        if (formula) {
+            htmlParts.push(`<div data-type="equation" data-equation="${escapeHtml(formula)}"></div>`);
+            replaced = true;
+        }
+
+        cursor = formulaEnd + next.close.length;
+    }
+
+    appendText(normalized.slice(cursor));
+    return replaced ? htmlParts.join('') : null;
+};
+
 const plainMathClipboardToHtml = (text: string | undefined) => {
     const normalized = normalizeClipboardPlainText(text || '');
     if (!normalized || !/[⟨⟩〈〉\\^_−–—]|(?:\n\s*[UuCijIJ]\s*\n)/.test(normalized)) return null;
@@ -2226,7 +2364,7 @@ const plainMathClipboardToHtml = (text: string | undefined) => {
 };
 
 const mathClipboardToHtml = (html: string | undefined, text: string | undefined) => {
-    return normalizeMathClipboardHtml(html) || plainMathClipboardToHtml(text);
+    return normalizeMathClipboardHtml(html) || latexDelimitedClipboardToHtml(text) || plainMathClipboardToHtml(text);
 };
 
 const normalizeSmartImageLinksForExport = (html: string) => {
@@ -2442,6 +2580,7 @@ export const SmartDocumentEditor = ({
             TemplateButtonBlock,
             SyncedBlock,
             PageLinkBlock,
+            InlineEquation,
             EquationBlock,
             DatabaseBlock,
             Table.configure({

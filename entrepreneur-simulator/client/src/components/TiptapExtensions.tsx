@@ -2531,6 +2531,7 @@ const DatabaseRowPageEditor = ({
       TemplateButtonBlock,
       SyncedBlock,
       PageLinkBlock,
+      InlineEquation,
       EquationBlock,
       DatabaseBlock,
       Table.configure({
@@ -4222,6 +4223,85 @@ const decodeEquationAttribute = (value: string | null) => {
 };
 
 const normalizeEquationFormula = (value: unknown) => decodeEquationAttribute(String(value || '')).trim();
+
+const renderInlineEquation = (formula: string) => {
+  const source = formula.trim() || DEFAULT_EQUATION;
+  try {
+    return katex.renderToString(source, {
+      displayMode: false,
+      throwOnError: false,
+      strict: false,
+      output: 'html',
+    });
+  } catch {
+    return katex.renderToString(DEFAULT_EQUATION, {
+      displayMode: false,
+      throwOnError: false,
+      strict: false,
+      output: 'html',
+    });
+  }
+};
+
+const InlineEquationView = ({ node, selected }: any) => {
+  const formula = normalizeEquationFormula(node.attrs.formula) || DEFAULT_EQUATION;
+  const previewHtml = useMemo(() => renderInlineEquation(formula), [formula]);
+
+  return (
+    <NodeViewWrapper
+      as="span"
+      className={`smart-doc-inline-equation inline-flex rounded px-0.5 align-baseline ${
+        selected ? 'bg-blue-50 ring-1 ring-blue-200' : ''
+      }`}
+      data-type="inline-equation"
+      data-equation={formula}
+      contentEditable={false}
+    >
+      <span dangerouslySetInnerHTML={{ __html: previewHtml }} />
+    </NodeViewWrapper>
+  );
+};
+
+export const InlineEquation = Node.create({
+  name: 'inlineEquation',
+  group: 'inline',
+  inline: true,
+  atom: true,
+  selectable: true,
+
+  addAttributes() {
+    return {
+      formula: {
+        default: DEFAULT_EQUATION,
+        parseHTML: element => decodeEquationAttribute(element.getAttribute('data-equation')) || element.textContent?.trim() || DEFAULT_EQUATION,
+        renderHTML: attributes => ({
+          'data-equation': encodeURIComponent(normalizeEquationFormula(attributes.formula) || DEFAULT_EQUATION),
+        }),
+      },
+    }
+  },
+
+  parseHTML() {
+    return [{ tag: 'span[data-type="inline-equation"]' }]
+  },
+
+  renderHTML({ node, HTMLAttributes }) {
+    const formula = normalizeEquationFormula(node.attrs.formula) || DEFAULT_EQUATION;
+    return [
+      'span',
+      mergeAttributes(HTMLAttributes, {
+        'data-type': 'inline-equation',
+        'data-equation': encodeURIComponent(formula),
+        class: 'smart-doc-inline-equation',
+      }),
+      formula,
+    ]
+  },
+
+  addNodeView() {
+    return ReactNodeViewRenderer(InlineEquationView)
+  },
+});
 
 const EquationBlockView = ({ node, updateAttributes, selected }: any) => {
   const formula = normalizeEquationFormula(node.attrs.formula) || DEFAULT_EQUATION;
