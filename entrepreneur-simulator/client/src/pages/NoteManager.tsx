@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { 
   Plus, Tag, Search, X, 
   MoreHorizontal, Trash2, FileText, 
-  ArrowLeft
+  ArrowLeft, Maximize2, Minimize2
 } from 'lucide-react';
 import { api } from '../services/api';
 import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue } from '../components/SmartDocumentEditor';
@@ -500,7 +500,25 @@ function NoteDetailView({
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showPublish, setShowPublish] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [publishCat, setPublishCat] = useState<'people' | 'business' | 'brand'>('people');
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsFullscreen(false);
+    };
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isFullscreen]);
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const newTitle = e.target.value;
@@ -545,7 +563,11 @@ function NoteDetailView({
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-white">
+    <div
+      className={`flex-1 flex flex-col h-full overflow-hidden bg-white ${
+        isFullscreen ? 'fixed inset-0 z-[80] shadow-2xl' : ''
+      }`}
+    >
       {/* Header */}
       <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white flex-shrink-0">
         <div className="flex items-center flex-1 mr-4">
@@ -571,6 +593,18 @@ function NoteDetailView({
                 ) : "已保存"}
             </span>
             <div className="h-4 w-px bg-gray-200"></div>
+            <button
+                type="button"
+                onClick={() => {
+                    setShowMenu(false);
+                    setIsFullscreen((current) => !current);
+                }}
+                className="p-2 text-gray-400 hover:text-gray-700 rounded-full hover:bg-gray-50 transition-colors"
+                title={isFullscreen ? '退出全屏 (Esc)' : '全屏编辑'}
+                aria-label={isFullscreen ? '退出全屏' : '全屏编辑'}
+            >
+                {isFullscreen ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
+            </button>
             <div className="relative">
                 <button 
                     onClick={() => setShowMenu(!showMenu)}
