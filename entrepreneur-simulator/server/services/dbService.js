@@ -69,6 +69,152 @@ const isMissingContentJsonColumn = (error) => {
   return error?.code === 'PGRST204' || message.includes("'content_json' column");
 };
 
+const SOP_METADATA_FIELDS = [
+  'domain',
+  'research_type',
+  'research_status',
+  'promoted_to_life',
+  'promoted_at',
+  'promoted_from_sop_id',
+];
+
+const VALID_SOP_DOMAINS = new Set(['life', 'research']);
+const VALID_RESEARCH_TYPES = new Set(['document', 'idea', 'meeting']);
+const VALID_RESEARCH_STATUSES = new Set(['seed', 'to_verify', 'absorbed', 'paused']);
+
+const isMissingSopMetadataColumn = (error) => {
+  const message = String(error?.message || error?.details || '');
+  return SOP_METADATA_FIELDS.some((field) => (
+    message.includes(`'${field}' column`) ||
+    message.includes(`Could not find the '${field}'`) ||
+    message.includes(field)
+  ));
+};
+
+const stripSopMetadataFields = (payload) => {
+  const next = { ...(payload || {}) };
+  SOP_METADATA_FIELDS.forEach((field) => {
+    delete next[field];
+  });
+  return next;
+};
+
+const SYSTEM_TAG_PREFIXES = [
+  'domain:',
+  'research_type:',
+  'research_status:',
+  'promoted_to_life:',
+  'promoted_from:',
+];
+
+const normalizeSopTags = (tags) => (
+  Array.isArray(tags) ? tags.map((tag) => String(tag || '').trim()).filter(Boolean) : []
+);
+
+const stripSopSystemTags = (tags) => (
+  normalizeSopTags(tags).filter((tag) => !SYSTEM_TAG_PREFIXES.some((prefix) => tag.startsWith(prefix)))
+);
+
+const getSopTagValue = (tags, prefix) => {
+  const tag = normalizeSopTags(tags).find((item) => item.startsWith(prefix));
+  return tag ? tag.slice(prefix.length) : '';
+};
+
+const canStripSopMetadataFallback = (payload = {}) => {
+  const domain = normalizeSopDomain(payload.domain);
+  return (
+    domain === 'life' &&
+    !payload.research_type &&
+    !payload.research_status &&
+    !payload.promoted_to_life &&
+    !payload.promoted_at &&
+    !payload.promoted_from_sop_id
+  );
+};
+
+const withSopMetadataFallbackTags = (payload = {}) => {
+  const domain = normalizeSopDomain(payload.domain);
+  const researchType = normalizeResearchType(payload.research_type, domain);
+  const researchStatus = normalizeResearchStatus(payload.research_status, researchType);
+  const tags = stripSopSystemTags(payload.tags);
+  const systemTags = [];
+
+  if (domain === 'research') systemTags.push('domain:research');
+  if (researchType) systemTags.push(`research_type:${researchType}`);
+  if (researchStatus) systemTags.push(`research_status:${researchStatus}`);
+  if (payload.promoted_to_life) systemTags.push('promoted_to_life:true');
+  if (payload.promoted_from_sop_id) systemTags.push(`promoted_from:${payload.promoted_from_sop_id}`);
+
+  return {
+    ...stripSopMetadataFields(payload),
+    tags: [...tags, ...systemTags],
+  };
+};
+
+const normalizeSopDomain = (value) => (
+  VALID_SOP_DOMAINS.has(String(value || '').trim()) ? String(value).trim() : 'life'
+);
+
+const normalizeResearchType = (value, domain) => {
+  const raw = String(value || '').trim();
+  return domain === 'research' && VALID_RESEARCH_TYPES.has(raw) ? raw : null;
+};
+
+const normalizeResearchStatus = (value, researchType) => {
+  const raw = String(value || '').trim();
+  if (researchType !== 'idea') return null;
+  return VALID_RESEARCH_STATUSES.has(raw) ? raw : 'seed';
+};
+
+const normalizeNullableUuid = (value) => {
+  const raw = String(value || '').trim();
+  return raw.length > 10 ? raw : null;
+};
+
+const buildSopMetadataPayload = (sopData = {}) => {
+  const domain = normalizeSopDomain(sopData.domain);
+  const researchType = normalizeResearchType(sopData.research_type, domain);
+  const researchStatus = normalizeResearchStatus(sopData.research_status, researchType);
+  return {
+    domain,
+    research_type: researchType,
+    research_status: researchStatus,
+    promoted_to_life: !!sopData.promoted_to_life,
+    promoted_at: sopData.promoted_at || null,
+    promoted_from_sop_id: normalizeNullableUuid(sopData.promoted_from_sop_id),
+  };
+};
+
+const runSopMutationWithFallback = async (mutate, payload, fallbackContent) => {
+  let currentPayload = payload;
+  let strippedContentJson = false;
+  let strippedMetadata = false;
+
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const result = await mutate(currentPayload);
+    if (!result.error) return result;
+
+    if (isMissingContentJsonColumn(result.error) && !strippedContentJson) {
+      const { content_json, ...fallbackPayload } = currentPayload;
+      currentPayload = { ...fallbackPayload, content: fallbackContent };
+      strippedContentJson = true;
+      continue;
+    }
+
+    if (isMissingSopMetadataColumn(result.error) && !strippedMetadata) {
+      currentPayload = canStripSopMetadataFallback(currentPayload)
+        ? stripSopMetadataFields(currentPayload)
+        : withSopMetadataFallbackTags(currentPayload);
+      strippedMetadata = true;
+      continue;
+    }
+
+    return result;
+  }
+
+  return mutate(currentPayload);
+};
+
 function summarizeMindMapContent(content) {
   const text = typeof content === 'string' ? content : '';
   const hasFence = text.includes('```mindmap');
@@ -181,25 +327,20 @@ const saveSOP = async (sopData) => {
           version: sopData.version,
           content,
           content_json: contentJson,
+          ...buildSopMetadataPayload(sopData),
           updated_at: new Date()
       };
 
-      let { data, error } = await supabase
-        .from('sops')
-        .update(payload)
-        .eq('id', sopData.id)
-        .select('id')
-        .single();
-
-      if (error && isMissingContentJsonColumn(error)) {
-        const { content_json, ...fallbackPayload } = payload;
-        ({ data, error } = await supabase
+      let { data, error } = await runSopMutationWithFallback(
+        (nextPayload) => supabase
           .from('sops')
-          .update({ ...fallbackPayload, content: fallbackContent })
+          .update(nextPayload)
           .eq('id', sopData.id)
           .select('id')
-          .single());
-      }
+          .single(),
+        payload,
+        fallbackContent
+      );
         
       if (error) throw error;
       sopId = data.id;
@@ -215,23 +356,19 @@ const saveSOP = async (sopData) => {
           version: insertData.version,
           content,
           content_json: contentJson,
+          ...buildSopMetadataPayload(insertData),
           // related_scenes is legacy, we use relational tables now
       };
       
-      let { data, error } = await supabase
-        .from('sops')
-        .insert([payload])
-        .select('id')
-        .single();
-
-      if (error && isMissingContentJsonColumn(error)) {
-        const { content_json, ...fallbackPayload } = payload;
-        ({ data, error } = await supabase
+      let { data, error } = await runSopMutationWithFallback(
+        (nextPayload) => supabase
           .from('sops')
-          .insert([{ ...fallbackPayload, content: fallbackContent }])
+          .insert([nextPayload])
           .select('id')
-          .single());
-      }
+          .single(),
+        payload,
+        fallbackContent
+      );
 
       if (error) throw error;
       sopId = data.id;
@@ -317,12 +454,23 @@ const saveSOP = async (sopData) => {
   return sopId;
 };
 
-const getSOPs = async (userId) => {
+const applySopFilters = (items, filters = {}) => {
+  const domain = filters.domain && VALID_SOP_DOMAINS.has(String(filters.domain)) ? String(filters.domain) : null;
+  const researchType = filters.researchType && VALID_RESEARCH_TYPES.has(String(filters.researchType)) ? String(filters.researchType) : null;
+
+  return (items || []).filter((item) => {
+    if (domain && item.domain !== domain) return false;
+    if (researchType && item.research_type !== researchType) return false;
+    return true;
+  });
+};
+
+const getSOPs = async (userId, filters = {}) => {
   if (!supabase) return [];
 
   // Fetch SOPs with their related data
   // Note: This relies on foreign key relationships being detected by Supabase/PostgREST
-  const { data, error } = await supabase
+  let query = supabase
     .from('sops')
     .select(`
       *,
@@ -355,8 +503,52 @@ const getSOPs = async (userId) => {
         )
       )
     `)
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false });
+    .eq('user_id', userId);
+
+  const domain = filters.domain && VALID_SOP_DOMAINS.has(String(filters.domain)) ? String(filters.domain) : null;
+  const researchType = filters.researchType && VALID_RESEARCH_TYPES.has(String(filters.researchType)) ? String(filters.researchType) : null;
+  if (domain) query = query.eq('domain', domain);
+  if (researchType) query = query.eq('research_type', researchType);
+
+  let { data, error } = await query.order('updated_at', { ascending: false });
+
+  if (error && isMissingSopMetadataColumn(error)) {
+    ({ data, error } = await supabase
+      .from('sops')
+      .select(`
+        *,
+        sop_versions (
+          version,
+          created_at,
+          version_note
+        ),
+        sop_usage_logs (
+          scene_type,
+          score,
+          created_at,
+          notes,
+          scene_id
+        ),
+        scene_sop_rel (
+          scene_id,
+          scenes (
+              id,
+              scene_type,
+              initial_context
+          )
+        ),
+        people_sop_rel (
+          people_id,
+          people_profiles (
+              id,
+              name,
+              identity
+          )
+        )
+      `)
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false }));
+  }
 
   if (error) {
     console.error('Error fetching SOPs:', error);
@@ -364,11 +556,17 @@ const getSOPs = async (userId) => {
   }
   
   // Transform data to match frontend SOPEntity structure
-  return data.map(sop => {
+  const mapped = data.map(sop => {
     const unpackedContent = unpackSmartDocumentContent(sop.content);
     const contentJson = normalizeContentJson(sop.content_json) || unpackedContent.contentJson;
     const usageLogs = sop.sop_usage_logs || [];
     const versions = sop.sop_versions || [];
+    const rawTags = normalizeSopTags(sop.tags);
+    const taggedDomain = getSopTagValue(rawTags, 'domain:');
+    const taggedResearchType = getSopTagValue(rawTags, 'research_type:');
+    const taggedResearchStatus = getSopTagValue(rawTags, 'research_status:');
+    const sopDomain = normalizeSopDomain(sop.domain || taggedDomain);
+    const researchType = normalizeResearchType(sop.research_type || taggedResearchType, sopDomain);
     
     // Calculate stats
     const use_count = usageLogs.length;
@@ -421,7 +619,13 @@ const getSOPs = async (userId) => {
       id: sop.id,
       title: sop.title,
       category: sop.category,
-      tags: sop.tags || [],
+      domain: sopDomain,
+      research_type: researchType,
+      research_status: normalizeResearchStatus(sop.research_status || taggedResearchStatus, researchType),
+      promoted_to_life: !!sop.promoted_to_life || getSopTagValue(rawTags, 'promoted_to_life:') === 'true',
+      promoted_at: sop.promoted_at || null,
+      promoted_from_sop_id: sop.promoted_from_sop_id || getSopTagValue(rawTags, 'promoted_from:') || null,
+      tags: stripSopSystemTags(rawTags),
       version: sop.version,
       created_at: new Date(sop.created_at).toLocaleDateString(),
       updated_at: new Date(sop.updated_at).toLocaleDateString(),
@@ -442,6 +646,140 @@ const getSOPs = async (userId) => {
       validation
     };
   });
+
+  return applySopFilters(mapped, filters);
+};
+
+const updateSOPMeta = async ({ id, userId, patch }) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+  const payload = {};
+  SOP_METADATA_FIELDS.forEach((field) => {
+    if (Object.prototype.hasOwnProperty.call(patch || {}, field)) {
+      payload[field] = patch[field];
+    }
+  });
+  try {
+    const { data: existing } = await supabase
+      .from('sops')
+      .select('tags')
+      .eq('id', id)
+      .eq('user_id', userId)
+      .single();
+    if (existing && Array.isArray(existing.tags)) {
+      const existingTags = normalizeSopTags(existing.tags);
+      payload.tags = existingTags;
+      if (!Object.prototype.hasOwnProperty.call(payload, 'domain')) {
+        const taggedDomain = getSopTagValue(existingTags, 'domain:');
+        if (taggedDomain) payload.domain = taggedDomain;
+      }
+      if (!Object.prototype.hasOwnProperty.call(payload, 'research_type')) {
+        const taggedResearchType = getSopTagValue(existingTags, 'research_type:');
+        if (taggedResearchType) payload.research_type = taggedResearchType;
+      }
+      if (!Object.prototype.hasOwnProperty.call(payload, 'research_status')) {
+        const taggedResearchStatus = getSopTagValue(existingTags, 'research_status:');
+        if (taggedResearchStatus) payload.research_status = taggedResearchStatus;
+      }
+      if (!Object.prototype.hasOwnProperty.call(payload, 'promoted_from_sop_id')) {
+        const taggedPromotedFrom = getSopTagValue(existingTags, 'promoted_from:');
+        if (taggedPromotedFrom) payload.promoted_from_sop_id = taggedPromotedFrom;
+      }
+    }
+  } catch {}
+  payload.updated_at = new Date();
+
+  const { data, error } = await runSopMutationWithFallback(
+    (nextPayload) => supabase
+      .from('sops')
+      .update(nextPayload)
+      .eq('id', id)
+      .eq('user_id', userId)
+      .select('id')
+      .single(),
+    payload,
+    null
+  );
+  if (error) throw error;
+  return data.id;
+};
+
+const compactSopText = (value, maxLength = 800) => {
+  const text = String(value || '')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[#>*_`[\]()~-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!text || text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1).trim()}...`;
+};
+
+const promoteSOPToLife = async ({ id, userId, title, summary }) => {
+  const researchDocs = await getSOPs(userId, { domain: 'research' });
+  let source = (researchDocs || []).find((item) => String(item.id) === String(id));
+  if (!source) {
+    const allDocs = await getSOPs(userId);
+    const candidate = (allDocs || []).find((item) => String(item.id) === String(id));
+    if (candidate && candidate.domain === 'research') source = candidate;
+  }
+  if (!source) throw new Error('Research item not found');
+
+  const sourceTypeLabel = {
+    document: 'document',
+    idea: 'idea',
+    meeting: 'meeting',
+  }[source.research_type] || 'research';
+
+  const summaryObj = summary && typeof summary === 'object' ? summary : {};
+  const what = compactSopText(summaryObj.what || source.title || 'Untitled research item', 500);
+  const why = compactSopText(summaryObj.why || '', 500);
+  const impact = compactSopText(summaryObj.impact || '', 500);
+  const followup = compactSopText(summaryObj.followup || '', 500);
+  const sourceExcerpt = compactSopText(source.content || '', 700);
+  const lifeTitle = String(title || `科研上浮：${source.title || '未命名科研条目'}`).trim().slice(0, 120);
+  const promotedAt = new Date().toISOString();
+
+  const content = [
+    `# ${lifeTitle}`,
+    '',
+    `来源：${source.title || 'Untitled'} (${sourceTypeLabel})`,
+    `来源ID：${source.id}`,
+    `上浮时间：${promotedAt}`,
+    '',
+    '## 这件事是什么',
+    what || sourceExcerpt || '待补充',
+    '',
+    '## 为什么重要',
+    why || '待补充',
+    '',
+    '## 对时间/压力/方向/关系的影响',
+    impact || '待补充',
+    '',
+    '## 是否需要进入复盘或计划',
+    followup || '待补充',
+  ].join('\n');
+
+  const lifeId = await saveSOP({
+    user_id: userId || DEFAULT_USER_ID,
+    title: lifeTitle,
+    category: 'note',
+    tags: ['research-promoted', `research:${sourceTypeLabel}`, `source:${source.id}`],
+    version: 'V1.0',
+    content,
+    content_json: null,
+    domain: 'life',
+    promoted_from_sop_id: source.id,
+  });
+
+  await updateSOPMeta({
+    id: source.id,
+    userId: userId || DEFAULT_USER_ID,
+    patch: {
+      promoted_to_life: true,
+      promoted_at: promotedAt,
+    },
+  });
+
+  return { id: lifeId, source_id: source.id, promoted_at: promotedAt };
 };
 
 const deleteSOP = async (sopId) => {
@@ -1137,11 +1475,9 @@ const getUserStats = async (userId) => {
         .select('id', { count: 'exact', head: true })
         .eq('user_id', userId);
 
-    // 3. Count SOPs
-    const { count: sopCount } = await supabase
-        .from('sops')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', userId);
+    // 3. Count life-domain SOPs/documents only, so research notes do not inflate the life dashboard.
+    const lifeSops = await getSOPs(userId, { domain: 'life' });
+    const sopCount = lifeSops.length;
 
     // 4. Calculate Scores (Simple Logic based on activity)
     // In a real app, this would be more complex based on scene results
@@ -1317,7 +1653,7 @@ const uploadFile = async (fileBuffer, fileName, mimeType) => {
 };
 
 module.exports = { 
-  initDB, saveScene, getRecentScenes, saveSOP, getSOPs, deleteSOP, deleteSOPsByTitle,
+  initDB, saveScene, getRecentScenes, saveSOP, getSOPs, updateSOPMeta, promoteSOPToLife, deleteSOP, deleteSOPsByTitle,
   savePersonProfile, updatePersonPrivateInfo, updatePersonTriggersPleasers, updatePersonReactionLibrary, updatePersonAIFollowUp, deletePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog, deleteInteractionLog,
   saveReviewSession, getReviewSessions, getReviewSession, getUserStats,
   getPlannerLists, ensurePlannerInbox, createPlannerList, updatePlannerList, deletePlannerList,

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Routes, Route, Link, Navigate, useLocation } from 'react-router-dom'
-import { Brain, MessageSquare, User, Settings, LayoutDashboard, Users, FileText, Menu, X, Notebook, ChevronLeft, ChevronRight, Calendar } from 'lucide-react'
+import { Brain, MessageSquare, User, Settings, LayoutDashboard, Users, FileText, Menu, X, Notebook, ChevronLeft, ChevronRight, Calendar, Microscope } from 'lucide-react'
 
 // Pages
 import Dashboard from './pages/Dashboard'
@@ -13,6 +13,7 @@ import ChatAssistant from './pages/ChatAssistant'
 import EvolutionTree from './pages/EvolutionTree'
 import SettingsPage from './pages/Settings'
 import Planner from './pages/Planner'
+import ResearchWorkspace from './pages/ResearchWorkspace'
 import FloatingAssistant from './components/FloatingAssistant'
 import { CURRENT_USER_ID } from './config/currentUser'
 
@@ -31,6 +32,7 @@ function App() {
   useEffect(() => {
     if (location.pathname.includes('/training') || location.pathname.includes('/evolution-tree')) setActiveTab('dashboard');
     else if (location.pathname.includes('/planner')) setActiveTab('planner');
+    else if (location.pathname.includes('/research')) setActiveTab('research');
     else if (location.pathname.includes('/dashboard')) setActiveTab('dashboard');
     else if (location.pathname.includes('/notes')) setActiveTab('notes');
     else if (location.pathname.includes('/personality')) setActiveTab('personality');
@@ -125,6 +127,7 @@ function App() {
             {!isSidebarCollapsed && <h3 className="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">记录中心</h3>}
             <SidebarLink collapsed={isSidebarCollapsed} to="/planner" icon={<Calendar size={20} />} label="日程待办" active={activeTab === 'planner'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/notes?view=notes" icon={<Notebook size={20} />} label="随笔/文档" active={activeTab === 'notes'} />
+            <SidebarLink collapsed={isSidebarCollapsed} to="/research?type=document" icon={<Microscope size={20} />} label="科研工作台" active={activeTab === 'research'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/personality" icon={<Users size={20} />} label="性格分析档案" active={activeTab === 'personality'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/real-review" icon={<FileText size={20} />} label="真实场景复盘" active={activeTab === 'real-review'} />
           </div>
@@ -186,6 +189,7 @@ function App() {
               <Route path="/planner" element={<Planner />} />
               <Route path="/sop" element={<Navigate to="/notes?view=sop" replace />} />
               <Route path="/notes" element={<NoteManager />} />
+              <Route path="/research" element={<ResearchWorkspace />} />
               <Route path="/personality" element={<PersonalityManager />} />
               <Route path="/real-review" element={<RealReview />} />
               <Route path="/evolution-tree" element={<EvolutionTree />} />

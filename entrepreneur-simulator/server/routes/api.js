@@ -339,11 +339,16 @@ async function routes(fastify, options) {
   // SOP Management
   fastify.get('/sop/:userId', async (request, reply) => {
     const { userId } = request.params;
-    const sops = await dbService.getSOPs(userId);
+    const domain = String(request.query?.domain || '').trim();
+    const researchType = String(request.query?.researchType || request.query?.research_type || '').trim();
+    const sops = await dbService.getSOPs(userId, {
+      domain: domain || undefined,
+      researchType: researchType || undefined,
+    });
 
     try {
       const mindmapCount = (sops || []).filter((s) => summarizeMindMapContent(s.content).hasFence || summarizeMindMapContent(s.content).hasDiv).length;
-      request.log.info({ userId, count: (sops || []).length, mindmapCount }, 'Fetched SOPs');
+      request.log.info({ userId, domain, researchType, count: (sops || []).length, mindmapCount }, 'Fetched SOPs');
     } catch {}
 
     return sops;
@@ -360,6 +365,23 @@ async function routes(fastify, options) {
     } catch (err) {
       request.log.error(err);
       reply.code(500).send({ error: err.message || 'Failed to save SOP' });
+    }
+  });
+
+  fastify.post('/sop/:id/promote-to-life', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.body?.userId || request.body?.user_id || request.query?.userId || DEFAULT_USER_ID;
+      const result = await dbService.promoteSOPToLife({
+        id,
+        userId,
+        title: request.body?.title,
+        summary: request.body?.summary,
+      });
+      return { ...result, message: 'Research item promoted to life' };
+    } catch (err) {
+      request.log.error(err);
+      reply.code(500).send({ error: err.message || 'Failed to promote research item' });
     }
   });
 
@@ -400,10 +422,14 @@ async function routes(fastify, options) {
       const { userId } = request.params;
       const query = String(request.query?.query || '').trim();
       const limit = Number.parseInt(String(request.query?.limit || '12'), 10);
+      const domain = String(request.query?.domain || 'life').trim();
+      const researchType = String(request.query?.researchType || request.query?.research_type || '').trim();
       return documentContextService.buildDecisionDocumentContext({
         userId: userId || DEFAULT_USER_ID,
         query,
         maxBlocks: Number.isFinite(limit) ? Math.max(1, Math.min(24, limit)) : 12,
+        domain,
+        researchType: researchType || null,
       });
     } catch (err) {
       request.log.error(err);

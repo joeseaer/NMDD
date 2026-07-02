@@ -29,8 +29,15 @@ const uploadFileRequest = async (file: File, label: string = 'file') => {
 
 export const api = {
     // SOPs
-    getSOPs: async (userId: string = CURRENT_USER_ID) => {
-        const response = await fetch(`${API_BASE_URL}/sop/${userId}`);
+    getSOPs: async (
+        userId: string = CURRENT_USER_ID,
+        opts?: { domain?: 'life' | 'research'; researchType?: 'document' | 'idea' | 'meeting' }
+    ) => {
+        const params = new URLSearchParams();
+        if (opts?.domain) params.set('domain', opts.domain);
+        if (opts?.researchType) params.set('researchType', opts.researchType);
+        const query = params.toString();
+        const response = await fetch(`${API_BASE_URL}/sop/${userId}${query ? `?${query}` : ''}`);
         if (!response.ok) throw new Error('Failed to fetch SOPs');
         return response.json();
     },
@@ -90,6 +97,31 @@ export const api = {
             method: 'DELETE'
         });
         if (!response.ok) throw new Error('Failed to delete SOP');
+        return response.json();
+    },
+
+    promoteSOPToLife: async (
+        id: string,
+        payload: {
+            userId?: string;
+            title?: string;
+            summary?: { what?: string; why?: string; impact?: string; followup?: string };
+        }
+    ) => {
+        const response = await fetch(`${API_BASE_URL}/sop/${id}/promote-to-life`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: payload.userId || CURRENT_USER_ID, title: payload.title, summary: payload.summary || {} })
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            try {
+                const data = JSON.parse(text);
+                throw new Error(data.error || 'Failed to promote research item');
+            } catch {
+                throw new Error(text || 'Failed to promote research item');
+            }
+        }
         return response.json();
     },
 

@@ -280,8 +280,11 @@ const scoreBlock = (block, queryTokens, queryText) => {
   return score;
 };
 
-const buildDocumentCorpus = async (userId) => {
-  const docs = await dbService.getSOPs(userId);
+const buildDocumentCorpus = async (userId, options = {}) => {
+  const docs = await dbService.getSOPs(userId, {
+    domain: options.domain || 'life',
+    researchType: options.researchType,
+  });
   const documents = Array.isArray(docs) ? docs : [];
   const blocks = documents.flatMap((doc) => {
     const jsonBlocks = collectJsonBlocks(doc);
@@ -291,8 +294,8 @@ const buildDocumentCorpus = async (userId) => {
   return { documents, blocks };
 };
 
-const buildDecisionDocumentContext = async ({ userId, query, maxBlocks = 12 }) => {
-  const { documents, blocks } = await buildDocumentCorpus(userId);
+const buildDecisionDocumentContext = async ({ userId, query, maxBlocks = 12, domain = 'life', researchType = null }) => {
+  const { documents, blocks } = await buildDocumentCorpus(userId, { domain, researchType });
   const queryText = compactText(query, 500);
   const queryTokens = tokenize(queryText);
 
@@ -319,7 +322,7 @@ const buildDecisionDocumentContext = async ({ userId, query, maxBlocks = 12 }) =
 
   const promptText = selected.length
     ? [
-        `User document memory: ${documents.length} documents, ${blocks.length} searchable blocks, ${selected.length} selected blocks.`,
+        `User document memory (${domain || 'life'}): ${documents.length} documents, ${blocks.length} searchable blocks, ${selected.length} selected blocks.`,
         'Use the following user-owned notes/SOP blocks as decision context. Prefer specific and recent user notes over generic advice. If a cited block is weakly related, say that it is only a light reference. When useful, cite references like [D1] in the answer.',
         ...references.map((ref, index) => {
           const block = selected[index];
@@ -330,10 +333,12 @@ const buildDecisionDocumentContext = async ({ userId, query, maxBlocks = 12 }) =
           ].join('\n');
         }),
       ].join('\n\n')
-    : `User document memory: ${documents.length} documents, ${blocks.length} searchable blocks, no usable text blocks selected.`;
+    : `User document memory (${domain || 'life'}): ${documents.length} documents, ${blocks.length} searchable blocks, no usable text blocks selected.`;
 
   return {
     corpus: {
+      domain: domain || 'life',
+      research_type: researchType || null,
       document_count: documents.length,
       block_count: blocks.length,
       selected_count: selected.length,

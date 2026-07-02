@@ -4,7 +4,7 @@ import {
   MoreHorizontal, Trash2, FileText, 
   ArrowLeft, Maximize2, Minimize2
 } from 'lucide-react';
-import { api } from '../services/api';
+import { api, CURRENT_USER_ID } from '../services/api';
 import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue } from '../components/SmartDocumentEditor';
 import { useSearchParams } from 'react-router-dom';
 
@@ -13,6 +13,12 @@ interface SOPEntity {
   id: string;
   title: string;
   category: 'people' | 'business' | 'brand' | 'note';
+  domain?: 'life' | 'research';
+  research_type?: 'document' | 'idea' | 'meeting' | null;
+  research_status?: 'seed' | 'to_verify' | 'absorbed' | 'paused' | null;
+  promoted_to_life?: boolean;
+  promoted_at?: string | null;
+  promoted_from_sop_id?: string | null;
   tags: string[];
   version: string;
   created_at: string;
@@ -43,6 +49,12 @@ const normalizeSopEntity = (raw: any): SOPEntity => {
     id: String(raw?.id || ''),
     title: String(raw?.title || ''),
     category,
+    domain: raw?.domain === 'research' ? 'research' : 'life',
+    research_type: raw?.research_type === 'document' || raw?.research_type === 'idea' || raw?.research_type === 'meeting' ? raw.research_type : null,
+    research_status: raw?.research_status === 'seed' || raw?.research_status === 'to_verify' || raw?.research_status === 'absorbed' || raw?.research_status === 'paused' ? raw.research_status : null,
+    promoted_to_life: !!raw?.promoted_to_life,
+    promoted_at: raw?.promoted_at || null,
+    promoted_from_sop_id: raw?.promoted_from_sop_id || null,
     tags: Array.isArray(raw?.tags) ? raw.tags.map((t: any) => String(t)).filter(Boolean) : [],
     version: String(raw?.version || 'V1.0'),
     created_at: String(raw?.created_at || ''),
@@ -136,7 +148,7 @@ export default function NoteManager() {
   const fetchData = async () => {
     try {
         setLoading(true);
-        const fetchedSops = await api.getSOPs();
+        const fetchedSops = await api.getSOPs(CURRENT_USER_ID, { domain: 'life' });
         setItems((Array.isArray(fetchedSops) ? fetchedSops : []).map(normalizeSopEntity).filter((x) => x.id));
     } catch (error) {
         console.error("Failed to load notes", error);
@@ -168,8 +180,9 @@ export default function NoteManager() {
   }, [docParam, items, selectedNoteId, setSearchParams, view]);
 
   const visibleItems = useCallback((list: SOPEntity[]) => {
-    if (view === 'sop') return list.filter((it) => it.category !== 'note');
-    return list.filter((it) => it.category === 'note');
+    const lifeItems = list.filter((it) => (it.domain || 'life') === 'life');
+    if (view === 'sop') return lifeItems.filter((it) => it.category !== 'note');
+    return lifeItems.filter((it) => it.category === 'note');
   }, [view]);
 
   const filteredNotes = visibleItems(items).filter(note => {
@@ -240,6 +253,10 @@ export default function NoteManager() {
       const newNote: Partial<SOPEntity> = {
           title: view === 'sop' ? '未命名 SOP' : '未命名文档',
           category: view === 'sop' ? 'people' : 'note',
+          domain: 'life',
+          research_type: null,
+          research_status: null,
+          promoted_to_life: false,
           tags: [],
           version: 'V1.0',
           content: '',
