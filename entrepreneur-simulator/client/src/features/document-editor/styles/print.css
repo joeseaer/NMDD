@@ -1,0 +1,228 @@
+@media print {
+  @page {
+    size: auto;
+    margin: 16mm 18mm 18mm;
+  }
+
+  :is(.smart-document-shell, .smart-document, .smart-document-content) {
+    color-scheme: light;
+    --smart-doc-page: #ffffff;
+    --smart-doc-canvas: #ffffff;
+    --smart-doc-surface: #ffffff;
+    --smart-doc-surface-raised: #ffffff;
+    --smart-doc-surface-muted: #f5f5f3;
+    --smart-doc-text: #181817;
+    --smart-doc-text-secondary: #4f4e4b;
+    --smart-doc-text-muted: #74736e;
+    --smart-doc-border: #d9d8d4;
+    --smart-doc-border-strong: #bebdb8;
+    --smart-doc-link: #244f91;
+    --smart-doc-code-bg: #f5f5f3;
+    --smart-doc-code-text: #222220;
+    --smart-doc-table-head: #f2f2f0;
+    --smart-doc-shadow-node: none;
+    --smart-doc-shadow-menu: none;
+  }
+
+  .smart-document-shell {
+    position: static !important;
+    display: block;
+    width: auto;
+    height: auto !important;
+    min-height: 0;
+    overflow: visible !important;
+    background: #ffffff !important;
+    color: #181817 !important;
+  }
+
+  .smart-document-shell__body,
+  .smart-document-shell__scroll,
+  .smart-document-shell__page,
+  .smart-document-shell__editor {
+    position: static !important;
+    display: block !important;
+    width: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  .smart-document-editor-shell,
+  .smart-document-editor-main,
+  .smart-document-canvas,
+  .smart-document-content-rail {
+    position: static !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  :is(.smart-document-shell, .smart-document) :is(
+      .smart-document-shell__topbar,
+      .smart-document-shell__outline,
+      .smart-document-outline-panel,
+      .smart-document-shell__floating,
+      .smart-document-toolbar,
+      .smart-document-editor-toolbar,
+      .smart-document-bubble-menu,
+      .smart-document-floating-menu,
+      .smart-document-context-menu,
+      .smart-document-context-toolbar-row,
+      .smart-document-block-handle,
+      .smart-document-block-menu,
+      [data-smart-doc-ui],
+      .smart-document-page-header__actions,
+      .smart-document-properties__actions
+    ) {
+    display: none !important;
+  }
+
+  .smart-document-page-header,
+  .smart-document-properties,
+  .smart-document-canvas {
+    padding-right: 0 !important;
+    padding-left: 0 !important;
+  }
+
+  .smart-document-page-header {
+    padding-top: 0 !important;
+  }
+
+  .smart-document-page-header__title,
+  .smart-document-page-header__title-input {
+    color: #181817 !important;
+    font-size: 24pt !important;
+    line-height: 1.18 !important;
+  }
+
+  .smart-document-page-header__title-input {
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    resize: none;
+  }
+
+  .smart-document-properties {
+    padding-top: 10mm !important;
+  }
+
+  .smart-document-canvas {
+    padding-top: 8mm !important;
+    padding-bottom: 0 !important;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) {
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    color: #181817 !important;
+    font-size: 10.5pt !important;
+    line-height: 1.55 !important;
+    overflow: visible !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) :is(
+    .tableWrapper,
+    .smart-doc-database,
+    .smart-doc-column-list,
+    [data-type="mind-map"]
+  ) {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-right: 0 !important;
+    margin-left: 0 !important;
+    transform: none !important;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) :is(h1, h2, h3, h4, h5, h6) {
+    break-after: avoid-page;
+    page-break-after: avoid;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) :is(
+    blockquote,
+    pre,
+    .notion-image-block,
+    .smart-doc-equation,
+    .smart-doc-callout,
+    .smart-doc-toggle,
+    .smart-doc-media,
+    .smart-doc-bookmark,
+    .smart-doc-page-link
+  ) {
+    break-inside: avoid-page;
+    page-break-inside: avoid;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) pre {
+    overflow: visible !important;
+    border-color: #d9d8d4 !important;
+    white-space: pre-wrap !important;
+    word-break: break-word;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) .tableWrapper {
+    overflow: visible !important;
+    border-color: #d9d8d4 !important;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) table {
+    min-width: 0 !important;
+    font-size: 8.5pt !important;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) thead {
+    display: table-header-group;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) :is(td, th) {
+    padding: 5pt 6pt !important;
+    border-color: #d9d8d4 !important;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-equation > textarea {
+    display: none !important;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle-content {
+    display: block !important;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) :is(
+    .smart-doc-callout,
+    .smart-doc-database,
+    .smart-doc-toggle
+  ) button {
+    display: none !important;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) img {
+    max-width: 100% !important;
+    max-height: 220mm;
+    object-fit: contain;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) a {
+    color: #244f91 !important;
+    text-decoration: underline;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) .ProseMirror-selectednode {
+    outline: none !important;
+  }
+}

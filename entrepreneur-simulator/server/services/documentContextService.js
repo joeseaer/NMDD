@@ -49,6 +49,10 @@ const getNodeText = (node) => {
   if (!node || typeof node !== 'object') return '';
   if (node.type === 'text') return node.text || '';
   if (node.type === 'hardBreak') return '\n';
+  if (node.type === 'inlineEquation') {
+    const attrs = node.attrs || {};
+    return attrs.formula || attrs.latex || attrs.value || '';
+  }
   const children = Array.isArray(node.content) ? node.content : [];
   return children.map(getNodeText).join(node.type === 'paragraph' ? '' : ' ');
 };
@@ -128,6 +132,8 @@ const summarizeNode = (node) => {
       return compactText(`Page link: ${attrs.title || attrs.pageTitle || attrs.pageId || ''}`);
     case 'equationBlock':
       return compactText(`Equation: ${attrs.formula || body}`);
+    case 'inlineEquation':
+      return compactText(`Inline equation: ${attrs.formula || attrs.latex || attrs.value || body}`);
     case 'mindMap':
       return compactText(`Mind map: ${body || attrs.markdown || attrs.data || ''}`);
     case 'databaseBlock':

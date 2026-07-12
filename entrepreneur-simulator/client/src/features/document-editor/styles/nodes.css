@@ -1,0 +1,587 @@
+/* Rich node presentation. Kept separate from prose so custom nodes stay legible
+ * in the main editor and in nested database-row editors. */
+
+/* Wide-rail nodes are centered against the 720px reading track and may grow to
+ * 1040px without creating page-level horizontal scrolling. */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :is(
+  .tableWrapper,
+  .smart-doc-database,
+  .smart-doc-column-list,
+  [data-type="mind-map"]
+) {
+  position: relative;
+  width: min(var(--smart-doc-wide-track), calc(100vw - var(--smart-doc-gutter) - var(--smart-doc-gutter)));
+  max-width: calc(100vw - var(--smart-doc-gutter) - var(--smart-doc-gutter));
+  margin-left: 50% !important;
+  transform: translateX(-50%);
+}
+
+@supports (width: 100cqw) {
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) :is(
+    .tableWrapper,
+    .smart-doc-database,
+    .smart-doc-column-list,
+    [data-type="mind-map"]
+  ) {
+    width: min(var(--smart-doc-wide-track), 100cqw);
+    max-width: 100cqw;
+  }
+}
+
+/* Tables */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .tableWrapper {
+  margin-top: 1.25rem !important;
+  margin-bottom: 1.25rem !important;
+  overflow-x: auto;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: var(--smart-doc-radius-md);
+  background: var(--smart-doc-surface);
+  box-shadow: var(--smart-doc-shadow-node);
+  -webkit-overflow-scrolling: touch;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) table {
+  width: 100%;
+  min-width: 32rem;
+  margin: 0;
+  overflow: hidden;
+  border: 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: var(--smart-doc-surface);
+  color: var(--smart-doc-text);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :is(td, th) {
+  position: relative;
+  min-width: 6rem;
+  padding: 0.5625rem 0.75rem !important;
+  border: 0 !important;
+  border-right: 1px solid var(--smart-doc-border) !important;
+  border-bottom: 1px solid var(--smart-doc-border) !important;
+  box-sizing: border-box;
+  vertical-align: top;
+  text-align: left;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) tr:last-child > :is(td, th) {
+  border-bottom: 0 !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) tr > :is(td, th):last-child {
+  border-right: 0 !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) th {
+  background: var(--smart-doc-table-head) !important;
+  color: var(--smart-doc-text-secondary);
+  font-weight: 620;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) tbody tr {
+  transition: background-color var(--smart-doc-motion-fast) var(--smart-doc-ease);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) tbody tr:hover {
+  background: var(--smart-doc-table-row-hover);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :is(td, th) > :first-child {
+  margin-top: 0;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :is(td, th) > :last-child {
+  margin-bottom: 0;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .selectedCell::after {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  background: var(--smart-doc-table-selection);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--smart-doc-accent) 48%, transparent);
+  content: "";
+  pointer-events: none;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .column-resize-handle {
+  position: absolute;
+  z-index: 3;
+  top: 0;
+  right: -2px;
+  bottom: -1px;
+  width: 4px;
+  background: var(--smart-doc-accent);
+  opacity: 0.72;
+  pointer-events: none;
+}
+
+/* Images and media */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .notion-image-block {
+  margin-top: 1.25rem !important;
+  margin-bottom: 1.25rem !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .notion-image-block > div > div:first-child {
+  border-color: var(--smart-doc-border) !important;
+  background: var(--smart-doc-surface-muted) !important;
+  box-shadow: none !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .notion-image-block img {
+  max-width: 100%;
+  border-radius: inherit;
+  box-shadow: none !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .notion-image-block > input:not([type="file"]) {
+  display: block;
+  min-height: 1.5rem;
+  margin: 0.55rem auto 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  color: var(--smart-doc-text-muted) !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.5;
+  text-align: center;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-smart-doc-ui="image-toolbar"] {
+  max-width: min(42.5rem, calc(100vw - 2rem)) !important;
+  border-color: var(--smart-doc-border) !important;
+  border-radius: var(--smart-doc-radius-sm) !important;
+  background: color-mix(in srgb, var(--smart-doc-surface-raised) 94%, transparent) !important;
+  box-shadow: var(--smart-doc-shadow-menu) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-smart-doc-ui="resize-handle"] {
+  width: 3px !important;
+  background: var(--smart-doc-accent) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-image-link {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-media {
+  margin-top: 1rem !important;
+  margin-bottom: 1rem !important;
+  overflow: hidden;
+  border-color: var(--smart-doc-border) !important;
+  border-radius: var(--smart-doc-radius-md) !important;
+  background: var(--smart-doc-surface) !important;
+  box-shadow: var(--smart-doc-shadow-node);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-media :is(input, audio) {
+  color: var(--smart-doc-text) !important;
+}
+
+/* Equations */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-inline-equation {
+  display: inline-flex;
+  max-width: 100%;
+  margin-inline: 0.08em;
+  padding: 0.02em 0.18em !important;
+  overflow-x: auto;
+  border: 1px solid transparent;
+  border-radius: var(--smart-doc-radius-xs) !important;
+  background: color-mix(in srgb, var(--smart-doc-accent-soft) 42%, transparent);
+  color: var(--smart-doc-text);
+  line-height: 1.35;
+  vertical-align: -0.08em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-inline-equation.ProseMirror-selectednode {
+  border-color: color-mix(in srgb, var(--smart-doc-accent) 48%, transparent);
+  box-shadow: 0 0 0 2px var(--smart-doc-accent-ring);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-equation {
+  margin-top: 1.15rem !important;
+  margin-bottom: 1.15rem !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border-color: transparent !important;
+  border-radius: var(--smart-doc-radius-md) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-equation > div:first-child {
+  min-height: 3.25rem !important;
+  padding: 0.875rem 1rem !important;
+  overflow-x: auto;
+  border: 1px solid transparent;
+  border-radius: var(--smart-doc-radius-md) !important;
+  background: var(--smart-doc-surface-muted) !important;
+  color: var(--smart-doc-text) !important;
+  transition: border-color var(--smart-doc-motion-fast) var(--smart-doc-ease), background-color var(--smart-doc-motion-fast) var(--smart-doc-ease);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-equation:hover > div:first-child {
+  border-color: var(--smart-doc-border);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-equation > textarea {
+  display: block;
+  width: 100%;
+  max-height: 0;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border: 0 !important;
+  background: var(--smart-doc-surface) !important;
+  color: var(--smart-doc-text-secondary) !important;
+  font-family: var(--smart-doc-font-mono) !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.55;
+  opacity: 0;
+  pointer-events: none;
+  resize: vertical;
+  transition: max-height var(--smart-doc-motion-normal) var(--smart-doc-ease), margin var(--smart-doc-motion-normal) var(--smart-doc-ease), padding var(--smart-doc-motion-normal) var(--smart-doc-ease), opacity var(--smart-doc-motion-fast) var(--smart-doc-ease);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-equation:is(.ProseMirror-selectednode, .border-gray-400, :focus-within) > textarea {
+  max-height: 12rem;
+  min-height: 3.25rem !important;
+  margin-top: 0.5rem !important;
+  padding: 0.625rem 0.75rem !important;
+  overflow: auto;
+  border: 1px solid var(--smart-doc-border) !important;
+  border-radius: var(--smart-doc-radius-sm);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Toggle and callout */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle {
+  margin-top: 0.8rem !important;
+  margin-bottom: 0.8rem !important;
+  overflow: clip;
+  border-color: transparent !important;
+  border-radius: var(--smart-doc-radius-sm) !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle:hover,
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle.ProseMirror-selectednode {
+  background: var(--smart-doc-surface-muted) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle > div:first-child,
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle-summary {
+  min-height: 2.25rem;
+  padding: 0.25rem 0.35rem !important;
+  color: var(--smart-doc-text) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle input {
+  border-color: transparent !important;
+  background: transparent !important;
+  color: var(--smart-doc-text) !important;
+  font-size: 0.9375rem !important;
+  font-weight: 620 !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle-content {
+  padding: 0.15rem 0.75rem 0.75rem 2.65rem !important;
+  color: var(--smart-doc-text);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-callout {
+  --smart-doc-callout-bg: var(--smart-doc-callout-gray-bg);
+  --smart-doc-callout-border: var(--smart-doc-callout-gray-border);
+  margin-top: 1rem !important;
+  margin-bottom: 1rem !important;
+  padding: 0.875rem 1rem !important;
+  border-color: var(--smart-doc-callout-border) !important;
+  border-radius: var(--smart-doc-radius-md) !important;
+  background: var(--smart-doc-callout-bg) !important;
+  color: var(--smart-doc-text) !important;
+  box-shadow: none !important;
+  font-size: 0.9375rem !important;
+  line-height: 1.65;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-callout[data-tone="yellow"] {
+  --smart-doc-callout-bg: var(--smart-doc-callout-yellow-bg);
+  --smart-doc-callout-border: var(--smart-doc-callout-yellow-border);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-callout[data-tone="blue"] {
+  --smart-doc-callout-bg: var(--smart-doc-callout-blue-bg);
+  --smart-doc-callout-border: var(--smart-doc-callout-blue-border);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-callout[data-tone="green"] {
+  --smart-doc-callout-bg: var(--smart-doc-callout-green-bg);
+  --smart-doc-callout-border: var(--smart-doc-callout-green-border);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-callout[data-tone="red"] {
+  --smart-doc-callout-bg: var(--smart-doc-callout-red-bg);
+  --smart-doc-callout-border: var(--smart-doc-callout-red-border);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-callout[data-tone="purple"] {
+  --smart-doc-callout-bg: var(--smart-doc-callout-purple-bg);
+  --smart-doc-callout-border: var(--smart-doc-callout-purple-border);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-callout input {
+  border-color: color-mix(in srgb, var(--smart-doc-callout-border) 88%, var(--smart-doc-text-muted)) !important;
+  background: color-mix(in srgb, var(--smart-doc-surface) 74%, transparent) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-callout-tone-picker {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-0.2rem);
+  transition:
+    max-height var(--smart-doc-motion-normal) var(--smart-doc-ease),
+    opacity var(--smart-doc-motion-fast) var(--smart-doc-ease),
+    transform var(--smart-doc-motion-normal) var(--smart-doc-ease);
+}
+
+.ProseMirror[contenteditable="true"] .smart-doc-callout:hover .smart-doc-callout-tone-picker,
+.ProseMirror[contenteditable="true"] .smart-doc-callout:focus-within .smart-doc-callout-tone-picker {
+  max-height: 8rem;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.ProseMirror[contenteditable="false"] .smart-doc-callout input {
+  border-color: transparent !important;
+  background: transparent !important;
+  pointer-events: none;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-callout-content {
+  color: inherit;
+}
+
+/* Columns */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-column-list {
+  align-items: stretch;
+  gap: 1.25rem !important;
+  margin-top: 1.25rem !important;
+  margin-bottom: 1.25rem !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-column {
+  width: 100%;
+  min-width: 0;
+  padding: 0.3rem !important;
+  border-color: transparent !important;
+  border-radius: var(--smart-doc-radius-sm) !important;
+}
+
+:is(.smart-document-shell, .smart-document)[data-mode="edit"] :is(.smart-document-content, .ProseMirror) .smart-doc-column:hover,
+:is(.smart-document-shell, .smart-document)[data-mode="edit"] :is(.smart-document-content, .ProseMirror) .smart-doc-column.ProseMirror-selectednode {
+  border-color: var(--smart-doc-border-strong) !important;
+}
+
+/* Database */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-database {
+  margin-top: 1.5rem !important;
+  margin-bottom: 1.5rem !important;
+  overflow: hidden;
+  border-color: var(--smart-doc-border) !important;
+  border-radius: var(--smart-doc-radius-lg) !important;
+  background: var(--smart-doc-surface) !important;
+  color: var(--smart-doc-text);
+  box-shadow: var(--smart-doc-shadow-node) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-database > div:first-child {
+  border-color: var(--smart-doc-border) !important;
+  background: var(--smart-doc-surface-muted);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-database :is(input, textarea, select) {
+  border-color: var(--smart-doc-border) !important;
+  background-color: var(--smart-doc-surface) !important;
+  color: var(--smart-doc-text) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-database :is(input, textarea)::placeholder {
+  color: var(--smart-doc-text-faint) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-database table {
+  min-width: 42rem;
+  font-size: 0.8125rem;
+}
+
+/* Nested row-page editors stay inside the database detail panel instead of
+ * inheriting the top-level 1040px breakout rail. */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-database .ProseMirror :is(
+  .tableWrapper,
+  .smart-doc-database,
+  .smart-doc-column-list,
+  [data-type="mind-map"]
+) {
+  width: 100%;
+  max-width: 100%;
+  margin-left: 0 !important;
+  transform: none;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-database :is(.bg-gray-50, .bg-gray-100) {
+  background-color: var(--smart-doc-surface-muted) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-database :is(.text-gray-900, .text-gray-800, .text-gray-700) {
+  color: var(--smart-doc-text) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-database :is(.text-gray-600, .text-gray-500, .text-gray-400) {
+  color: var(--smart-doc-text-secondary) !important;
+}
+
+/* Supporting smart blocks */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :is(
+  .smart-doc-bookmark,
+  .smart-doc-embed,
+  .smart-doc-page-link,
+  .smart-doc-synced-block,
+  .smart-doc-template-button
+) {
+  border-color: var(--smart-doc-border) !important;
+  border-radius: var(--smart-doc-radius-md) !important;
+  background: var(--smart-doc-surface) !important;
+  color: var(--smart-doc-text) !important;
+  box-shadow: var(--smart-doc-shadow-node);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :is(.smart-doc-bookmark, .smart-doc-page-link):hover {
+  border-color: var(--smart-doc-border-strong) !important;
+  background: var(--smart-doc-surface-muted) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-embed iframe {
+  border: 0;
+  background: var(--smart-doc-surface-muted) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-synced-block > div:first-child {
+  border-color: color-mix(in srgb, var(--smart-doc-accent) 18%, var(--smart-doc-border)) !important;
+  background: color-mix(in srgb, var(--smart-doc-accent-soft) 70%, var(--smart-doc-surface)) !important;
+  color: var(--smart-doc-accent) !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-type="mind-map"] {
+  min-height: 22rem;
+  margin-top: 1.5rem !important;
+  margin-bottom: 1.5rem !important;
+  overflow: hidden;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: var(--smart-doc-radius-lg);
+  background: var(--smart-doc-surface-muted);
+}
+
+/* Block identities, comments, and user-applied colors */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :is(
+  .smart-doc-block-link-highlight,
+  [id^="block-"]:target,
+  [data-block-link-target="true"]
+) {
+  border-radius: var(--smart-doc-radius-sm);
+  background-color: var(--smart-doc-warning-soft);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--smart-doc-warning) 24%, transparent);
+  transition: background-color var(--smart-doc-motion-normal) var(--smart-doc-ease), box-shadow var(--smart-doc-motion-normal) var(--smart-doc-ease);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-text-color="gray"] { color: #6b7280; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-text-color="brown"] { color: #875a35; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-text-color="orange"] { color: #b95712; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-text-color="yellow"] { color: #8b6900; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-text-color="green"] { color: #18794e; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-text-color="blue"] { color: #2864b4; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-text-color="purple"] { color: #7651b7; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-text-color="pink"] { color: #b83f76; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-text-color="red"] { color: #c9362b; }
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-background-color] {
+  margin-inline: -0.2rem;
+  padding-inline: 0.2rem;
+  border-radius: var(--smart-doc-radius-xs);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-background-color="gray"] { background-color: #f1f1ef; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-background-color="brown"] { background-color: #f4eee8; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-background-color="orange"] { background-color: #fff0e2; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-background-color="yellow"] { background-color: #fff6cf; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-background-color="green"] { background-color: #eaf6ef; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-background-color="blue"] { background-color: #eaf2fb; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-background-color="purple"] { background-color: #f2edfa; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-background-color="pink"] { background-color: #faeaf1; }
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-block-background-color="red"] { background-color: #fcebea; }
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .ProseMirror-selectednode {
+  outline: 2px solid color-mix(in srgb, var(--smart-doc-accent) 56%, transparent);
+  outline-offset: 2px;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-action-label::before {
+  content: attr(data-label);
+}
+
+@media (min-width: 48rem) {
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-column {
+    flex: 0 0 var(--smart-column-width, 1fr);
+    max-width: var(--smart-column-width, none);
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-column:not([data-width]) {
+    flex: 1 1 0;
+    max-width: none;
+  }
+}
+
+@media (max-width: 47.999rem) {
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) :is(
+    .tableWrapper,
+    .smart-doc-database,
+    .smart-doc-column-list,
+    [data-type="mind-map"]
+  ) {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0 !important;
+    transform: none;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-column-list {
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-database {
+    border-radius: var(--smart-doc-radius-md) !important;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-callout {
+    gap: 0.625rem !important;
+    padding: 0.75rem !important;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) [data-smart-doc-ui="image-toolbar"] {
+    right: 0.375rem !important;
+    left: 0.375rem;
+    max-width: none !important;
+  }
+}

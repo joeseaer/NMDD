@@ -2,16 +2,11 @@
 import { Node, mergeAttributes, InputRule, Extension, type JSONContent } from '@tiptap/core';
 import Suggestion from '@tiptap/suggestion';
 import { EditorContent, ReactRenderer, ReactNodeViewRenderer, NodeViewWrapper, NodeViewContent, useEditor } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import LinkExtension from '@tiptap/extension-link';
 import TiptapImage from '@tiptap/extension-image';
 import { Table } from '@tiptap/extension-table';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import { TableRow } from '@tiptap/extension-table-row';
-import TaskList from '@tiptap/extension-task-list';
-import TaskItem from '@tiptap/extension-task-item';
-import Placeholder from '@tiptap/extension-placeholder';
 import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { Fragment } from '@tiptap/pm/model';
 import tippy from 'tippy.js';
@@ -26,6 +21,8 @@ import {
   Database, Plus, Trash2, Table as TableIcon
 } from 'lucide-react';
 import { MindMapComponent } from './MindMapExtension';
+import { createSmartDocumentExtensions } from '../features/document-editor/createEditorExtensions';
+import { SmartClipboardExtension } from '../features/document-editor/SmartClipboardExtension';
 
 // --- Module Augmentation for Commands ---
 declare module '@tiptap/core' {
@@ -468,7 +465,7 @@ const CalloutBlockView = ({ node, updateAttributes, selected }: any) => {
           className={`flex h-7 w-7 rounded border px-0 text-center text-sm font-semibold outline-none focus:ring-2 focus:ring-white/70 ${tone.iconClassName}`}
           aria-label="Callout 图标"
         />
-        <div className="flex flex-col gap-1">
+        <div className="smart-doc-callout-tone-picker flex flex-col gap-1">
           {CALLOUT_TONE_OPTIONS.map((option) => (
             <button
               key={option.value}
@@ -2490,90 +2487,61 @@ const DatabaseRowPageEditor = ({
 }) => {
   const pageSignature = getDatabaseRowPageSignature(page);
   const externalSigRef = useRef(pageSignature);
+  const smartDocumentRef = useRef(smartDocument);
+  smartDocumentRef.current = smartDocument;
   const uploadImage = smartDocument?.uploadImage || smartDocument?.uploadFile;
 
   const rowPageEditor = useEditor({
-    extensions: [
-      StarterKit.configure({
-        link: false,
-        bulletList: {
-          keepMarks: true,
-          keepAttributes: false,
+    extensions: createSmartDocumentExtensions({
+      placeholder: '输入条目详情，或输入 / 插入块',
+      before: [SmartClipboardExtension.configure({
+        uploadImage: async file => {
+          const upload = smartDocumentRef.current?.uploadImage || smartDocumentRef.current?.uploadFile;
+          return typeof upload === 'function' ? upload(file) : null;
         },
-        orderedList: {
-          keepMarks: true,
-          keepAttributes: false,
+        uploadFile: async file => {
+          const upload = smartDocumentRef.current?.uploadFile || smartDocumentRef.current?.uploadImage;
+          return typeof upload === 'function' ? upload(file) : null;
         },
-      }),
-      LinkExtension.configure({ openOnClick: false }),
-      DatabaseRowPageImage.configure({
+      })],
+      image: DatabaseRowPageImage.configure({
         inline: false,
         allowBase64: true,
       }),
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Placeholder.configure({ placeholder: '输入条目详情，或输入 / 插入块' }),
-      ColumnList,
-      Column,
-      SlashCommand.configure({
-        suggestion: {
-          items: getSuggestionItems,
-          render: renderItems,
-        },
-      }),
-      Indent,
-      MindMap,
-      ToggleBlock,
-      CalloutBlock,
-      BookmarkBlock,
-      EmbedBlock,
-      MediaBlock,
-      TemplateButtonBlock,
-      SyncedBlock,
-      PageLinkBlock,
-      InlineEquation,
-      EquationBlock,
-      DatabaseBlock,
-      Table.configure({
-        resizable: true,
-      }),
-      TableRow,
-      TableHeader,
-      TableCell,
-    ],
+      custom: [
+        ColumnList,
+        Column,
+        SlashCommand.configure({
+          suggestion: {
+            items: getSuggestionItems,
+            render: renderItems,
+          },
+        }),
+        Indent,
+        MindMap,
+        ToggleBlock,
+        CalloutBlock,
+        BookmarkBlock,
+        EmbedBlock,
+        MediaBlock,
+        TemplateButtonBlock,
+        SyncedBlock,
+        PageLinkBlock,
+        InlineEquation,
+        EquationBlock,
+        DatabaseBlock,
+      ],
+      table: {
+        table: Table.configure({ resizable: true }),
+        row: TableRow,
+        header: TableHeader,
+        cell: TableCell,
+      },
+    }),
     content: getDatabaseRowPageInitialContent(page),
     editorProps: {
       attributes: {
-        class: 'prose prose-sm max-w-none min-h-[180px] rounded-b-md bg-white px-4 py-3 text-gray-800 outline-none whitespace-pre-wrap break-words [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_ul[data-type="taskList"]]:list-none [&_ul[data-type="taskList"]]:pl-0 [&_li_p]:m-0 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-50 [&_th]:px-2 [&_th]:py-1',
-      },
-      handlePaste: (view, event) => {
-        const item = Array.from(event.clipboardData?.items || []).find((entry) => entry.kind === 'file' && entry.type.startsWith('image/'));
-        const file = item?.getAsFile();
-        if (!file || typeof uploadImage !== 'function') return false;
-
-        event.preventDefault();
-        uploadImage(file).then((url) => {
-          if (!url) return;
-          const node = view.state.schema.nodes.image.create({ src: url, width: '100%', align: 'center' });
-          view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
-        });
-        return true;
-      },
-      handleDrop: (view, event, _slice, moved) => {
-        const file = !moved && event.dataTransfer?.files?.[0];
-        if (!file || !file.type.startsWith('image/') || typeof uploadImage !== 'function') return false;
-
-        event.preventDefault();
-        uploadImage(file).then((url) => {
-          if (!url) return;
-          const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY });
-          const node = view.state.schema.nodes.image.create({ src: url, width: '100%', align: 'center' });
-          const tr = coordinates
-            ? view.state.tr.insert(coordinates.pos, node)
-            : view.state.tr.replaceSelectionWith(node);
-          view.dispatch(tr.scrollIntoView());
-        });
-        return true;
+        class: 'smart-document-content smart-document-content--compact min-h-[180px] rounded-b-md outline-none',
       },
     },
     onUpdate: ({ editor }) => {
@@ -4335,6 +4303,7 @@ const EquationBlockView = ({ node, updateAttributes, selected }: any) => {
     >
       <div
         className="min-h-10 overflow-x-auto rounded bg-gray-50 px-3 py-3 text-center text-gray-900"
+        role="math"
         aria-label={formula}
         dangerouslySetInnerHTML={{ __html: previewHtml }}
       />

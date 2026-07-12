@@ -64,10 +64,97 @@ const packSmartDocumentContent = (content, contentJson) => {
   return `${SMART_DOC_JSON_PREFIX}${encoded}${SMART_DOC_JSON_SUFFIX}\n${content || ''}`;
 };
 
-const isMissingContentJsonColumn = (error) => {
-  const message = String(error?.message || error?.details || '');
-  return error?.code === 'PGRST204' || message.includes("'content_json' column");
+const DEFAULT_DOCUMENT_SCHEMA_VERSION = 1;
+const DOCUMENT_RELIABILITY_FIELDS = ['content_schema_version', 'content_revision'];
+
+const getDatabaseErrorText = (error) => (
+  [error?.message, error?.details, error?.hint].filter(Boolean).join(' ')
+);
+
+const escapeRegExp = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const errorMentionsColumn = (error, field) => {
+  const code = String(error?.code || '').toUpperCase();
+  const message = getDatabaseErrorText(error);
+  const escapedField = escapeRegExp(field);
+
+  if (code === 'PGRST204') {
+    return (
+      /schema cache/i.test(message) &&
+      new RegExp(`(?:could not find\\s+)?['\"]${escapedField}['\"]\\s+column\\b`, 'i').test(message)
+    );
+  }
+
+  if (code === '42703') {
+    return new RegExp(
+      `\\bcolumn\\s+(?:(?:['\"]?[^\\s.'\"]+['\"]?)\\.)?['\"]?${escapedField}['\"]?\\s+does not exist\\b`,
+      'i'
+    ).test(message);
+  }
+
+  return false;
 };
+
+const isMissingContentJsonColumn = (error) => errorMentionsColumn(error, 'content_json');
+
+const isMissingDocumentReliabilityColumn = (error) => (
+  DOCUMENT_RELIABILITY_FIELDS.some((field) => errorMentionsColumn(error, field))
+);
+
+const stripDocumentReliabilityFields = (payload) => {
+  const next = { ...(payload || {}) };
+  DOCUMENT_RELIABILITY_FIELDS.forEach((field) => delete next[field]);
+  return next;
+};
+
+const normalizePositiveInteger = (value, fallback = null) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 1 ? parsed : fallback;
+};
+
+const normalizeDocumentSchemaVersion = (value) => (
+  normalizePositiveInteger(value, DEFAULT_DOCUMENT_SCHEMA_VERSION)
+);
+
+const normalizeExpectedRevision = (sopData = {}) => {
+  const provided = Object.prototype.hasOwnProperty.call(sopData, 'expected_revision')
+    ? sopData.expected_revision
+    : sopData.expectedRevision;
+  if (provided === undefined || provided === null || provided === '') return null;
+  const revision = normalizePositiveInteger(provided, null);
+  if (revision === null) {
+    const error = new Error('expected_revision must be a positive integer');
+    error.name = 'SopRevisionValidationError';
+    error.code = 'INVALID_EXPECTED_REVISION';
+    error.statusCode = 400;
+    throw error;
+  }
+  return revision;
+};
+
+class SopRevisionConflictError extends Error {
+  constructor({ id, expectedRevision, currentRevision, contentSchemaVersion }) {
+    super(`SOP ${id} changed after revision ${expectedRevision}`);
+    this.name = 'SopRevisionConflictError';
+    this.code = 'SOP_REVISION_CONFLICT';
+    this.statusCode = 409;
+    this.sopId = id;
+    this.expectedRevision = expectedRevision;
+    this.currentRevision = currentRevision;
+    this.contentSchemaVersion = contentSchemaVersion;
+  }
+}
+
+class SopNotFoundError extends Error {
+  constructor(id) {
+    super(`SOP ${id} was not found`);
+    this.name = 'SopNotFoundError';
+    this.code = 'SOP_NOT_FOUND';
+    this.statusCode = 404;
+    this.sopId = id;
+  }
+}
 
 const SOP_METADATA_FIELDS = [
   'domain',
@@ -82,14 +169,9 @@ const VALID_SOP_DOMAINS = new Set(['life', 'research']);
 const VALID_RESEARCH_TYPES = new Set(['document', 'idea', 'meeting']);
 const VALID_RESEARCH_STATUSES = new Set(['seed', 'to_verify', 'absorbed', 'paused']);
 
-const isMissingSopMetadataColumn = (error) => {
-  const message = String(error?.message || error?.details || '');
-  return SOP_METADATA_FIELDS.some((field) => (
-    message.includes(`'${field}' column`) ||
-    message.includes(`Could not find the '${field}'`) ||
-    message.includes(field)
-  ));
-};
+const isMissingSopMetadataColumn = (error) => (
+  SOP_METADATA_FIELDS.some((field) => errorMentionsColumn(error, field))
+);
 
 const stripSopMetadataFields = (payload) => {
   const next = { ...(payload || {}) };
@@ -185,19 +267,29 @@ const buildSopMetadataPayload = (sopData = {}) => {
   };
 };
 
-const runSopMutationWithFallback = async (mutate, payload, fallbackContent) => {
-  let currentPayload = payload;
+const runSopMutationWithFallback = async (mutate, payload, fallbackContent, options = {}) => {
+  let currentPayload = options.documentReliability === false
+    ? stripDocumentReliabilityFields(payload)
+    : payload;
   let strippedContentJson = false;
   let strippedMetadata = false;
+  let documentReliabilitySupported = options.documentReliability !== false;
 
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    const result = await mutate(currentPayload);
-    if (!result.error) return result;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const state = { documentReliabilitySupported };
+    const result = await mutate(currentPayload, state);
+    if (!result.error) return { ...result, ...state };
 
     if (isMissingContentJsonColumn(result.error) && !strippedContentJson) {
       const { content_json, ...fallbackPayload } = currentPayload;
       currentPayload = { ...fallbackPayload, content: fallbackContent };
       strippedContentJson = true;
+      continue;
+    }
+
+    if (isMissingDocumentReliabilityColumn(result.error) && documentReliabilitySupported) {
+      currentPayload = stripDocumentReliabilityFields(currentPayload);
+      documentReliabilitySupported = false;
       continue;
     }
 
@@ -212,7 +304,9 @@ const runSopMutationWithFallback = async (mutate, payload, fallbackContent) => {
     return result;
   }
 
-  return mutate(currentPayload);
+  const state = { documentReliabilitySupported };
+  const result = await mutate(currentPayload, state);
+  return { ...result, ...state };
 };
 
 function summarizeMindMapContent(content) {
@@ -304,14 +398,31 @@ const getRecentScenes = async (userId, limit = 5) => {
 
 // --- SOPs ---
 
-const saveSOP = async (sopData) => {
+const saveSOP = async (sopData, options = {}) => {
   if (!supabase) throw new Error("Database connection not established. Check environment variables.");
 
   let sopId = sopData.id;
+  let saveResult = null;
+  const isUpdate = !!(sopData.id && sopData.id.length > 10);
+  const expectedRevision = normalizeExpectedRevision(sopData);
+  const hasContentSchemaVersion = (
+    sopData.content_schema_version !== undefined &&
+    sopData.content_schema_version !== null &&
+    sopData.content_schema_version !== ''
+  );
+  const contentSchemaVersion = normalizeDocumentSchemaVersion(sopData.content_schema_version);
   const unpackedContent = unpackSmartDocumentContent(sopData.content);
   const contentJson = normalizeContentJson(sopData.content_json) || unpackedContent.contentJson;
   const content = unpackedContent.content;
   const fallbackContent = packSmartDocumentContent(content, contentJson);
+
+  if (!isUpdate && expectedRevision !== null) {
+    const error = new Error('expected_revision can only be used when updating an existing SOP');
+    error.name = 'SopRevisionValidationError';
+    error.code = 'INVALID_EXPECTED_REVISION';
+    error.statusCode = 400;
+    throw error;
+  }
 
   // Ensure content is processed if it contains URL-encoded mindmap data
   // Although frontend decodes it for display, we want to store it as is or decoded?
@@ -319,7 +430,7 @@ const saveSOP = async (sopData) => {
   // Postgres TEXT column can handle it fine. No special processing needed here usually.
   
   // Check if updating or inserting
-  if (sopData.id && sopData.id.length > 10) { // Simple check for UUID vs mock ID
+  if (isUpdate) { // Simple check for UUID vs mock ID
       const payload = {
           title: sopData.title,
           category: sopData.category,
@@ -327,23 +438,63 @@ const saveSOP = async (sopData) => {
           version: sopData.version,
           content,
           content_json: contentJson,
+          ...(hasContentSchemaVersion ? { content_schema_version: contentSchemaVersion } : {}),
           ...buildSopMetadataPayload(sopData),
           updated_at: new Date()
       };
 
-      let { data, error } = await runSopMutationWithFallback(
-        (nextPayload) => supabase
-          .from('sops')
-          .update(nextPayload)
-          .eq('id', sopData.id)
-          .select('id')
-          .single(),
+      const mutationResult = await runSopMutationWithFallback(
+        (nextPayload, state) => {
+          let query = supabase
+            .from('sops')
+            .update(nextPayload)
+            .eq('id', sopData.id);
+          if (state.documentReliabilitySupported && expectedRevision !== null) {
+            query = query.eq('content_revision', expectedRevision);
+          }
+          return query
+            .select(state.documentReliabilitySupported
+              ? 'id, content_revision, content_schema_version'
+              : 'id')
+            .maybeSingle();
+        },
         payload,
         fallbackContent
       );
-        
-      if (error) throw error;
-      sopId = data.id;
+
+      if (mutationResult.error) throw mutationResult.error;
+
+      if (!mutationResult.data) {
+        if (mutationResult.documentReliabilitySupported && expectedRevision !== null) {
+          const { data: current, error: currentError } = await supabase
+            .from('sops')
+            .select('id, content_revision, content_schema_version')
+            .eq('id', sopData.id)
+            .maybeSingle();
+          if (currentError) throw currentError;
+          if (current) {
+            throw new SopRevisionConflictError({
+              id: sopData.id,
+              expectedRevision,
+              currentRevision: normalizePositiveInteger(current.content_revision, null),
+              contentSchemaVersion: normalizeDocumentSchemaVersion(current.content_schema_version),
+            });
+          }
+        }
+        throw new SopNotFoundError(sopData.id);
+      }
+
+      sopId = mutationResult.data.id;
+      saveResult = {
+        id: sopId,
+        content_schema_version: mutationResult.documentReliabilitySupported
+          ? normalizeDocumentSchemaVersion(mutationResult.data.content_schema_version)
+          : DEFAULT_DOCUMENT_SCHEMA_VERSION,
+        content_revision: mutationResult.documentReliabilitySupported
+          ? normalizePositiveInteger(mutationResult.data.content_revision, null)
+          : null,
+        revision_supported: !!mutationResult.documentReliabilitySupported,
+      };
   } else {
       // If ID is missing or short (temp ID), treat as insert
       // Remove temp ID from payload so Postgres generates new UUID
@@ -356,22 +507,36 @@ const saveSOP = async (sopData) => {
           version: insertData.version,
           content,
           content_json: contentJson,
+          content_schema_version: contentSchemaVersion,
+          content_revision: 1,
           ...buildSopMetadataPayload(insertData),
           // related_scenes is legacy, we use relational tables now
       };
       
-      let { data, error } = await runSopMutationWithFallback(
-        (nextPayload) => supabase
+      const mutationResult = await runSopMutationWithFallback(
+        (nextPayload, state) => supabase
           .from('sops')
           .insert([nextPayload])
-          .select('id')
+          .select(state.documentReliabilitySupported
+            ? 'id, content_revision, content_schema_version'
+            : 'id')
           .single(),
         payload,
         fallbackContent
       );
 
-      if (error) throw error;
-      sopId = data.id;
+      if (mutationResult.error) throw mutationResult.error;
+      sopId = mutationResult.data.id;
+      saveResult = {
+        id: sopId,
+        content_schema_version: mutationResult.documentReliabilitySupported
+          ? normalizeDocumentSchemaVersion(mutationResult.data.content_schema_version)
+          : DEFAULT_DOCUMENT_SCHEMA_VERSION,
+        content_revision: mutationResult.documentReliabilitySupported
+          ? normalizePositiveInteger(mutationResult.data.content_revision, 1)
+          : null,
+        revision_supported: !!mutationResult.documentReliabilitySupported,
+      };
   }
 
   try {
@@ -407,16 +572,26 @@ const saveSOP = async (sopData) => {
             version: latestHistory.version,
             content,
             content_json: contentJson,
+            content_schema_version: saveResult.content_schema_version,
+            content_revision: saveResult.content_revision || 1,
             version_note: latestHistory.note
         };
-        let { error: versionError } = await supabase.from('sop_versions').insert(versionPayload);
-        if (versionError && isMissingContentJsonColumn(versionError)) {
-          const { content_json, ...fallbackVersionPayload } = versionPayload;
-          ({ error: versionError } = await supabase
-            .from('sop_versions')
-            .insert({ ...fallbackVersionPayload, content: fallbackContent }));
+        const versionResult = await runSopMutationWithFallback(
+          (nextPayload) => supabase.from('sop_versions').insert(nextPayload),
+          versionPayload,
+          fallbackContent,
+          { documentReliability: saveResult.revision_supported }
+        );
+        if (versionResult.error) {
+          // The primary document revision has already committed at this point.
+          // Treat history snapshots as best-effort so a transient secondary-table
+          // failure cannot make the client retry a successful CAS write.
+          console.warn('[sop][db] version history snapshot failed after document save', {
+            sopId,
+            version: latestHistory.version,
+            error: versionResult.error?.message || versionResult.error,
+          });
         }
-        if (versionError) throw versionError;
       }
   }
 
@@ -451,7 +626,7 @@ const saveSOP = async (sopData) => {
       }
   }
 
-  return sopId;
+  return options.returnResult ? saveResult : sopId;
 };
 
 const applySopFilters = (items, filters = {}) => {
@@ -465,89 +640,69 @@ const applySopFilters = (items, filters = {}) => {
   });
 };
 
+const buildSopListSelect = (includeDocumentReliability) => `
+  *,
+  sop_versions (
+    version,
+    created_at,
+    version_note${includeDocumentReliability ? ',\n    content_schema_version,\n    content_revision' : ''}
+  ),
+  sop_usage_logs (
+    scene_type,
+    score,
+    created_at,
+    notes,
+    scene_id
+  ),
+  scene_sop_rel (
+    scene_id,
+    scenes (
+        id,
+        scene_type,
+        initial_context
+    )
+  ),
+  people_sop_rel (
+    people_id,
+    people_profiles (
+        id,
+        name,
+        identity
+    )
+  )
+`;
+
 const getSOPs = async (userId, filters = {}) => {
   if (!supabase) return [];
 
   // Fetch SOPs with their related data
   // Note: This relies on foreign key relationships being detected by Supabase/PostgREST
-  let query = supabase
-    .from('sops')
-    .select(`
-      *,
-      sop_versions (
-        version,
-        created_at,
-        version_note
-      ),
-      sop_usage_logs (
-        scene_type,
-        score,
-        created_at,
-        notes,
-        scene_id
-      ),
-      scene_sop_rel (
-        scene_id,
-        scenes (
-            id,
-            scene_type,
-            initial_context
-        )
-      ),
-      people_sop_rel (
-        people_id,
-        people_profiles (
-            id,
-            name,
-            identity
-        )
-      )
-    `)
-    .eq('user_id', userId);
-
   const domain = filters.domain && VALID_SOP_DOMAINS.has(String(filters.domain)) ? String(filters.domain) : null;
   const researchType = filters.researchType && VALID_RESEARCH_TYPES.has(String(filters.researchType)) ? String(filters.researchType) : null;
-  if (domain) query = query.eq('domain', domain);
-  if (researchType) query = query.eq('research_type', researchType);
+  let metadataSupported = true;
+  let documentReliabilitySupported = true;
+  let data = null;
+  let error = null;
 
-  let { data, error } = await query.order('updated_at', { ascending: false });
-
-  if (error && isMissingSopMetadataColumn(error)) {
-    ({ data, error } = await supabase
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    let query = supabase
       .from('sops')
-      .select(`
-        *,
-        sop_versions (
-          version,
-          created_at,
-          version_note
-        ),
-        sop_usage_logs (
-          scene_type,
-          score,
-          created_at,
-          notes,
-          scene_id
-        ),
-        scene_sop_rel (
-          scene_id,
-          scenes (
-              id,
-              scene_type,
-              initial_context
-          )
-        ),
-        people_sop_rel (
-          people_id,
-          people_profiles (
-              id,
-              name,
-              identity
-          )
-        )
-      `)
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false }));
+      .select(buildSopListSelect(documentReliabilitySupported))
+      .eq('user_id', userId);
+    if (metadataSupported && domain) query = query.eq('domain', domain);
+    if (metadataSupported && researchType) query = query.eq('research_type', researchType);
+
+    ({ data, error } = await query.order('updated_at', { ascending: false }));
+    if (!error) break;
+    if (metadataSupported && isMissingSopMetadataColumn(error)) {
+      metadataSupported = false;
+      continue;
+    }
+    if (documentReliabilitySupported && isMissingDocumentReliabilityColumn(error)) {
+      documentReliabilitySupported = false;
+      continue;
+    }
+    break;
   }
 
   if (error) {
@@ -556,7 +711,7 @@ const getSOPs = async (userId, filters = {}) => {
   }
   
   // Transform data to match frontend SOPEntity structure
-  const mapped = data.map(sop => {
+  const mapped = (data || []).map(sop => {
     const unpackedContent = unpackSmartDocumentContent(sop.content);
     const contentJson = normalizeContentJson(sop.content_json) || unpackedContent.contentJson;
     const usageLogs = sop.sop_usage_logs || [];
@@ -581,7 +736,9 @@ const getSOPs = async (userId, filters = {}) => {
     const history = versions.map(v => ({
       version: v.version,
       date: new Date(v.created_at).toLocaleDateString(),
-      note: v.version_note || ''
+      note: v.version_note || '',
+      content_schema_version: normalizeDocumentSchemaVersion(v.content_schema_version),
+      content_revision: normalizePositiveInteger(v.content_revision, null),
     })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     // Map validation (from usage logs where scene_id is present)
@@ -631,6 +788,9 @@ const getSOPs = async (userId, filters = {}) => {
       updated_at: new Date(sop.updated_at).toLocaleDateString(),
       content: unpackedContent.content,
       content_json: contentJson,
+      content_schema_version: normalizeDocumentSchemaVersion(sop.content_schema_version),
+      content_revision: normalizePositiveInteger(sop.content_revision, null),
+      revision_supported: normalizePositiveInteger(sop.content_revision, null) !== null,
       stats: {
         use_count,
         avg_score: Number(avg_score),
@@ -1652,11 +1812,25 @@ const uploadFile = async (fileBuffer, fileName, mimeType) => {
     return publicData.publicUrl;
 };
 
+// Narrow dependency seam for node:test. Production code never calls this; it
+// lets persistence tests exercise the real saveSOP flow without a live project.
+const __setSupabaseClientForTests = (client) => {
+  supabase = client;
+};
+
 module.exports = { 
   initDB, saveScene, getRecentScenes, saveSOP, getSOPs, updateSOPMeta, promoteSOPToLife, deleteSOP, deleteSOPsByTitle,
   savePersonProfile, updatePersonPrivateInfo, updatePersonTriggersPleasers, updatePersonReactionLibrary, updatePersonAIFollowUp, deletePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog, deleteInteractionLog,
   saveReviewSession, getReviewSessions, getReviewSession, getUserStats,
   getPlannerLists, ensurePlannerInbox, createPlannerList, updatePlannerList, deletePlannerList,
   createPlannerItem, updatePlannerItem, deletePlannerItem, listPlannerItems,
-  saveNPCRelation, getNPCRelations, updateNPCRelation, getAllUserData, uploadFile
+  saveNPCRelation, getNPCRelations, updateNPCRelation, getAllUserData, uploadFile,
+  SopRevisionConflictError,
+  __setSupabaseClientForTests,
+  __test: {
+    errorMentionsColumn,
+    normalizeExpectedRevision,
+    normalizeDocumentSchemaVersion,
+    isMissingDocumentReliabilityColumn,
+  },
 };

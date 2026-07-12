@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -16,6 +16,23 @@ import {
 } from 'lucide-react';
 import { api, CURRENT_USER_ID } from '../services/api';
 import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue } from '../components/SmartDocumentEditor';
+import {
+  normalizeDocumentRevision,
+  restoreLocalDocumentDraft,
+  useRevisionedSaveQueue,
+  type DocumentSaveStatus,
+} from '../features/document-editor/useRevisionedSaveQueue';
+import { DocumentSaveIndicator } from '../features/document-editor/ui/DocumentSaveIndicator';
+import {
+  DocumentPageHeader,
+  DocumentProperties,
+  DocumentProperty,
+  DocumentTopbar,
+  DocumentWorkspaceShell,
+} from '../components/document';
+import { DocumentViewControls } from '../features/document-editor/ui/DocumentViewControls';
+import { useDocumentViewPreferences } from '../features/document-editor/useDocumentViewPreferences';
+import { withoutRelationsForDocumentAutosave } from '../features/document-editor/savePayload';
 
 type ResearchType = 'document' | 'idea' | 'meeting';
 type ResearchStatus = 'seed' | 'to_verify' | 'absorbed' | 'paused';
@@ -42,6 +59,8 @@ type ResearchItem = {
   updated_at: string;
   content: string;
   content_json?: any | null;
+  content_schema_version?: number;
+  content_revision?: number | null;
   related: {
     scenes: { id: string; title: string; score: number; date: string }[];
     people: RelatedPerson[];
@@ -55,6 +74,15 @@ type ResearchItem = {
     last_used: string;
     related_scenes_count: number;
   };
+};
+
+type ResearchSavePayload = Omit<ResearchItem, 'related'> & {
+  related?: ResearchItem['related'];
+};
+
+type ResearchUpdateOptions = {
+  persistRelations?: boolean;
+  flush?: boolean;
 };
 
 type PromoteDraft = {
@@ -111,6 +139,8 @@ const normalizeResearchItem = (raw: any): ResearchItem => {
     updated_at: String(raw?.updated_at || ''),
     content: String(raw?.content || ''),
     content_json: raw?.content_json || null,
+    content_schema_version: Number(raw?.content_schema_version || 1),
+    content_revision: normalizeDocumentRevision(raw?.content_revision),
     related: {
       scenes: Array.isArray(related.scenes) ? related.scenes : [],
       people: Array.isArray(related.people) ? related.people : [],
@@ -167,34 +197,15 @@ const makeDefaultTitle = (type: ResearchType) => {
   return '未命名科研文档';
 };
 
-function useDebouncedCallback<T extends (...args: any[]) => any>(
-  callback: T,
-  wait: number
-) {
-  const timeout = useRef<ReturnType<typeof setTimeout>>();
-
-  return useCallback(
-    (...args: Parameters<T>) => {
-      const later = () => {
-        clearTimeout(timeout.current);
-        callback(...args);
-      };
-
-      clearTimeout(timeout.current);
-      timeout.current = setTimeout(later, wait);
-    },
-    [callback, wait]
-  );
-}
-
 export default function ResearchWorkspace() {
   const [items, setItems] = useState<ResearchItem[]>([]);
   const [people, setPeople] = useState<RelatedPerson[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const activeEditorFlushRef = React.useRef<(() => Promise<void>) | null>(null);
+  const urlSyncTargetRef = React.useRef<string | undefined>(undefined);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -212,6 +223,36 @@ export default function ResearchWorkspace() {
     }))
   ), [items]);
 
+  const handleOptimisticResearchUpdate = useCallback((updatedItem: ResearchSavePayload) => {
+    setItems((current) => current.map((item) => item.id === updatedItem.id
+      ? {
+          ...item,
+          ...updatedItem,
+          related: updatedItem.related ?? item.related,
+        }
+      : item));
+  }, []);
+
+  const handleConfirmedResearchSave = useCallback((id: string, result: {
+    content_revision?: number | null;
+    content_schema_version?: number;
+  }) => {
+    setItems((current) => current.map((item) => item.id === id
+      ? {
+          ...item,
+          content_revision: normalizeDocumentRevision(result.content_revision) ?? item.content_revision,
+          content_schema_version: Number(result.content_schema_version || item.content_schema_version || 1),
+        }
+      : item));
+  }, []);
+
+  const saveQueue = useRevisionedSaveQueue<ResearchSavePayload>({
+    saveDocument: api.createSOP,
+    onOptimisticUpdate: handleOptimisticResearchUpdate,
+    onConfirmed: handleConfirmedResearchSave,
+  });
+  const selectedSaveStatus = saveQueue.getStatus(selectedItemId);
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -219,7 +260,21 @@ export default function ResearchWorkspace() {
         api.getSOPs(CURRENT_USER_ID, { domain: 'research' }),
         api.getAllPeople(CURRENT_USER_ID),
       ]);
-      setItems((Array.isArray(rawItems) ? rawItems : []).map(normalizeResearchItem).filter((item) => item.id));
+      const normalizedItems = (Array.isArray(rawItems) ? rawItems : [])
+        .map(normalizeResearchItem)
+        .filter((item) => item.id);
+      const restoredItems = normalizedItems.map((item) => {
+        const restored = restoreLocalDocumentDraft(item);
+        if (restored !== item && normalizeDocumentRevision(item.content_revision) !== null) {
+          // A recovered draft may contain an explicit relation edit, so its
+          // one-time retry must preserve the complete stored payload. Legacy
+          // databases have no CAS revision, so their drafts remain visible
+          // locally but are never replayed automatically over remote content.
+          saveQueue.schedule(restored);
+        }
+        return restored;
+      });
+      setItems(restoredItems);
       setPeople((Array.isArray(rawPeople) ? rawPeople : []).map((person: any) => ({
         id: String(person?.id || ''),
         name: String(person?.name || ''),
@@ -238,17 +293,44 @@ export default function ResearchWorkspace() {
   }, []);
 
   useEffect(() => {
-    if (!docParam) return;
-    const target = items.find((item) => item.id === docParam);
-    if (!target) return;
-    if (target.research_type !== activeType) {
-      setSearchParams({ type: target.research_type, doc: docParam }, { replace: true });
+    const target = docParam ? items.find((item) => item.id === docParam) || null : null;
+    if (docParam && !target) return;
+    const desiredId = target?.id || null;
+
+    if (desiredId === selectedItemId) {
+      urlSyncTargetRef.current = undefined;
+      if (target && target.research_type !== activeType) {
+        setSearchParams({ type: target.research_type, doc: target.id }, { replace: true });
+      }
       return;
     }
-    if (selectedItemId !== docParam) {
-      setSelectedItemId(docParam);
+
+    if (!selectedItemId) {
+      setSelectedItemId(desiredId);
       setShowMobileSidebar(false);
+      return;
     }
+
+    const targetKey = desiredId || '__research_list__';
+    if (urlSyncTargetRef.current === targetKey) return;
+    urlSyncTargetRef.current = targetKey;
+    void (async () => {
+      const canLeave = await flushBeforeNavigation();
+      if (urlSyncTargetRef.current !== targetKey) return;
+      urlSyncTargetRef.current = undefined;
+      if (!canLeave) {
+        const current = items.find((item) => item.id === selectedItemId);
+        if (current) {
+          setSearchParams({ type: current.research_type, doc: current.id }, { replace: true });
+        }
+        return;
+      }
+      setSelectedItemId(desiredId);
+      setShowMobileSidebar(false);
+      if (target) {
+        setSearchParams({ type: target.research_type, doc: target.id }, { replace: true });
+      }
+    })();
   }, [activeType, docParam, items, selectedItemId, setSearchParams]);
 
   const visibleItems = items
@@ -263,23 +345,17 @@ export default function ResearchWorkspace() {
       );
     });
 
-  const debouncedSave = useDebouncedCallback(async (updatedItem: ResearchItem) => {
-    try {
-      await api.createSOP(updatedItem);
-    } catch (error) {
-      console.error('Failed to save research item', error);
-    } finally {
-      setIsSaving(false);
+  const handleUpdateItem = useCallback((updatedItem: ResearchItem, options: ResearchUpdateOptions = {}) => {
+    if (options.persistRelations) {
+      saveQueue.schedule(updatedItem);
+    } else {
+      saveQueue.schedule(withoutRelationsForDocumentAutosave(updatedItem));
     }
-  }, 1000);
-
-  const handleUpdateItem = (updatedItem: ResearchItem) => {
-    setIsSaving(true);
-    setItems((prev) => prev.map((item) => item.id === updatedItem.id ? updatedItem : item));
-    debouncedSave(updatedItem);
-  };
+    if (options.flush) void saveQueue.flush();
+  }, [saveQueue]);
 
   const handleCreateItem = async () => {
+    if (!await flushBeforeNavigation()) return;
     setLoading(true);
     const content = makeTemplate(activeType);
     const newItem: Partial<ResearchItem> = {
@@ -305,6 +381,8 @@ export default function ResearchWorkspace() {
       const createdItem = {
         ...newItem,
         id: result.id,
+        content_schema_version: Number(result.content_schema_version || 1),
+        content_revision: normalizeDocumentRevision(result.content_revision),
         created_at: new Date().toISOString().split('T')[0],
         updated_at: new Date().toISOString().split('T')[0],
       } as ResearchItem;
@@ -334,16 +412,34 @@ export default function ResearchWorkspace() {
     }
   };
 
-  const handleOpenItem = (item: ResearchItem) => {
+  const handleOpenItem = async (item: ResearchItem) => {
+    if (!await flushBeforeNavigation()) return;
     setSelectedItemId(item.id);
     setShowMobileSidebar(false);
     setSearchParams({ type: item.research_type, doc: item.id });
   };
 
-  const handleSwitchType = (type: ResearchType) => {
+  const handleSwitchType = async (type: ResearchType) => {
+    if (!await flushBeforeNavigation()) return;
     setSelectedItemId(null);
     setSearchParams({ type });
   };
+
+  async function flushBeforeNavigation() {
+    try {
+      await activeEditorFlushRef.current?.();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '附件仍在上传，请稍后再离开文档。');
+      return false;
+    }
+
+    const result = await saveQueue.flush();
+    if (result.ok) return true;
+    alert(result.conflictedIds.length
+      ? '文档与其他窗口发生冲突。请先处理冲突，当前内容仍保留在本地。'
+      : '文档尚未保存成功。请重试保存后再离开，当前内容仍保留在本地。');
+    return false;
+  }
 
   const handlePromote = async (item: ResearchItem, draft: PromoteDraft) => {
     setPromotingId(item.id);
@@ -395,7 +491,7 @@ export default function ResearchWorkspace() {
               <button
                 key={type.key}
                 type="button"
-                onClick={() => handleSwitchType(type.key)}
+                onClick={() => void handleSwitchType(type.key)}
                 className={`rounded-md px-2 py-2 text-xs font-medium transition-colors ${
                   activeType === type.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600 hover:bg-white/70'
                 }`}
@@ -438,7 +534,7 @@ export default function ResearchWorkspace() {
                   key={item.id}
                   item={item}
                   active={selectedItemId === item.id}
-                  onClick={() => handleOpenItem(item)}
+                  onClick={() => void handleOpenItem(item)}
                 />
               ))}
             </div>
@@ -454,9 +550,13 @@ export default function ResearchWorkspace() {
             item={selectedItem}
             people={people}
             pages={pages}
-            isSaving={isSaving}
+            saveStatus={selectedSaveStatus}
+            onRetrySave={() => saveQueue.retry(selectedItem.id)}
+            onReloadAfterConflict={() => window.location.reload()}
+            serializationFlushRef={activeEditorFlushRef}
             isPromoting={promotingId === selectedItem.id}
-            onBack={() => {
+            onBack={async () => {
+              if (!await flushBeforeNavigation()) return;
               setSelectedItemId(null);
               setSearchParams({ type: activeType });
             }}
@@ -524,7 +624,10 @@ function ResearchDetail({
   item,
   people,
   pages,
-  isSaving,
+  saveStatus,
+  onRetrySave,
+  onReloadAfterConflict,
+  serializationFlushRef,
   isPromoting,
   onBack,
   onUpdate,
@@ -534,14 +637,21 @@ function ResearchDetail({
   item: ResearchItem;
   people: RelatedPerson[];
   pages: SmartDocumentPageLink[];
-  isSaving: boolean;
+  saveStatus: DocumentSaveStatus;
+  onRetrySave: () => void;
+  onReloadAfterConflict: () => void;
+  serializationFlushRef: React.MutableRefObject<(() => Promise<void>) | null>;
   isPromoting: boolean;
-  onBack: () => void;
-  onUpdate: (item: ResearchItem) => void;
+  onBack: () => void | Promise<void>;
+  onUpdate: (item: ResearchItem, options?: ResearchUpdateOptions) => void;
   onDelete: () => void;
   onPromote: (draft: PromoteDraft) => Promise<void>;
 }) {
   const [showPromote, setShowPromote] = useState(false);
+  const { mode, setMode, theme, setTheme } = useDocumentViewPreferences();
+  const handleBackFromEditor = async () => {
+    await onBack();
+  };
   const [promoteDraft, setPromoteDraft] = useState<PromoteDraft>(() => ({
     title: `科研上浮：${item.title || makeDefaultTitle(item.research_type)}`,
     what: item.title || '',
@@ -560,8 +670,8 @@ function ResearchDetail({
     });
   }, [item.id]);
 
-  const handleTitleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    onUpdate({ ...item, title: event.target.value, updated_at: new Date().toISOString().split('T')[0] });
+  const handleTitleChange = (title: string) => {
+    onUpdate({ ...item, title, updated_at: new Date().toISOString().split('T')[0] });
   };
 
   const handleTagsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -601,7 +711,7 @@ function ResearchDetail({
         people: [...currentPeople, { id: person.id, name: person.name, role: person.identity || person.role || '' }],
       },
       updated_at: new Date().toISOString().split('T')[0],
-    });
+    }, { persistRelations: true, flush: true });
   };
 
   const removePerson = (personId: string) => {
@@ -612,7 +722,7 @@ function ResearchDetail({
         people: (item.related.people || []).filter((person) => person.id !== personId),
       },
       updated_at: new Date().toISOString().split('T')[0],
-    });
+    }, { persistRelations: true, flush: true });
   };
 
   const updateStatus = (status: ResearchStatus) => {
@@ -620,119 +730,134 @@ function ResearchDetail({
   };
 
   return (
-    <div className="flex h-full flex-1 flex-col overflow-hidden bg-white">
-      <div className="flex shrink-0 items-center justify-between border-b border-gray-100 bg-white px-6 py-4">
-        <div className="mr-4 flex flex-1 items-center">
-          <button onClick={onBack} className="mr-4 rounded-full p-2 transition-colors hover:bg-gray-100 lg:hidden">
-            <ArrowLeft className="h-5 w-5 text-gray-500" />
-          </button>
-          <div className="min-w-0 flex-1">
-            <input
-              value={item.title}
-              onChange={handleTitleChange}
-              className="w-full border-none bg-transparent px-0 py-1 text-xl font-bold text-gray-900 focus:outline-none focus:ring-0"
-              placeholder="科研记录标题"
-            />
-            <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-400">
-              <span>{RESEARCH_TYPES.find((type) => type.key === item.research_type)?.label}</span>
-              <span>更新于 {item.updated_at || '-'}</span>
-              {item.promoted_to_life && <span className="text-emerald-600">已上浮</span>}
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">
-            {isSaving ? '保存中...' : '已保存'}
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowPromote(true)}
-            disabled={isPromoting}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-60"
-          >
-            <UploadCloud className="h-4 w-4" />
-            {item.promoted_to_life ? '再次上浮' : '上浮到人生主线'}
-          </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            className="rounded-lg border border-red-100 bg-white p-2 text-red-500 transition-colors hover:bg-red-50"
-            title="删除"
-          >
-            <Trash2 className="h-4 w-4" />
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto bg-white">
-        <div className="mx-auto flex h-full max-w-4xl flex-col">
-          <div className="space-y-4 px-8 pb-2 pt-6">
-            <div className="flex items-center gap-2">
-              <Tag className="h-4 w-4 text-gray-400" />
+    <>
+      <DocumentWorkspaceShell
+        className="flex-1"
+        data-testid="research-document-workspace"
+        theme={theme}
+        mode={mode}
+        scrollMode="workspace"
+        topbar={(
+          <DocumentTopbar
+            leading={(
+              <button type="button" onClick={handleBackFromEditor} className="smart-document-icon-button lg:hidden" aria-label="返回科研记录列表">
+                <ArrowLeft aria-hidden="true" />
+              </button>
+            )}
+            center={(
+              <span>
+                {RESEARCH_TYPES.find(type => type.key === item.research_type)?.label || '科研记录'}
+                {' · '}
+                更新于 {item.updated_at || '-'}
+              </span>
+            )}
+            actions={(
+              <>
+                <DocumentSaveIndicator status={saveStatus} onRetry={onRetrySave} onReload={onReloadAfterConflict} />
+                <DocumentViewControls mode={mode} theme={theme} onModeChange={setMode} onThemeChange={setTheme} />
+                <button
+                  type="button"
+                  onClick={() => setShowPromote(true)}
+                  disabled={isPromoting}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-60"
+                >
+                  <UploadCloud className="h-4 w-4" aria-hidden="true" />
+                  <span className="hidden xl:inline">{item.promoted_to_life ? '再次上浮' : '上浮到人生主线'}</span>
+                </button>
+                <button type="button" onClick={onDelete} className="smart-document-icon-button text-red-500" title="删除" aria-label="删除科研记录">
+                  <Trash2 aria-hidden="true" />
+                </button>
+              </>
+            )}
+          />
+        )}
+        header={(
+          <DocumentPageHeader
+            title={item.title}
+            onTitleChange={handleTitleChange}
+            readOnly={mode === 'read'}
+            titlePlaceholder="科研记录标题"
+            icon={item.research_type === 'idea' ? <Lightbulb /> : item.research_type === 'meeting' ? <MessageSquare /> : <FileText />}
+            eyebrow="RESEARCH WORKSPACE"
+            description={RESEARCH_TYPES.find(type => type.key === item.research_type)?.label}
+            meta={(
+              <>
+                <span>{item.version || 'V1.0'}</span>
+                <span>创建于 {item.created_at || '-'}</span>
+                <span>更新于 {item.updated_at || '-'}</span>
+                {item.promoted_to_life ? <span className="text-emerald-600">已上浮到人生主线</span> : null}
+              </>
+            )}
+          />
+        )}
+        properties={(
+          <DocumentProperties>
+            <DocumentProperty label="标签" icon={<Tag />}>
               <input
                 type="text"
                 value={item.tags ? item.tags.join(', ') : ''}
                 onChange={handleTagsChange}
-                className="flex-1 border-none bg-transparent px-0 text-sm placeholder-gray-400 focus:ring-0"
-                placeholder="添加标签..."
+                disabled={mode === 'read'}
+                placeholder="添加标签，用逗号分隔"
+                aria-label="科研记录标签"
               />
-            </div>
+            </DocumentProperty>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {item.research_type === 'idea' && (
+            {item.research_type === 'idea' ? (
+              <DocumentProperty label="状态" icon={<Lightbulb />}>
                 <select
                   value={item.research_status || 'seed'}
-                  onChange={(event) => updateStatus(event.target.value as ResearchStatus)}
-                  className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  onChange={event => updateStatus(event.target.value as ResearchStatus)}
+                  disabled={mode === 'read'}
+                  aria-label="科研想法状态"
                 >
                   {Object.entries(STATUS_LABELS).map(([key, label]) => (
                     <option key={key} value={key}>{label}</option>
                   ))}
                 </select>
-              )}
+              </DocumentProperty>
+            ) : null}
 
-              <div className="flex flex-wrap items-center gap-2">
-                {(item.related.people || []).map((person) => (
-                  <span key={person.id} className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-700">
-                    {person.name}
-                    <button type="button" onClick={() => removePerson(person.id)} className="text-gray-400 hover:text-gray-700">
-                      <X className="h-3 w-3" />
+            <DocumentProperty label="关联人物" icon={<UserPlus />}>
+              {(item.related.people || []).map(person => (
+                <span key={person.id} className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-700">
+                  {person.name}
+                  {mode === 'edit' ? (
+                    <button type="button" onClick={() => removePerson(person.id)} className="text-gray-400 hover:text-gray-700" aria-label={'移除 ' + person.name}>
+                      <X className="h-3 w-3" aria-hidden="true" />
                     </button>
-                  </span>
+                  ) : null}
+                </span>
+              ))}
+              <select
+                value=""
+                onChange={event => addPerson(event.target.value)}
+                disabled={mode === 'read'}
+                aria-label="关联人物"
+              >
+                <option value="">添加关联人物</option>
+                {people.map(person => (
+                  <option key={person.id} value={person.id}>{person.name}</option>
                 ))}
-              </div>
+              </select>
+            </DocumentProperty>
+          </DocumentProperties>
+        )}
+      >
+        <SmartDocumentEditor
+          key={item.id}
+          content={item.content || ''}
+          contentJson={item.content_json || null}
+          pages={pages}
+          currentDocumentId={item.id}
+          mode={mode}
+          theme={theme}
+          serializationFlushRef={serializationFlushRef}
+          onChange={handleContentUpdate}
+        />
+      </DocumentWorkspaceShell>
 
-              <div className="relative">
-                <UserPlus className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-                <select
-                  value=""
-                  onChange={(event) => addPerson(event.target.value)}
-                  className="rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-8 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                >
-                  <option value="">关联人物</option>
-                  {people.map((person) => (
-                    <option key={person.id} value={person.id}>{person.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-1 flex-col">
-            <SmartDocumentEditor
-              key={item.id}
-              content={item.content || ''}
-              contentJson={item.content_json || null}
-              pages={pages}
-              currentDocumentId={item.id}
-              onChange={handleContentUpdate}
-            />
-          </div>
-        </div>
-      </div>
-
-      {showPromote && (
+      {showPromote ? (
         <PromoteModal
           draft={promoteDraft}
           isSubmitting={isPromoting}
@@ -743,8 +868,8 @@ function ResearchDetail({
             setShowPromote(false);
           }}
         />
-      )}
-    </div>
+      ) : null}
+    </>
   );
 }
 

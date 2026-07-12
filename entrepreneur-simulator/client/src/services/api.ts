@@ -3,6 +3,32 @@ import { CURRENT_USER_ID } from '../config/currentUser';
 const API_BASE_URL = '/api';
 export { CURRENT_USER_ID };
 
+export type SOPSaveResult = {
+    id: string;
+    content_schema_version?: number;
+    content_revision?: number | null;
+    revision_supported?: boolean;
+    message?: string;
+};
+
+export class SOPRevisionConflictError extends Error {
+    readonly code = 'SOP_REVISION_CONFLICT';
+    readonly status = 409;
+    readonly sopId?: string;
+    readonly expectedRevision?: number;
+    readonly currentRevision?: number;
+    readonly contentSchemaVersion?: number;
+
+    constructor(payload: any) {
+        super(payload?.error || 'Document changed in another editor. Reload before saving again.');
+        this.name = 'SOPRevisionConflictError';
+        this.sopId = payload?.id;
+        this.expectedRevision = payload?.expected_revision;
+        this.currentRevision = payload?.current_revision;
+        this.contentSchemaVersion = payload?.content_schema_version;
+    }
+}
+
 const uploadFileRequest = async (file: File, label: string = 'file') => {
     const formData = new FormData();
     formData.append('file', file);
@@ -46,7 +72,7 @@ export const api = {
 
     uploadImage: async (file: File) => uploadFileRequest(file, 'image'),
 
-    createSOP: async (sopData: any) => {
+    createSOP: async (sopData: any): Promise<SOPSaveResult> => {
         // Ensure user_id is present
         const dataToSend = { ...sopData, user_id: sopData.user_id || CURRENT_USER_ID };
         
@@ -68,12 +94,16 @@ export const api = {
 
         if (!response.ok) {
             if (!text) throw new Error(`创建失败（${statusHint}）：服务无响应或返回空内容`);
+            let errorData: any = null;
             try {
-                const data = JSON.parse(text);
-                throw new Error(data.error || `创建失败（${statusHint}）`);
+                errorData = JSON.parse(text);
             } catch {
-                throw new Error(`创建失败（${statusHint}）：${text.substring(0, 120)}`);
+                // Keep the raw response as the fallback message below.
             }
+            if (response.status === 409 && errorData?.code === 'SOP_REVISION_CONFLICT') {
+                throw new SOPRevisionConflictError(errorData);
+            }
+            throw new Error(errorData?.error || `创建失败（${statusHint}）：${text.substring(0, 120)}`);
         }
 
         if (!text) {

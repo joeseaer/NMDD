@@ -1,0 +1,242 @@
+/* Explicit dark theme. Variables are repeated on `.smart-document-content`
+ * because standalone editors also carry the light defaults from tokens.css. */
+:is(
+  .smart-document-shell[data-theme="dark"],
+  .smart-document-shell[data-theme="dark"] .smart-document-content,
+  .smart-document[data-theme="dark"],
+  .smart-document[data-theme="dark"] .smart-document-content,
+  .dark .smart-document-shell:not([data-theme="light"]),
+  .dark .smart-document-shell:not([data-theme="light"]) .smart-document-content,
+  .dark .smart-document:not([data-theme="light"]),
+  .dark .smart-document:not([data-theme="light"]) .smart-document-content
+) {
+  color-scheme: dark;
+  --smart-doc-page: #1b1b1a;
+  --smart-doc-canvas: #171716;
+  --smart-doc-surface: #20201f;
+  --smart-doc-surface-raised: #262624;
+  --smart-doc-surface-muted: #282826;
+  --smart-doc-surface-hover: #30302e;
+  --smart-doc-surface-active: #3a3936;
+  --smart-doc-text: #e8e7e3;
+  --smart-doc-text-secondary: #b7b5af;
+  --smart-doc-text-muted: #aaa8a1;
+  --smart-doc-text-faint: #68665f;
+  --smart-doc-border: #353532;
+  --smart-doc-border-strong: #4c4b46;
+  --smart-doc-accent: #9791ff;
+  --smart-doc-accent-hover: #aaa5ff;
+  --smart-doc-accent-soft: #302f4f;
+  --smart-doc-accent-ring: rgba(151, 145, 255, 0.28);
+  --smart-doc-link: #8ab5f5;
+  --smart-doc-link-hover: #afd0ff;
+  --smart-doc-selection: rgba(151, 145, 255, 0.28);
+  --smart-doc-danger: #ff8f84;
+  --smart-doc-danger-soft: #442724;
+  --smart-doc-success: #74cfa7;
+  --smart-doc-success-soft: #203a30;
+  --smart-doc-warning: #e6bd63;
+  --smart-doc-warning-soft: #3d3522;
+  --smart-doc-inline-code-bg: #2d2d2a;
+  --smart-doc-code-bg: #222220;
+  --smart-doc-code-text: #e0dfda;
+  --smart-doc-quote-border: #5a5852;
+  --smart-doc-table-head: #292927;
+  --smart-doc-table-row-hover: #252523;
+  --smart-doc-table-selection: rgba(151, 145, 255, 0.2);
+  --smart-doc-callout-gray-bg: #282826;
+  --smart-doc-callout-gray-border: #3d3d39;
+  --smart-doc-callout-yellow-bg: #3b3320;
+  --smart-doc-callout-yellow-border: #635326;
+  --smart-doc-callout-blue-bg: #203247;
+  --smart-doc-callout-blue-border: #31506f;
+  --smart-doc-callout-green-bg: #20372d;
+  --smart-doc-callout-green-border: #315845;
+  --smart-doc-callout-red-bg: #422725;
+  --smart-doc-callout-red-border: #6a3935;
+  --smart-doc-callout-purple-bg: #332a43;
+  --smart-doc-callout-purple-border: #514169;
+  --smart-doc-shadow-menu: 0 16px 38px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.28);
+  --smart-doc-shadow-node: 0 1px 2px rgba(0, 0, 0, 0.22);
+}
+
+@media (prefers-color-scheme: dark) {
+  :is(
+    .smart-document-shell[data-theme="system"],
+    .smart-document-shell[data-theme="system"] .smart-document-content,
+    .smart-document[data-theme="system"],
+    .smart-document[data-theme="system"] .smart-document-content
+  ) {
+    color-scheme: dark;
+    --smart-doc-page: #1b1b1a;
+    --smart-doc-canvas: #171716;
+    --smart-doc-surface: #20201f;
+    --smart-doc-surface-raised: #262624;
+    --smart-doc-surface-muted: #282826;
+    --smart-doc-surface-hover: #30302e;
+    --smart-doc-surface-active: #3a3936;
+    --smart-doc-text: #e8e7e3;
+    --smart-doc-text-secondary: #b7b5af;
+    --smart-doc-text-muted: #aaa8a1;
+    --smart-doc-text-faint: #68665f;
+    --smart-doc-border: #353532;
+    --smart-doc-border-strong: #4c4b46;
+    --smart-doc-accent: #9791ff;
+    --smart-doc-accent-hover: #aaa5ff;
+    --smart-doc-accent-soft: #302f4f;
+    --smart-doc-accent-ring: rgba(151, 145, 255, 0.28);
+    --smart-doc-link: #8ab5f5;
+    --smart-doc-link-hover: #afd0ff;
+    --smart-doc-selection: rgba(151, 145, 255, 0.28);
+    --smart-doc-danger: #ff8f84;
+    --smart-doc-danger-soft: #442724;
+    --smart-doc-success: #74cfa7;
+    --smart-doc-success-soft: #203a30;
+    --smart-doc-warning: #e6bd63;
+    --smart-doc-warning-soft: #3d3522;
+    --smart-doc-inline-code-bg: #2d2d2a;
+    --smart-doc-code-bg: #222220;
+    --smart-doc-code-text: #e0dfda;
+    --smart-doc-quote-border: #5a5852;
+    --smart-doc-table-head: #292927;
+    --smart-doc-table-row-hover: #252523;
+    --smart-doc-table-selection: rgba(151, 145, 255, 0.2);
+    --smart-doc-callout-gray-bg: #282826;
+    --smart-doc-callout-gray-border: #3d3d39;
+    --smart-doc-callout-yellow-bg: #3b3320;
+    --smart-doc-callout-yellow-border: #635326;
+    --smart-doc-callout-blue-bg: #203247;
+    --smart-doc-callout-blue-border: #31506f;
+    --smart-doc-callout-green-bg: #20372d;
+    --smart-doc-callout-green-border: #315845;
+    --smart-doc-callout-red-bg: #422725;
+    --smart-doc-callout-red-border: #6a3935;
+    --smart-doc-callout-purple-bg: #332a43;
+    --smart-doc-callout-purple-border: #514169;
+    --smart-doc-shadow-menu: 0 16px 38px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.28);
+    --smart-doc-shadow-node: 0 1px 2px rgba(0, 0, 0, 0.22);
+  }
+}
+
+:is(
+  .smart-document-shell[data-theme="dark"],
+  .smart-document[data-theme="dark"],
+  .dark .smart-document-shell:not([data-theme="light"]),
+  .dark .smart-document:not([data-theme="light"])
+) :is(.smart-document-content, .ProseMirror) strong {
+  color: var(--smart-doc-text);
+}
+
+:is(
+  .smart-document-shell[data-theme="dark"],
+  .smart-document[data-theme="dark"],
+  .dark .smart-document-shell:not([data-theme="light"]),
+  .dark .smart-document:not([data-theme="light"])
+) :is(.smart-document-content, .ProseMirror) mark {
+  background: #665624;
+  color: #f3ead0;
+}
+
+:is(
+  .smart-document-shell[data-theme="dark"],
+  .smart-document[data-theme="dark"],
+  .dark .smart-document-shell:not([data-theme="light"]),
+  .dark .smart-document:not([data-theme="light"])
+) :is(.smart-document-content, .ProseMirror) :is(
+  .smart-doc-media,
+  .smart-doc-bookmark,
+  .smart-doc-embed,
+  .smart-doc-page-link,
+  .smart-doc-synced-block,
+  .smart-doc-template-button,
+  .smart-doc-database
+) :is(input, textarea, select, iframe) {
+  border-color: var(--smart-doc-border) !important;
+  background-color: var(--smart-doc-surface) !important;
+  color: var(--smart-doc-text) !important;
+}
+
+:is(
+  .smart-document-shell[data-theme="dark"],
+  .smart-document[data-theme="dark"],
+  .dark .smart-document-shell:not([data-theme="light"]),
+  .dark .smart-document:not([data-theme="light"])
+) :is(.smart-document-content, .ProseMirror) :is(
+  .smart-doc-media,
+  .smart-doc-bookmark,
+  .smart-doc-embed,
+  .smart-doc-page-link,
+  .smart-doc-synced-block,
+  .smart-doc-template-button,
+  .smart-doc-database,
+  .smart-doc-toggle,
+  .smart-doc-equation
+) :is(.bg-white, .bg-white\/80, .bg-white\/95) {
+  background-color: var(--smart-doc-surface) !important;
+}
+
+:is(
+  .smart-document-shell[data-theme="dark"],
+  .smart-document[data-theme="dark"],
+  .dark .smart-document-shell:not([data-theme="light"]),
+  .dark .smart-document:not([data-theme="light"])
+) :is(.smart-document-content, .ProseMirror) :is(.text-gray-900, .text-gray-800, .text-gray-700) {
+  color: var(--smart-doc-text) !important;
+}
+
+:is(
+  .smart-document-shell[data-theme="dark"],
+  .smart-document[data-theme="dark"],
+  .dark .smart-document-shell:not([data-theme="light"]),
+  .dark .smart-document:not([data-theme="light"])
+) :is(.smart-document-content, .ProseMirror) :is(.text-gray-600, .text-gray-500, .text-gray-400) {
+  color: var(--smart-doc-text-secondary) !important;
+}
+
+:is(
+  .smart-document-shell[data-theme="dark"],
+  .smart-document[data-theme="dark"],
+  .dark .smart-document-shell:not([data-theme="light"]),
+  .dark .smart-document:not([data-theme="light"])
+) :is(.smart-document-content, .ProseMirror) :is(.border-gray-100, .border-gray-200, .border-gray-300) {
+  border-color: var(--smart-doc-border) !important;
+}
+
+:is(
+  .smart-document-shell[data-theme="dark"],
+  .smart-document[data-theme="dark"],
+  .dark .smart-document-shell:not([data-theme="light"]),
+  .dark .smart-document:not([data-theme="light"])
+) :is(.smart-document-content, .ProseMirror) [data-smart-doc-ui="image-toolbar"] {
+  border-color: var(--smart-doc-border) !important;
+  background: color-mix(in srgb, var(--smart-doc-surface-raised) 94%, transparent) !important;
+  color: var(--smart-doc-text) !important;
+}
+
+@media (prefers-color-scheme: dark) {
+  .smart-document-shell[data-theme="system"] :is(.smart-document-content, .ProseMirror) strong,
+  .smart-document[data-theme="system"] :is(.smart-document-content, .ProseMirror) strong {
+    color: var(--smart-doc-text);
+  }
+
+  .smart-document-shell[data-theme="system"] :is(.smart-document-content, .ProseMirror) mark,
+  .smart-document[data-theme="system"] :is(.smart-document-content, .ProseMirror) mark {
+    background: #665624;
+    color: #f3ead0;
+  }
+
+  .smart-document-shell[data-theme="system"] :is(.smart-document-content, .ProseMirror) :is(.bg-white, .bg-white\/80, .bg-white\/95),
+  .smart-document[data-theme="system"] :is(.smart-document-content, .ProseMirror) :is(.bg-white, .bg-white\/80, .bg-white\/95) {
+    background-color: var(--smart-doc-surface) !important;
+  }
+
+  .smart-document-shell[data-theme="system"] :is(.smart-document-content, .ProseMirror) :is(.text-gray-900, .text-gray-800, .text-gray-700),
+  .smart-document[data-theme="system"] :is(.smart-document-content, .ProseMirror) :is(.text-gray-900, .text-gray-800, .text-gray-700) {
+    color: var(--smart-doc-text) !important;
+  }
+
+  .smart-document-shell[data-theme="system"] :is(.smart-document-content, .ProseMirror) :is(.text-gray-600, .text-gray-500, .text-gray-400),
+  .smart-document[data-theme="system"] :is(.smart-document-content, .ProseMirror) :is(.text-gray-600, .text-gray-500, .text-gray-400) {
+    color: var(--smart-doc-text-secondary) !important;
+  }
+}

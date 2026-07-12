@@ -27,6 +27,17 @@ const sha256 = (obj) => {
   return crypto.createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 };
 
+const expectedRevisionFromRequest = (request) => {
+  const body = request.body || {};
+  if (Object.prototype.hasOwnProperty.call(body, 'expected_revision')) return body.expected_revision;
+  if (Object.prototype.hasOwnProperty.call(body, 'expectedRevision')) return body.expectedRevision;
+
+  const rawHeader = request.headers?.['if-match'];
+  if (rawHeader === undefined || rawHeader === null || rawHeader === '') return undefined;
+  const normalized = String(rawHeader).trim().replace(/^W\//i, '').replace(/^"|"$/g, '');
+  return /^\d+$/.test(normalized) ? Number(normalized) : normalized;
+};
+
 const parsePrivateInfoObject = (privateInfo) => {
   if (!privateInfo) return {};
   if (privateInfo && typeof privateInfo === 'object') return privateInfo;
@@ -356,15 +367,45 @@ async function routes(fastify, options) {
 
   fastify.post('/sop/create', async (request, reply) => {
     try {
-      const sopData = request.body;
+      const sopData = { ...(request.body || {}) };
+      const expectedRevision = expectedRevisionFromRequest(request);
+      if (expectedRevision !== undefined) sopData.expected_revision = expectedRevision;
       const mm = summarizeMindMapContent(sopData?.content);
       request.log.info({ title: sopData?.title, id: sopData?.id, user_id: sopData?.user_id, ...mm }, 'Saving SOP');
-      const id = await dbService.saveSOP(sopData);
-      request.log.info({ id }, 'SOP Saved');
-      return { id, message: "SOP Created Successfully" };
+      const saved = await dbService.saveSOP(sopData, { returnResult: true });
+      const result = typeof saved === 'string'
+        ? { id: saved, content_schema_version: 1, content_revision: null, revision_supported: false }
+        : saved;
+      request.log.info({ id: result.id, content_revision: result.content_revision }, 'SOP Saved');
+      if (Number.isSafeInteger(result.content_revision)) {
+        reply.header('ETag', `"${result.content_revision}"`);
+      }
+      return { ...result, message: "SOP Created Successfully" };
     } catch (err) {
+      if (err?.code === 'SOP_REVISION_CONFLICT') {
+        request.log.warn({
+          id: err.sopId,
+          expected_revision: err.expectedRevision,
+          current_revision: err.currentRevision,
+        }, 'SOP save rejected because the document revision is stale');
+        return reply.code(409).send({
+          error: 'Document changed in another editor. Reload before saving again.',
+          code: err.code,
+          id: err.sopId,
+          expected_revision: err.expectedRevision,
+          current_revision: err.currentRevision,
+          content_schema_version: err.contentSchemaVersion,
+        });
+      }
       request.log.error(err);
-      reply.code(500).send({ error: err.message || 'Failed to save SOP' });
+      if (err?.statusCode === 400 || err?.statusCode === 404) {
+        return reply.code(err.statusCode).send({
+          error: err.message || 'Failed to save SOP',
+          code: err.code || 'SOP_SAVE_ERROR',
+          id: err.sopId,
+        });
+      }
+      return reply.code(500).send({ error: err.message || 'Failed to save SOP' });
     }
   });
 
