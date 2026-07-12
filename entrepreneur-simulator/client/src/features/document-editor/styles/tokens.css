@@ -1,0 +1,83 @@
+/*
+ * NMDD document design tokens.
+ *
+ * Tokens intentionally live under a document root. Nothing in this file changes
+ * the appearance of the rest of the application. A standalone editor may use
+ * `.smart-document`; full-page experiences should use `.smart-document-shell`.
+ */
+:where(.smart-document-shell, .smart-document, .smart-document-content) {
+  color-scheme: light;
+
+  --smart-doc-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --smart-doc-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+
+  --smart-doc-page: #ffffff;
+  --smart-doc-canvas: #fbfbfa;
+  --smart-doc-surface: #ffffff;
+  --smart-doc-surface-raised: #ffffff;
+  --smart-doc-surface-muted: #f7f7f5;
+  --smart-doc-surface-hover: #f1f1ef;
+  --smart-doc-surface-active: #e9e9e6;
+  --smart-doc-text: #252525;
+  --smart-doc-text-secondary: #5f5e5b;
+  --smart-doc-text-muted: #6f6e69;
+  --smart-doc-text-faint: #a9a8a3;
+  --smart-doc-border: #e8e7e4;
+  --smart-doc-border-strong: #d4d3cf;
+  --smart-doc-accent: #4f46e5;
+  --smart-doc-accent-hover: #4338ca;
+  --smart-doc-accent-soft: #eeedff;
+  --smart-doc-accent-ring: rgba(79, 70, 229, 0.24);
+  --smart-doc-link: #315ea8;
+  --smart-doc-link-hover: #244b8b;
+  --smart-doc-selection: rgba(79, 70, 229, 0.17);
+  --smart-doc-danger: #c9362b;
+  --smart-doc-danger-soft: #fff0ee;
+  --smart-doc-success: #157b55;
+  --smart-doc-success-soft: #ebf7f1;
+  --smart-doc-warning: #9a6700;
+  --smart-doc-warning-soft: #fff7df;
+
+  --smart-doc-inline-code-bg: #f1f1ef;
+  --smart-doc-code-bg: #f7f7f5;
+  --smart-doc-code-text: #30302e;
+  --smart-doc-quote-border: #c7c6c2;
+  --smart-doc-table-head: #f7f7f5;
+  --smart-doc-table-row-hover: #fafaf9;
+  --smart-doc-table-selection: rgba(79, 70, 229, 0.12);
+
+  --smart-doc-callout-gray-bg: #f7f7f5;
+  --smart-doc-callout-gray-border: #e3e2de;
+  --smart-doc-callout-yellow-bg: #fff7df;
+  --smart-doc-callout-yellow-border: #f0d98b;
+  --smart-doc-callout-blue-bg: #edf5ff;
+  --smart-doc-callout-blue-border: #bad5f5;
+  --smart-doc-callout-green-bg: #edf8f2;
+  --smart-doc-callout-green-border: #b9dfca;
+  --smart-doc-callout-red-bg: #fff0ee;
+  --smart-doc-callout-red-border: #f0c0ba;
+  --smart-doc-callout-purple-bg: #f5f0ff;
+  --smart-doc-callout-purple-border: #d8c6f4;
+
+  --smart-doc-radius-xs: 4px;
+  --smart-doc-radius-sm: 6px;
+  --smart-doc-radius-md: 10px;
+  --smart-doc-radius-lg: 14px;
+  --smart-doc-shadow-menu: 0 12px 32px rgba(24, 24, 22, 0.12), 0 2px 8px rgba(24, 24, 22, 0.06);
+  --smart-doc-shadow-node: 0 1px 2px rgba(24, 24, 22, 0.05);
+
+  --smart-doc-body-size: 1rem;
+  --smart-doc-body-leading: 1.7;
+  --smart-doc-body-track: 45rem;
+  --smart-doc-wide-track: 65rem;
+  --smart-doc-gutter: clamp(1.25rem, 5vw, 4.5rem);
+  --smart-doc-topbar-height: 3rem;
+  --smart-doc-control-height: 2.5rem;
+
+  --smart-doc-motion-fast: 120ms;
+  --smart-doc-motion-normal: 180ms;
+  --smart-doc-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Temporary compatibility alias for editor UI authored during the v2 split. */
+  --doc-text: var(--smart-doc-text);
+}

@@ -14,6 +14,7 @@ import EvolutionTree from './pages/EvolutionTree'
 import SettingsPage from './pages/Settings'
 import Planner from './pages/Planner'
 import ResearchWorkspace from './pages/ResearchWorkspace'
+import EditorLab from './pages/EditorLab'
 import FloatingAssistant from './components/FloatingAssistant'
 import { CURRENT_USER_ID } from './config/currentUser'
 
@@ -78,6 +79,14 @@ function App() {
     if (defaultHome === 'planner') return <Navigate to="/planner" replace />;
     return <Dashboard />;
   };
+
+  if (location.pathname === '/editor-lab') {
+    return (
+      <Routes>
+        <Route path="/editor-lab" element={<EditorLab />} />
+      </Routes>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-gray-50 overflow-hidden font-sans text-gray-900">

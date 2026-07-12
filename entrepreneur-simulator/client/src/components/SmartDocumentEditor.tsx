@@ -9,19 +9,13 @@ import {
   Plus
 } from 'lucide-react';
 import { useEditor, EditorContent } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import LinkExtension from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
 import { Table } from '@tiptap/extension-table';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import { TableRow } from '@tiptap/extension-table-row';
-import TaskList from '@tiptap/extension-task-list';
-import TaskItem from '@tiptap/extension-task-item';
-import Placeholder from '@tiptap/extension-placeholder';
-import Heading from '@tiptap/extension-heading';
 import { NodeViewWrapper, ReactNodeViewRenderer } from '@tiptap/react';
-import { DOMParser as ProseMirrorDOMParser, DOMSerializer } from 'prosemirror-model';
+import { DOMSerializer } from '@tiptap/pm/model';
 import { Extension, type JSONContent } from '@tiptap/core';
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
@@ -30,6 +24,20 @@ import MarkdownIt from 'markdown-it';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import { api, CURRENT_USER_ID } from '../services/api';
+import { createSmartDocumentExtensions } from '../features/document-editor/createEditorExtensions';
+import {
+    SmartClipboardExtension,
+    type SmartClipboardUploadController,
+} from '../features/document-editor/SmartClipboardExtension';
+import { serializeToMarkdown } from '../features/document-editor/serialization/toMarkdown';
+import { serializeToPlainText } from '../features/document-editor/serialization/toPlainText';
+import type { DocumentNodeJson } from '../features/document-editor/schema/documentSchema';
+import {
+    EditorCompactToolbar,
+    EditorEmptyBlockMenu,
+    EditorSelectionMenu,
+    EditorTableMenu,
+} from '../features/document-editor/ui/EditorMenus';
 import {
     ColumnList,
     Column,
@@ -85,6 +93,7 @@ const BLOCK_ID_TYPES = [
     'equationBlock',
     'databaseBlock',
 ];
+const BLOCK_IDENTITY_TRANSACTION_META = 'smartDocumentBlockIdentity';
 
 const LIST_CONTAINER_TYPES = new Set(['bulletList', 'orderedList', 'taskList']);
 const LIST_ITEM_TYPES = new Set(['listItem', 'taskItem']);
@@ -367,10 +376,17 @@ const BlockIdentity = Extension.create({
 
                         const currentId = node.attrs.blockId;
                         if (!currentId || seen.has(currentId)) {
-                            tr.setNodeMarkup(pos, undefined, {
-                                ...node.attrs,
-                                blockId: createBlockId(),
-                            }, node.marks);
+                            try {
+                                tr.setNodeMarkup(pos, undefined, {
+                                    ...node.attrs,
+                                    blockId: createBlockId(),
+                                }, node.marks);
+                            } catch (error) {
+                                console.warn('[document-editor] Skipped block identity repair for an invalid legacy node.', {
+                                    nodeType: node.type.name,
+                                    error,
+                                });
+                            }
                             return true;
                         }
 
@@ -380,6 +396,7 @@ const BlockIdentity = Extension.create({
 
                     if (!tr.docChanged) return null;
                     tr.setMeta('addToHistory', false);
+                    tr.setMeta(BLOCK_IDENTITY_TRANSACTION_META, true);
                     return tr;
                 },
             }),
@@ -397,10 +414,17 @@ const ensureEditorBlockIds = (editor: any) => {
 
         const currentId = node.attrs.blockId;
         if (!currentId || seen.has(currentId)) {
-            tr.setNodeMarkup(pos, undefined, {
-                ...node.attrs,
-                blockId: createBlockId(),
-            }, node.marks);
+            try {
+                tr.setNodeMarkup(pos, undefined, {
+                    ...node.attrs,
+                    blockId: createBlockId(),
+                }, node.marks);
+            } catch (error) {
+                console.warn('[document-editor] Skipped block identity repair for an invalid legacy node.', {
+                    nodeType: node.type.name,
+                    error,
+                });
+            }
             return true;
         }
 
@@ -410,6 +434,11 @@ const ensureEditorBlockIds = (editor: any) => {
 
     if (tr.docChanged) {
         tr.setMeta('addToHistory', false);
+        // Block IDs are editor runtime metadata. Hydrating a legacy document
+        // on open must not masquerade as a user edit or auto-save a recovered
+        // draft, especially on databases that do not yet support CAS.
+        tr.setMeta('preventUpdate', true);
+        tr.setMeta(BLOCK_IDENTITY_TRANSACTION_META, true);
         view.dispatch(tr);
         return true;
     }
@@ -1955,6 +1984,9 @@ type SmartDocumentEditorProps = {
     contentJson?: JSONContent | null;
     pages?: SmartDocumentPageLink[];
     currentDocumentId?: string | null;
+    mode?: 'edit' | 'read';
+    theme?: 'light' | 'dark' | 'system';
+    serializationFlushRef?: React.MutableRefObject<(() => Promise<void>) | null>;
     onChange: (value: SmartDocumentValue) => void;
 };
 
@@ -1998,374 +2030,6 @@ const preserveLegacyMarkdownBlankLines = (value: string) => {
 };
 
 const markdownToHtml = (value: string) => mdParser.render(preserveLegacyMarkdownBlankLines(value || ''));
-
-const ZERO_WIDTH_CLIPBOARD_CHARS = /[\u200b-\u200f\u202a-\u202e\u2060\ufeff]/g;
-const SUPERSCRIPT_DIGITS: Record<string, string> = {
-    '⁰': '^0',
-    '¹': '^1',
-    '²': '^2',
-    '³': '^3',
-    '⁴': '^4',
-    '⁵': '^5',
-    '⁶': '^6',
-    '⁷': '^7',
-    '⁸': '^8',
-    '⁹': '^9',
-};
-const SUBSCRIPT_SYMBOLS: Record<string, string> = {
-    'ᵢ': '_i',
-    'ⱼ': '_j',
-    '₀': '_0',
-    '₁': '_1',
-    '₂': '_2',
-    '₃': '_3',
-    '₄': '_4',
-    '₅': '_5',
-    '₆': '_6',
-    '₇': '_7',
-    '₈': '_8',
-    '₉': '_9',
-};
-
-const escapeHtml = (value: string) => (
-    value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;')
-);
-
-const stripLatexDelimiters = (value: string) => {
-    let formula = value.trim();
-    const pairs: Array<[string, string]> = [
-        ['$$', '$$'],
-        ['\\[', '\\]'],
-        ['\\(', '\\)'],
-    ];
-
-    for (const [open, close] of pairs) {
-        if (formula.startsWith(open) && formula.endsWith(close)) {
-            formula = formula.slice(open.length, formula.length - close.length).trim();
-        }
-    }
-
-    return formula;
-};
-
-const getLatexFromMathElement = (element: Element | null) => {
-    if (!element) return '';
-
-    const annotation = element.querySelector(
-        'annotation[encoding="application/x-tex"], annotation[encoding="application/x-latex"], annotation[encoding="application/tex"]'
-    );
-    if (annotation?.textContent?.trim()) return stripLatexDelimiters(annotation.textContent);
-
-    const attributeNames = ['data-latex', 'data-tex', 'data-value', 'alttext', 'aria-label'];
-    for (const name of attributeNames) {
-        const value = element.getAttribute(name);
-        if (value && /\\|[_^{}]/.test(value)) return stripLatexDelimiters(value);
-    }
-
-    return '';
-};
-
-const createEquationPasteNode = (doc: Document, formula: string) => {
-    const node = doc.createElement('div');
-    node.setAttribute('data-type', 'equation');
-    node.setAttribute('data-equation', stripLatexDelimiters(formula));
-    return node;
-};
-
-const createInlineEquationPasteNode = (doc: Document, formula: string) => {
-    const node = doc.createElement('span');
-    node.setAttribute('data-type', 'inline-equation');
-    node.setAttribute('data-equation', stripLatexDelimiters(formula));
-    return node;
-};
-
-const replaceMathElementWithEquation = (element: Element, replacement: HTMLElement) => {
-    const parent = element.parentElement;
-    if (parent?.tagName === 'P') {
-        const clone = parent.cloneNode(true) as HTMLElement;
-        clone.querySelectorAll('.katex-display, .math-display, mjx-container[display="true"], math[display="block"]').forEach((node) => node.remove());
-        if (!clone.textContent?.trim()) {
-            parent.replaceWith(replacement);
-            return;
-        }
-    }
-
-    element.replaceWith(replacement);
-};
-
-const normalizeMathClipboardHtml = (html: string | undefined) => {
-    if (!html || !/(katex|MathJax|mjx-container|application\/x-tex|application\/x-latex|<math|math-display)/i.test(html)) {
-        return null;
-    }
-
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    let replaced = false;
-
-    const displayMath = Array.from(doc.body.querySelectorAll(
-        '.katex-display, .math-display, mjx-container[display="true"], math[display="block"]'
-    ));
-
-    displayMath.forEach((element) => {
-        if (!doc.body.contains(element)) return;
-        const formula = getLatexFromMathElement(element);
-        if (!formula) return;
-
-        replaceMathElementWithEquation(element, createEquationPasteNode(doc, formula));
-        replaced = true;
-    });
-
-    const inlineMath = Array.from(doc.body.querySelectorAll('.katex, .math-inline, mjx-container, math'));
-    inlineMath.forEach((element) => {
-        if (!doc.body.contains(element) || element.closest('[data-type="equation"]')) return;
-        const formula = getLatexFromMathElement(element);
-        if (!formula) return;
-
-        element.replaceWith(createInlineEquationPasteNode(doc, formula));
-        replaced = true;
-    });
-
-    return replaced ? doc.body.innerHTML : null;
-};
-
-const normalizeClipboardPlainText = (value: string) => (
-    value
-        .replace(/\r\n?/g, '\n')
-        .replace(ZERO_WIDTH_CLIPBOARD_CHARS, '')
-        .replace(/\u00a0/g, ' ')
-        .replace(/\t+/g, ' ')
-);
-
-const normalizeFormulaSymbols = (value: string) => {
-    let next = value;
-    Object.entries(SUPERSCRIPT_DIGITS).forEach(([source, target]) => {
-        next = next.split(source).join(target);
-    });
-    Object.entries(SUBSCRIPT_SYMBOLS).forEach(([source, target]) => {
-        next = next.split(source).join(target);
-    });
-    return next
-        .replace(/[−–—]/g, '-')
-        .replace(/[⟨〈<]/g, ' \\langle ')
-        .replace(/[⟩〉>]/g, ' \\rangle ')
-        .replace(/\s+/g, ' ')
-        .trim();
-};
-
-const extractLatexFromMixedFormula = (value: string) => {
-    const normalized = normalizeFormulaSymbols(value);
-    const firstLatexMarker = normalized.search(/\\[a-zA-Z]+|[A-Za-z]_\{?[A-Za-z0-9]+\}?|\^\{?[A-Za-z0-9]+\}?/);
-    if (firstLatexMarker < 0) return '';
-
-    let start = firstLatexMarker;
-    while (start > 0 && /[A-Za-z0-9{}()+\-*/=.,\s]/.test(normalized[start - 1])) start -= 1;
-
-    const rangleEnd = normalized.indexOf('\\rangle', firstLatexMarker);
-    if (rangleEnd >= 0) return normalized.slice(start, rangleEnd + '\\rangle'.length).trim();
-
-    const braceEnd = normalized.indexOf('}', firstLatexMarker);
-    if (braceEnd >= 0) return normalized.slice(start, braceEnd + 1).trim();
-
-    return '';
-};
-
-const normalizePlainFormulaToLatex = (value: string) => {
-    const embeddedLatex = extractLatexFromMixedFormula(value);
-    let formula = embeddedLatex || normalizeFormulaSymbols(value);
-
-    formula = formula
-        .replace(/\b([uU])\s*_\s*\{?([ij])\}?/g, '$1_$2')
-        .replace(/\b([uU])\s+([ij])\b/g, '$1_$2')
-        .replace(/\b([uU])([ij])\b/g, '$1_$2')
-        .replace(/\bC\s*_\s*\{?ij\}?/g, 'C_{ij}')
-        .replace(/\bC\s+ij\b/g, 'C_{ij}')
-        .replace(/\bCij\b/g, 'C_{ij}')
-        .replace(/\)\s*\^?\s*([0-9]+)\b/g, ')^$1')
-        .replace(/([A-Za-z]_[A-Za-z0-9])\s*\^?\s*([0-9]+)\b/g, '$1^$2')
-        .replace(/\s*([+=])\s*/g, ' $1 ')
-        .replace(/\s+-\s*/g, ' - ')
-        .replace(/-\s*([0-9])/g, '- $1')
-        .replace(/\(\s+/g, '(')
-        .replace(/\s+\)/g, ')')
-        .replace(/\\langle\s+/g, '\\langle ')
-        .replace(/\s+\\rangle/g, ' \\rangle')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-    return formula;
-};
-
-const hasCjkText = (value: string) => /[\u3400-\u9fff]/.test(value);
-
-const isFormulaTextLine = (line: string, hasOpenFormula: boolean) => {
-    const text = line.trim();
-    if (!text) return false;
-    if (hasCjkText(text)) return false;
-    if (hasOpenFormula) return true;
-    if (/[⟨⟩〈〉\\^_+\-=−–—(){}]/.test(text)) return true;
-    if (/^[UuCijIJ0-9\s]+$/.test(text) && text.length <= 8) return true;
-    return false;
-};
-
-const isRenderableFormula = (value: string) => {
-    const formula = normalizePlainFormulaToLatex(value);
-    return /\\langle|\\rangle|[_^{}]|[+\-=]/.test(formula) && /[A-Za-z]/.test(formula);
-};
-
-const paragraphWithInlineLatexToHtml = (line: string) => {
-    const inlineLatexPattern = /\\\(([\s\S]+?)\\\)/g;
-    let cursor = 0;
-    let replaced = false;
-    let html = '';
-
-    line.replace(inlineLatexPattern, (match, formula: string, offset: number) => {
-        html += escapeHtml(line.slice(cursor, offset));
-        const normalizedFormula = stripLatexDelimiters(formula || '');
-        if (normalizedFormula) {
-            html += `<span data-type="inline-equation" data-equation="${escapeHtml(normalizedFormula)}"></span>`;
-            replaced = true;
-        } else {
-            html += escapeHtml(match);
-        }
-        cursor = offset + match.length;
-        return match;
-    });
-
-    html += escapeHtml(line.slice(cursor));
-    return { html, replaced };
-};
-
-const textSegmentToHtml = (segment: string) => {
-    const lines = segment
-        .replace(/\n{3,}/g, '\n\n')
-        .split(/\n+/)
-        .map((line) => line.trim())
-        .filter(Boolean);
-    let replaced = false;
-
-    const html = lines.map((line) => {
-        const rendered = paragraphWithInlineLatexToHtml(line);
-        replaced = replaced || rendered.replaced;
-        return `<p>${rendered.html}</p>`;
-    }).join('');
-
-    return { html, replaced };
-};
-
-const findNextDisplayFormulaStart = (value: string, from: number) => {
-    const bracketIndex = value.indexOf('\\[', from);
-    const dollarIndex = value.indexOf('$$', from);
-    const candidates = [
-        bracketIndex >= 0 ? { index: bracketIndex, open: '\\[', close: '\\]' } : null,
-        dollarIndex >= 0 ? { index: dollarIndex, open: '$$', close: '$$' } : null,
-    ].filter(Boolean) as Array<{ index: number; open: string; close: string }>;
-
-    if (!candidates.length) return null;
-    candidates.sort((a, b) => a.index - b.index);
-    return candidates[0];
-};
-
-const latexDelimitedClipboardToHtml = (text: string | undefined) => {
-    const normalized = normalizeClipboardPlainText(text || '');
-    if (!normalized || !/(\\\[|\\\(|\$\$)/.test(normalized)) return null;
-
-    const htmlParts: string[] = [];
-    let cursor = 0;
-    let replaced = false;
-
-    const appendText = (segment: string) => {
-        const rendered = textSegmentToHtml(segment);
-        if (rendered.html) htmlParts.push(rendered.html);
-        replaced = replaced || rendered.replaced;
-    };
-
-    while (cursor < normalized.length) {
-        const next = findNextDisplayFormulaStart(normalized, cursor);
-        if (!next) break;
-
-        appendText(normalized.slice(cursor, next.index));
-
-        const formulaStart = next.index + next.open.length;
-        const formulaEnd = normalized.indexOf(next.close, formulaStart);
-        if (formulaEnd < 0) return null;
-
-        const formula = normalized.slice(formulaStart, formulaEnd).trim();
-        if (formula) {
-            htmlParts.push(`<div data-type="equation" data-equation="${escapeHtml(formula)}"></div>`);
-            replaced = true;
-        }
-
-        cursor = formulaEnd + next.close.length;
-    }
-
-    appendText(normalized.slice(cursor));
-    return replaced ? htmlParts.join('') : null;
-};
-
-const plainMathClipboardToHtml = (text: string | undefined) => {
-    const normalized = normalizeClipboardPlainText(text || '');
-    if (!normalized || !/[⟨⟩〈〉\\^_−–—]|(?:\n\s*[UuCijIJ]\s*\n)/.test(normalized)) return null;
-
-    const lines = normalized.split('\n');
-    const parts: Array<{ type: 'paragraph' | 'equation'; value: string }> = [];
-    let paragraph: string[] = [];
-    let formula: string[] = [];
-
-    const flushParagraph = () => {
-        const value = paragraph.join('<br>').trim();
-        if (value) parts.push({ type: 'paragraph', value });
-        paragraph = [];
-    };
-
-    const flushFormula = () => {
-        const value = formula.join(' ').trim();
-        if (value && isRenderableFormula(value)) {
-            parts.push({ type: 'equation', value: normalizePlainFormulaToLatex(value) });
-        } else if (value) {
-            parts.push({ type: 'paragraph', value });
-        }
-        formula = [];
-    };
-
-    lines.forEach((line) => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-            if (formula.length) return;
-            flushParagraph();
-            return;
-        }
-
-        if (isFormulaTextLine(trimmed, formula.length > 0)) {
-            flushParagraph();
-            formula.push(trimmed);
-            return;
-        }
-
-        flushFormula();
-        paragraph.push(trimmed);
-    });
-
-    flushFormula();
-    flushParagraph();
-
-    if (!parts.some((part) => part.type === 'equation')) return null;
-
-    return parts.map((part) => {
-        if (part.type === 'equation') {
-            return `<div data-type="equation" data-equation="${escapeHtml(part.value)}"></div>`;
-        }
-        return `<p>${part.value.split('<br>').map(escapeHtml).join('<br>')}</p>`;
-    }).join('');
-};
-
-const mathClipboardToHtml = (html: string | undefined, text: string | undefined) => {
-    return normalizeMathClipboardHtml(html) || latexDelimitedClipboardToHtml(text) || plainMathClipboardToHtml(text);
-};
 
 const normalizeSmartImageLinksForExport = (html: string) => {
     if (!html || typeof document === 'undefined') return html;
@@ -2417,11 +2081,34 @@ const getContentSignature = (contentJson: JSONContent | null | undefined, markdo
     return `markdown:${markdown || ''}`;
 };
 
+const getSemanticDocumentSignature = (contentJson: JSONContent) => {
+    const stripRuntimeBlockIdentity = (node: JSONContent): JSONContent => {
+        const nextNode: JSONContent = { ...node };
+
+        if (node.attrs) {
+            const attrs = { ...node.attrs };
+            delete attrs.blockId;
+            nextNode.attrs = attrs;
+        }
+
+        if (node.content) {
+            nextNode.content = node.content.map(stripRuntimeBlockIdentity);
+        }
+
+        return nextNode;
+    };
+
+    return JSON.stringify(stripRuntimeBlockIdentity(contentJson));
+};
+
 export const SmartDocumentEditor = ({
     content = '',
     contentJson = null,
     pages = [],
     currentDocumentId = null,
+    mode = 'edit',
+    theme = 'system',
+    serializationFlushRef,
     onChange,
 }: SmartDocumentEditorProps) => {
     const [showTOC, setShowTOC] = useState(false);
@@ -2430,9 +2117,45 @@ export const SmartDocumentEditor = ({
     const [dragBlock, setDragBlock] = useState<DragBlockState | null>(null);
     const [columnResizeHandles, setColumnResizeHandles] = useState<ColumnResizeHandleInfo[]>([]);
     const [commentPanelBlock, setCommentPanelBlock] = useState<BlockHandleInfo | null>(null);
+    const [contentRecoveryWarning, setContentRecoveryWarning] = useState(false);
     const shellRef = React.useRef<HTMLDivElement | null>(null);
+    const uploadControllerRef = React.useRef<SmartClipboardUploadController | null>(null);
+    const initialContentRecoveryRef = React.useRef(false);
     const mmSigRef = React.useRef<string>('');
     const externalSigRef = React.useRef<string>(getContentSignature(contentJson, content));
+    const semanticDocumentSigRef = React.useRef<string | null>(null);
+    const onChangeRef = React.useRef(onChange);
+    const serializationTimerRef = React.useRef<number | null>(null);
+
+    useEffect(() => {
+        onChangeRef.current = onChange;
+    }, [onChange]);
+
+    const serializeAndEmit = useCallback((editorInstance: any) => {
+        if (!editorInstance || editorInstance.isDestroyed) return;
+        const html = normalizeSmartImageLinksForExport(editorInstance.getHTML());
+        const json = editorInstance.getJSON();
+        const markdown = serializeToMarkdown(json as DocumentNodeJson);
+        const text = serializeToPlainText(json as DocumentNodeJson);
+        externalSigRef.current = getContentSignature(json, markdown);
+        semanticDocumentSigRef.current = getSemanticDocumentSignature(json);
+
+        try {
+            const hasDiv = html.includes('data-type="mind-map"');
+            const hasFence = markdown.includes('```mindmap');
+            const sig = `${hasDiv}-${hasFence}-${markdown.length}`;
+            if (hasDiv && sig !== mmSigRef.current) mmSigRef.current = sig;
+        } catch {
+            // A serialization diagnostic must never interrupt editing.
+        }
+
+        onChangeRef.current({
+            markdown,
+            json,
+            html,
+            text,
+        });
+    }, []);
 
     const uploadImage = useCallback(async (file: File) => {
         try {
@@ -2457,22 +2180,17 @@ export const SmartDocumentEditor = ({
     }, []);
 
     const editor = useEditor({
-        extensions: [
-            BlockIdentity,
-            StarterKit.configure({
-                heading: false,
-                link: false,
-                bulletList: {
-                    keepMarks: true,
-                    keepAttributes: false,
-                },
-                orderedList: {
-                    keepMarks: true,
-                    keepAttributes: false,
-                },
-            }),
-            LinkExtension.configure({ openOnClick: false }),
-            Image.extend({
+        editable: mode === 'edit',
+        extensions: createSmartDocumentExtensions({
+            before: [
+                BlockIdentity,
+                SmartClipboardExtension.configure({
+                    uploadImage,
+                    uploadFile,
+                    uploadControllerRef,
+                }),
+            ],
+            image: Image.extend({
                 addAttributes() {
                     return {
                         ...this.parent?.(),
@@ -2544,166 +2262,148 @@ export const SmartDocumentEditor = ({
                     return ReactNodeViewRenderer(ResizableImageComponent);
                 },
             }).configure({
-                inline: true,
+                // Images are document blocks in NMDD. Treating them as inline
+                // made legacy top-level image JSON violate the doc `block+`
+                // schema and could crash block-ID normalization on load.
+                inline: false,
                 allowBase64: true,
             }),
-            Heading.configure({
-                levels: [1, 2, 3, 4, 5, 6],
-            }),
-            TaskList,
-            TaskItem.configure({ 
-                nested: true,
-                HTMLAttributes: {
-                    class: 'flex items-start space-x-2',
-                },
-            }),
-            Placeholder.configure({ placeholder: '开始输入内容... (输入 / 唤起命令菜单)' }),
-            ColumnList,
-            Column,
-            SlashCommand.configure({
-                suggestion: {
-                    items: getSuggestionItems,
-                    render: renderItems,
-                },
-            }),
-            Indent,
-            MindMap,
-            ToggleBlock,
-            CalloutBlock,
-            BookmarkBlock,
-            EmbedBlock,
-            MediaBlock.extend({
-                addNodeView() {
-                    return ReactNodeViewRenderer(NotionMediaComponent);
-                },
-            }),
-            TemplateButtonBlock,
-            SyncedBlock,
-            PageLinkBlock,
-            InlineEquation,
-            EquationBlock,
-            DatabaseBlock,
-            Table.configure({
-                resizable: true,
-            }),
-            TableRow,
-            TableHeaderWithBackground,
-            TableCellWithBackground,
-        ],
+            custom: [
+                ColumnList,
+                Column,
+                SlashCommand.configure({
+                    suggestion: {
+                        items: getSuggestionItems,
+                        render: renderItems,
+                    },
+                }),
+                Indent,
+                MindMap,
+                ToggleBlock,
+                CalloutBlock,
+                BookmarkBlock,
+                EmbedBlock,
+                MediaBlock.extend({
+                    addNodeView() {
+                        return ReactNodeViewRenderer(NotionMediaComponent);
+                    },
+                }),
+                TemplateButtonBlock,
+                SyncedBlock,
+                PageLinkBlock,
+                InlineEquation,
+                EquationBlock,
+                DatabaseBlock,
+            ],
+            table: {
+                table: Table.configure({ resizable: true }),
+                row: TableRow,
+                header: TableHeaderWithBackground,
+                cell: TableCellWithBackground,
+            },
+        }),
         content: getInitialContent(contentJson, content),
+        enableContentCheck: true,
+        onCreate: ({ editor }) => {
+            semanticDocumentSigRef.current = getSemanticDocumentSignature(editor.getJSON());
+        },
+        onContentError: ({ error }) => {
+            initialContentRecoveryRef.current = true;
+            console.warn('[document-editor] Invalid structured content detected; using the Markdown recovery copy.', error);
+        },
         editorProps: {
             attributes: {
-                class: 'prose prose-sm max-w-none focus:outline-none min-h-[500px] p-8 outline-none whitespace-pre-wrap break-words [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_h1]:text-3xl [&_h1]:font-bold [&_h1]:mb-4 [&_h2]:text-2xl [&_h2]:font-bold [&_h2]:mb-3 [&_h2]:mt-6 [&_h3]:text-xl [&_h3]:font-bold [&_h3]:mb-2 [&_h3]:mt-4 [&_h4]:text-lg [&_h4]:font-bold [&_h4]:mb-2 [&_h5]:text-base [&_h5]:font-bold [&_h5]:mb-1 [&_h6]:text-sm [&_h6]:font-bold [&_h6]:text-gray-500 [&_li_p]:m-0 [&_ul[data-type="taskList"]]:list-none [&_ul[data-type="taskList"]]:pl-0 [&_img]:rounded-lg [&_img]:shadow-sm [&_img]:max-w-full [&_img]:my-4 [&_div[data-type="mind-map"]]:my-6',
+                class: 'smart-document-content min-h-[500px] focus:outline-none',
             },
-            handlePaste: (view, event, _slice) => {
-                const text = event.clipboardData?.getData('text/plain');
-                const html = event.clipboardData?.getData('text/html');
-                const mathPasteHtml = mathClipboardToHtml(html, text);
-                if (mathPasteHtml) {
-                    event.preventDefault();
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(mathPasteHtml, 'text/html');
-                    const pmParser = ProseMirrorDOMParser.fromSchema(view.state.schema);
-                    const slice = pmParser.parseSlice(doc.body);
-                    const transaction = view.state.tr.replaceSelection(slice).scrollIntoView();
-                    view.dispatch(transaction);
-                    return true;
-                }
-
-                if (text) {
-                     // Check for Markdown table syntax (Header row + Separator row)
-                     if (/^\s*\|.*\|\s*\n\s*\|[-:| ]+\|\s*/m.test(text)) {
-                         const html = mdParser.render(text);
-                         const parser = new DOMParser();
-                         const doc = parser.parseFromString(html, 'text/html');
-                         const pmParser = ProseMirrorDOMParser.fromSchema(view.state.schema);
-                         const slice = pmParser.parseSlice(doc.body);
-                         const transaction = view.state.tr.replaceSelection(slice);
-                         view.dispatch(transaction);
-                         return true;
-                     }
-                }
-
-                const items = Array.from(event.clipboardData?.items || []);
-                const item = items.find(item => item.kind === 'file');
-
-                if (item) {
-                    event.preventDefault();
-                    const file = item.getAsFile();
-                    if (file) {
-                        const upload = file.type.indexOf('image') === 0 ? uploadImage : uploadFile;
-                        upload(file).then(url => {
-                            if (url) {
-                                const { schema } = view.state;
-                                const node = file.type.indexOf('image') === 0
-                                    ? schema.nodes.image.create({ src: url, width: '100%', align: 'center' })
-                                    : schema.nodes.mediaBlock.create({
-                                        url,
-                                        name: file.name,
-                                        mime: file.type || '',
-                                        size: file.size,
-                                        kind: getMediaKindFromFile(file),
-                                    });
-                                const transaction = view.state.tr.replaceSelectionWith(node);
-                                view.dispatch(transaction);
-                            }
-                        });
-                    }
-                    return true;
-                }
-                return false;
-            },
-            handleDrop: (view, event, _slice, moved) => {
-                if (!moved && event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]) {
-                    const file = event.dataTransfer.files[0];
-                    event.preventDefault();
-                    const upload = file.type.indexOf('image') === 0 ? uploadImage : uploadFile;
-                    upload(file).then(url => {
-                        if (url) {
-                            const { schema } = view.state;
-                            const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY });
-                            if (coordinates) {
-                                const node = file.type.indexOf('image') === 0
-                                    ? schema.nodes.image.create({ src: url, width: '100%', align: 'center' })
-                                    : schema.nodes.mediaBlock.create({
-                                        url,
-                                        name: file.name,
-                                        mime: file.type || '',
-                                        size: file.size,
-                                        kind: getMediaKindFromFile(file),
-                                    });
-                                const transaction = view.state.tr.insert(coordinates.pos, node);
-                                view.dispatch(transaction);
-                            }
-                        }
-                    });
-                    return true;
-                }
-                return false;
-            }
         },
-        onUpdate: ({ editor }) => {
-             const html = normalizeSmartImageLinksForExport(editor.getHTML());
-             const normalizedHtml = normalizeMindMapHtmlForTurndown(html);
-             const markdown = turndownService.turndown(normalizedHtml);
-             const json = editor.getJSON();
-             externalSigRef.current = getContentSignature(json, markdown);
+        onUpdate: ({ editor, transaction, appendedTransactions }) => {
+            const changedTransactions = [transaction, ...(appendedTransactions || [])]
+                .filter(candidate => candidate.docChanged);
+            const nextSemanticSignature = getSemanticDocumentSignature(editor.getJSON());
+            const isSemanticNoop = semanticDocumentSigRef.current === nextSemanticSignature;
+            semanticDocumentSigRef.current = nextSemanticSignature;
 
-             try {
-                 const hasDiv = html.includes('data-type="mind-map"');
-                 const hasFence = markdown.includes('```mindmap');
-                 const sig = `${hasDiv}-${hasFence}-${markdown.length}`;
-                 if (hasDiv && sig !== mmSigRef.current) mmSigRef.current = sig;
-             } catch {}
-
-             onChange({
-                markdown,
-                json,
-                html,
-                text: editor.state.doc.textBetween(0, editor.state.doc.content.size, '\n'),
-             });
+            if (
+                (changedTransactions.length === 0 && isSemanticNoop)
+                || (
+                    changedTransactions.length > 0
+                    && changedTransactions.every(candidate => candidate.getMeta(BLOCK_IDENTITY_TRANSACTION_META))
+                )
+            ) {
+                return;
+            }
+            if (serializationTimerRef.current !== null) {
+                window.clearTimeout(serializationTimerRef.current);
+            }
+            serializationTimerRef.current = window.setTimeout(() => {
+                serializationTimerRef.current = null;
+                serializeAndEmit(editor);
+            }, 180);
         }
     });
+
+    const flushPendingSerialization = useCallback(() => {
+        if (serializationTimerRef.current !== null) {
+            window.clearTimeout(serializationTimerRef.current);
+            serializationTimerRef.current = null;
+            serializeAndEmit(editor);
+        }
+    }, [editor, serializeAndEmit]);
+
+    const flushPendingEditorWork = useCallback(async () => {
+        await uploadControllerRef.current?.waitForPendingUploads();
+        flushPendingSerialization();
+    }, [flushPendingSerialization]);
+
+    useEffect(() => {
+        if (!serializationFlushRef) return;
+        serializationFlushRef.current = flushPendingEditorWork;
+        return () => {
+            if (serializationFlushRef.current === flushPendingEditorWork) {
+                serializationFlushRef.current = null;
+            }
+        };
+    }, [flushPendingEditorWork, serializationFlushRef]);
+
+    useEffect(() => {
+        if (!editor || !initialContentRecoveryRef.current) return;
+        const timeoutId = window.setTimeout(() => {
+            if (editor.isDestroyed || !initialContentRecoveryRef.current) return;
+            initialContentRecoveryRef.current = false;
+            editor.commands.setContent(markdownToHtml(content || ''), {
+                emitUpdate: false,
+                // Markdown is the recovery format. Unknown legacy wrappers may
+                // be discarded, but their supported text/children must remain.
+                errorOnInvalidContent: false,
+            });
+            semanticDocumentSigRef.current = getSemanticDocumentSignature(editor.getJSON());
+            externalSigRef.current = getContentSignature(contentJson, content);
+            setContentRecoveryWarning(true);
+        }, 0);
+        return () => window.clearTimeout(timeoutId);
+    }, [content, contentJson, editor]);
+
+    useEffect(() => {
+        const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+            if (!uploadControllerRef.current?.hasPendingUploads()) return;
+            event.preventDefault();
+            event.returnValue = '';
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, []);
+
+    useEffect(() => () => {
+        flushPendingSerialization();
+    }, [flushPendingSerialization]);
+
+    useEffect(() => {
+        if (!editor) return;
+        const timeoutId = window.setTimeout(() => {
+            if (!editor.isDestroyed) editor.setEditable(mode === 'edit');
+        }, 0);
+        return () => window.clearTimeout(timeoutId);
+    }, [editor, mode]);
 
     useEffect(() => {
         if (!editor) return;
@@ -2726,31 +2426,57 @@ export const SmartDocumentEditor = ({
 
     useEffect(() => {
         if (!editor) return;
-        ensureEditorBlockIds(editor);
+        const timeoutId = window.setTimeout(() => {
+            if (!editor.isDestroyed) ensureEditorBlockIds(editor);
+        }, 0);
+        return () => window.clearTimeout(timeoutId);
     }, [editor, content, contentJson]);
 
     useEffect(() => {
-        if (!editor) return;
-        const nextSignature = getContentSignature(contentJson, content);
-        if (nextSignature === externalSigRef.current) return;
-        if (editor.isFocused) return;
+        if (!editor || initialContentRecoveryRef.current) return;
+        const timeoutId = window.setTimeout(() => {
+            if (editor.isDestroyed) return;
+            const nextSignature = getContentSignature(contentJson, content);
+            if (nextSignature === externalSigRef.current) return;
+            if (editor.isFocused) return;
 
-        if (isValidDocJson(contentJson)) {
-            const currentSignature = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
-            if (currentSignature !== nextSignature) {
-                editor.commands.setContent(contentJson, { emitUpdate: false });
+            if (isValidDocJson(contentJson)) {
+                const currentSignature = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
+                if (currentSignature !== nextSignature) {
+                    try {
+                        editor.commands.setContent(contentJson, {
+                            emitUpdate: false,
+                            errorOnInvalidContent: true,
+                        });
+                        ensureEditorBlockIds(editor);
+                        semanticDocumentSigRef.current = getSemanticDocumentSignature(editor.getJSON());
+                        setContentRecoveryWarning(false);
+                    } catch (error) {
+                        console.warn('[document-editor] Rejected invalid external JSON and restored its Markdown copy.', error);
+                        editor.commands.setContent(markdownToHtml(content || ''), {
+                            emitUpdate: false,
+                            errorOnInvalidContent: false,
+                        });
+                        semanticDocumentSigRef.current = getSemanticDocumentSignature(editor.getJSON());
+                        setContentRecoveryWarning(true);
+                    }
+                }
+                externalSigRef.current = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
+                return;
+            }
+
+            const currentMarkdown = editorToMarkdown(editor);
+            if (currentMarkdown !== (content || '')) {
+                editor.commands.setContent(markdownToHtml(content || ''), {
+                    emitUpdate: false,
+                    errorOnInvalidContent: false,
+                });
                 ensureEditorBlockIds(editor);
+                semanticDocumentSigRef.current = getSemanticDocumentSignature(editor.getJSON());
             }
             externalSigRef.current = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
-            return;
-        }
-
-        const currentMarkdown = editorToMarkdown(editor);
-        if (currentMarkdown !== (content || '')) {
-            editor.commands.setContent(markdownToHtml(content || ''), { emitUpdate: false });
-            ensureEditorBlockIds(editor);
-        }
-        externalSigRef.current = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
+        }, 0);
+        return () => window.clearTimeout(timeoutId);
     }, [content, contentJson, editor]);
 
     useEffect(() => {
@@ -3398,6 +3124,23 @@ export const SmartDocumentEditor = ({
         editor.chain().focus().setImage({ src: url, width: '100%', align: 'center' } as any).run();
     }, [editor]);
 
+    const setSelectionLink = useCallback(async () => {
+        if (!editor) return;
+        const previousUrl = String(editor.getAttributes('link').href || '');
+        const url = await promptForUrl({
+            title: '链接地址',
+            initialValue: previousUrl,
+            allowEmpty: true,
+            confirmLabel: '保存',
+        });
+        if (url === null) return;
+        if (!url.trim()) {
+            editor.chain().focus().extendMarkRange('link').unsetLink().run();
+            return;
+        }
+        editor.chain().focus().extendMarkRange('link').setLink({ href: url.trim() }).run();
+    }, [editor]);
+
     if (!editor) return null;
 
     const commentPanelComments = commentPanelBlock
@@ -3407,12 +3150,14 @@ export const SmartDocumentEditor = ({
     return (
         <div
             ref={shellRef}
-            className="flex h-full min-h-[500px] relative"
+            className="smart-document smart-document-editor-shell"
+            data-mode={mode}
+            data-theme={theme}
             onDragOver={handleEditorDragOver}
             onDrop={handleEditorDrop}
             onDragEnd={handleEditorDragEnd}
         >
-            <BlockHandleLayer
+            {mode === 'edit' && <BlockHandleLayer
                 block={hoveredBlock}
                 menuOpen={blockMenuOpen}
                 onMenuOpenChange={setBlockMenuOpen}
@@ -3427,54 +3172,72 @@ export const SmartDocumentEditor = ({
                 onCopyLink={copyBlockLink}
                 onOpenComments={openBlockComments}
                 onDragStart={handleBlockDragStart}
-            />
-            <BlockDropIndicator dragBlock={dragBlock} />
-            <ColumnResizeLayer handles={columnResizeHandles} onResizeStart={handleColumnResizeStart} />
-            <BlockCommentPanel
+            />}
+            {mode === 'edit' && <BlockDropIndicator dragBlock={dragBlock} />}
+            {mode === 'edit' && <ColumnResizeLayer handles={columnResizeHandles} onResizeStart={handleColumnResizeStart} />}
+            {mode === 'edit' && <BlockCommentPanel
                 block={commentPanelBlock}
                 comments={commentPanelComments}
                 onClose={closeBlockComments}
                 onAdd={addBlockComment}
                 onResolve={resolveBlockComment}
                 onDelete={deleteBlockComment}
-            />
+            />}
             {/* Outline / Table of Contents (Left Side) */}
             {showTOC && (
-                <div className="hidden xl:flex flex-col w-64 sticky top-0 h-full border-r border-gray-100 bg-gray-50/30 flex-shrink-0 transition-all duration-300">
-                    <div className="p-4 border-b border-gray-100 flex justify-between items-center">
-                         <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center">
+                <aside className="smart-document-outline-panel" aria-label="文档大纲">
+                    <div className="smart-document-outline-header">
+                         <h4>
                             <ListOrdered className="w-3 h-3 mr-2" /> 
                             大纲
                          </h4>
                          <button 
+                            type="button"
                             onClick={() => setShowTOC(false)} 
-                            className="text-gray-400 hover:text-gray-600 p-1 hover:bg-gray-100 rounded"
+                            className="smart-document-icon-button"
                             title="隐藏大纲"
-                         >
+                            aria-label="隐藏大纲"
+                          >
                             <X className="w-3 h-3" />
                          </button>
                     </div>
-                    <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+                    <div className="smart-document-outline-content custom-scrollbar">
                         <TableOfContents editor={editor} />
                     </div>
-                </div>
+                </aside>
             )}
 
-            <div className="flex-1 flex flex-col min-w-0 transition-all duration-300">
-                <EditorToolbar 
+            <div className="smart-document-editor-main">
+                {contentRecoveryWarning && (
+                    <div className="smart-document-recovery-warning" role="status" aria-live="polite">
+                        <AlertTriangle aria-hidden="true" />
+                        <span>检测到旧版或损坏的结构化内容，已安全显示 Markdown 备份；原始 JSON 不会被静默覆盖。</span>
+                    </div>
+                )}
+                {mode === 'edit' && <EditorCompactToolbar
                     editor={editor} 
-                    onAddImage={addImage} 
+                    onAddImage={addImage}
                     onAddImageUrl={addImageByUrl}
-                    showTOC={showTOC} 
-                    onToggleTOC={() => setShowTOC(!showTOC)} 
-                />
+                    outlineOpen={showTOC}
+                    onToggleOutline={() => setShowTOC(!showTOC)}
+                />}
+                {mode === 'edit' && editor.isActive('table') && (
+                    <div className="smart-document-context-toolbar-row">
+                        <EditorTableMenu editor={editor} />
+                        <TableCellBackgroundMenu editor={editor} />
+                    </div>
+                )}
                 <div
-                    className="flex-1 bg-white cursor-text p-8 sm:p-12 max-w-5xl mx-auto w-full"
+                    className="smart-document-canvas"
                     onClick={handleEditorCanvasClick}
                     onMouseMove={handleEditorMouseMove}
                     onMouseLeave={handleEditorMouseLeave}
                 >
-                    <EditorContent editor={editor} />
+                    <div className="smart-document-content-rail">
+                        <EditorContent editor={editor} />
+                        {mode === 'edit' && <EditorSelectionMenu editor={editor} onSetLink={setSelectionLink} />}
+                        {mode === 'edit' && <EditorEmptyBlockMenu editor={editor} />}
+                    </div>
                 </div>
             </div>
         </div>
@@ -3950,7 +3713,8 @@ const TableOfContents = ({ editor }: { editor: any }) => {
     );
 };
 
-const EditorToolbar = ({
+/** @deprecated Kept temporarily for downstream compatibility during the contextual-toolbar rollout. */
+export const LegacyEditorToolbar = ({
     editor,
     onAddImage,
     onAddImageUrl,
@@ -4278,7 +4042,8 @@ const TableCellBackgroundMenu = ({ editor }: { editor: any }) => {
     );
 };
 
-function ToolbarBtn({ icon, label, onClick, isActive, disabled }: { icon: React.ReactNode; label?: string; onClick?: () => void; isActive?: boolean; disabled?: boolean }) {
+/** @deprecated Used only by LegacyEditorToolbar. */
+export function ToolbarBtn({ icon, label, onClick, isActive, disabled }: { icon: React.ReactNode; label?: string; onClick?: () => void; isActive?: boolean; disabled?: boolean }) {
     return (
         <button 
             onClick={onClick}

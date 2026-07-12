@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Plus, Tag, Search, X, 
   MoreHorizontal, Trash2, FileText, 
@@ -7,6 +7,23 @@ import {
 import { api, CURRENT_USER_ID } from '../services/api';
 import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue } from '../components/SmartDocumentEditor';
 import { useSearchParams } from 'react-router-dom';
+import {
+  normalizeDocumentRevision,
+  restoreLocalDocumentDraft,
+  useRevisionedSaveQueue,
+  type DocumentSaveStatus,
+} from '../features/document-editor/useRevisionedSaveQueue';
+import { DocumentSaveIndicator } from '../features/document-editor/ui/DocumentSaveIndicator';
+import {
+  DocumentPageHeader,
+  DocumentProperties,
+  DocumentProperty,
+  DocumentTopbar,
+  DocumentWorkspaceShell,
+} from '../components/document';
+import { DocumentViewControls } from '../features/document-editor/ui/DocumentViewControls';
+import { useDocumentViewPreferences } from '../features/document-editor/useDocumentViewPreferences';
+import { withoutRelationsForDocumentAutosave } from '../features/document-editor/savePayload';
 
 // --- Types ---
 interface SOPEntity {
@@ -25,6 +42,8 @@ interface SOPEntity {
   updated_at: string;
   content: string;
   content_json?: any | null;
+  content_schema_version?: number;
+  content_revision?: number | null;
   stats: {
     use_count: number;
     avg_score: number;
@@ -39,6 +58,10 @@ interface SOPEntity {
   history: { version: string; date: string; note: string }[];
   validation: { scene: string; date: string; score: number; note: string }[];
 }
+
+type SOPEntitySavePayload = Omit<SOPEntity, 'related'> & {
+  related?: SOPEntity['related'];
+};
 
 const normalizeSopEntity = (raw: any): SOPEntity => {
   const category = raw?.category === 'people' || raw?.category === 'business' || raw?.category === 'brand' || raw?.category === 'note'
@@ -61,6 +84,8 @@ const normalizeSopEntity = (raw: any): SOPEntity => {
     updated_at: String(raw?.updated_at || ''),
     content: String(raw?.content || ''),
     content_json: raw?.content_json || null,
+    content_schema_version: Number(raw?.content_schema_version || 1),
+    content_revision: normalizeDocumentRevision(raw?.content_revision),
     stats: raw?.stats && typeof raw.stats === 'object'
       ? {
           use_count: Number(raw.stats.use_count || 0),
@@ -85,31 +110,9 @@ const getDocumentView = (note: Pick<SOPEntity, 'category'>) => {
   return note.category === 'note' ? 'notes' : 'sop';
 };
 
-// --- Custom Hooks ---
-function useDebouncedCallback<T extends (...args: any[]) => any>(
-  callback: T,
-  wait: number
-) {
-  const timeout = useRef<ReturnType<typeof setTimeout>>();
-
-  return useCallback(
-    (...args: Parameters<T>) => {
-      const later = () => {
-        clearTimeout(timeout.current);
-        callback(...args);
-      };
-
-      clearTimeout(timeout.current);
-      timeout.current = setTimeout(later, wait);
-    },
-    [callback, wait]
-  );
-}
-
 export default function NoteManager() {
   const [items, setItems] = useState<SOPEntity[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
 
@@ -119,6 +122,8 @@ export default function NoteManager() {
   
   // Navigation State
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const activeEditorFlushRef = React.useRef<(() => Promise<void>) | null>(null);
+  const urlSyncTargetRef = React.useRef<string | undefined>(undefined);
 
   const selectedNote = items.find(n => n.id === selectedNoteId) || null;
   const docParamTarget = docParam ? items.find((item) => item.id === docParam) || null : null;
@@ -145,11 +150,55 @@ export default function NoteManager() {
     }))
   ), [items]);
 
+  const handleOptimisticDocumentUpdate = useCallback((updatedNote: SOPEntitySavePayload) => {
+    setItems((current) => current.map((item) => item.id === updatedNote.id
+      ? {
+          ...item,
+          ...updatedNote,
+          related: updatedNote.related ?? item.related,
+        }
+      : item));
+  }, []);
+
+  const handleConfirmedDocumentSave = useCallback((id: string, result: {
+    content_revision?: number | null;
+    content_schema_version?: number;
+  }) => {
+    setItems((current) => current.map((item) => item.id === id
+      ? {
+          ...item,
+          content_revision: normalizeDocumentRevision(result.content_revision) ?? item.content_revision,
+          content_schema_version: Number(result.content_schema_version || item.content_schema_version || 1),
+        }
+      : item));
+  }, []);
+
+  const saveQueue = useRevisionedSaveQueue<SOPEntitySavePayload>({
+    saveDocument: api.createSOP,
+    onOptimisticUpdate: handleOptimisticDocumentUpdate,
+    onConfirmed: handleConfirmedDocumentSave,
+  });
+  const selectedSaveStatus = saveQueue.getStatus(selectedNoteId);
+
   const fetchData = async () => {
     try {
         setLoading(true);
         const fetchedSops = await api.getSOPs(CURRENT_USER_ID, { domain: 'life' });
-        setItems((Array.isArray(fetchedSops) ? fetchedSops : []).map(normalizeSopEntity).filter((x) => x.id));
+        const normalizedItems = (Array.isArray(fetchedSops) ? fetchedSops : [])
+          .map(normalizeSopEntity)
+          .filter((item) => item.id);
+        const restoredItems = normalizedItems.map((item) => {
+          const restored = restoreLocalDocumentDraft(item);
+          if (restored !== item && normalizeDocumentRevision(item.content_revision) !== null) {
+            // A recovered draft may contain an explicit relation edit, so its
+            // one-time retry must preserve the complete stored payload. Legacy
+            // databases have no CAS revision, so their drafts remain visible
+            // locally but are never replayed automatically over remote content.
+            saveQueue.schedule(restored);
+          }
+          return restored;
+        });
+        setItems(restoredItems);
     } catch (error) {
         console.error("Failed to load notes", error);
     } finally {
@@ -162,21 +211,47 @@ export default function NoteManager() {
   }, []);
 
   useEffect(() => {
-    if (!docParam) return;
+    const target = docParam ? items.find((item) => item.id === docParam) || null : null;
+    if (docParam && !target) return;
+    const desiredId = target?.id || null;
 
-    const target = items.find((item) => item.id === docParam);
-    if (!target) return;
-
-    const targetView = getDocumentView(target);
-    if (targetView !== view) {
-      setSearchParams({ view: targetView, doc: docParam }, { replace: true });
+    if (desiredId === selectedNoteId) {
+      urlSyncTargetRef.current = undefined;
+      if (target) {
+        const targetView = getDocumentView(target);
+        if (targetView !== view) {
+          setSearchParams({ view: targetView, doc: target.id }, { replace: true });
+        }
+      }
       return;
     }
 
-    if (selectedNoteId !== docParam) {
-      setSelectedNoteId(docParam);
+    if (!selectedNoteId) {
+      setSelectedNoteId(desiredId);
       setShowMobileSidebar(false);
+      return;
     }
+
+    const targetKey = desiredId || '__document_list__';
+    if (urlSyncTargetRef.current === targetKey) return;
+    urlSyncTargetRef.current = targetKey;
+    void (async () => {
+      const canLeave = await flushBeforeNavigation();
+      if (urlSyncTargetRef.current !== targetKey) return;
+      urlSyncTargetRef.current = undefined;
+      if (!canLeave) {
+        const current = items.find((item) => item.id === selectedNoteId);
+        if (current) {
+          setSearchParams({ view: getDocumentView(current), doc: current.id }, { replace: true });
+        }
+        return;
+      }
+      setSelectedNoteId(desiredId);
+      setShowMobileSidebar(false);
+      if (target) {
+        setSearchParams({ view: getDocumentView(target), doc: target.id }, { replace: true });
+      }
+    })();
   }, [docParam, items, selectedNoteId, setSearchParams, view]);
 
   const visibleItems = useCallback((list: SOPEntity[]) => {
@@ -191,7 +266,8 @@ export default function NoteManager() {
     return matchesSearch;
   });
 
-  const handleOpenDetail = (id: string) => {
+  const handleOpenDetail = async (id: string) => {
+    if (!await flushBeforeNavigation()) return;
     const note = items.find((item) => item.id === id);
     const nextView = note ? getDocumentView(note) : view;
     setSelectedNoteId(id);
@@ -199,38 +275,39 @@ export default function NoteManager() {
     setSearchParams({ view: nextView, doc: id });
   };
 
-  const handleBack = () => {
+  const handleBack = async () => {
+    if (!await flushBeforeNavigation()) return;
     setSelectedNoteId(null);
     setSearchParams({ view });
-    fetchData();
+    await fetchData();
   };
 
-  const debouncedSave = useDebouncedCallback(async (updatedNote: SOPEntity) => {
+  const handleSwitchView = async (nextView: 'notes' | 'sop') => {
+    if (nextView === view && !selectedNoteId) return;
+    if (!await flushBeforeNavigation()) return;
+    setSelectedNoteId(null);
+    setSearchParams({ view: nextView });
+  };
+
+  async function flushBeforeNavigation() {
     try {
-        const hasMindMap = (updatedNote.content || '').includes('```mindmap');
-        if (hasMindMap) {
-            console.log('[mindmap][save][note] sending', { id: updatedNote.id, len: (updatedNote.content || '').length });
-        }
-        await api.createSOP(updatedNote);
-        if (hasMindMap) {
-            console.log('[mindmap][save][note] ok', { id: updatedNote.id });
-        }
+      await activeEditorFlushRef.current?.();
     } catch (error) {
-        console.error("Failed to save note", error);
-        const hasMindMap = (updatedNote.content || '').includes('```mindmap');
-        if (hasMindMap) {
-            console.error('[mindmap][save][note] failed', { id: updatedNote.id });
-        }
-    } finally {
-        setIsSaving(false);
+      alert(error instanceof Error ? error.message : '附件仍在上传，请稍后再离开文档。');
+      return false;
     }
-  }, 1000);
 
-  const handleSaveNote = async (updatedNote: SOPEntity) => {
-    setIsSaving(true);
-    setItems(prev => prev.map(n => n.id === updatedNote.id ? updatedNote : n));
-    debouncedSave(updatedNote);
-  };
+    const result = await saveQueue.flush();
+    if (result.ok) return true;
+    alert(result.conflictedIds.length
+      ? '文档与其他窗口发生冲突。请先处理冲突，当前内容仍保留在本地。'
+      : '文档尚未保存成功。请重试保存后再离开，当前内容仍保留在本地。');
+    return false;
+  }
+
+  const handleSaveNote = useCallback((updatedNote: SOPEntity) => {
+    saveQueue.schedule(withoutRelationsForDocumentAutosave(updatedNote));
+  }, [saveQueue]);
 
   const handleDeleteNote = async (id: string) => {
     if (confirm('确定要删除这篇文档吗？此操作无法撤销。')) {
@@ -249,6 +326,7 @@ export default function NoteManager() {
   };
   
   const handleCreateNote = async () => {
+      if (!await flushBeforeNavigation()) return;
       setLoading(true);
       const newNote: Partial<SOPEntity> = {
           title: view === 'sop' ? '未命名 SOP' : '未命名文档',
@@ -274,10 +352,12 @@ export default function NoteManager() {
               throw new Error('Server response missing ID');
           }
           
-          const createdNote = {
-              ...newNote,
-              id: result.id,
-              created_at: new Date().toISOString().split('T')[0],
+           const createdNote = {
+               ...newNote,
+               id: result.id,
+               content_schema_version: Number(result.content_schema_version || 1),
+               content_revision: normalizeDocumentRevision(result.content_revision),
+               created_at: new Date().toISOString().split('T')[0],
               updated_at: new Date().toISOString().split('T')[0],
           } as SOPEntity;
 
@@ -320,19 +400,13 @@ export default function NoteManager() {
         <div className="px-4 pt-3">
           <div className="flex items-center gap-2 bg-gray-50 rounded-lg p-1 border border-gray-100">
             <button
-              onClick={() => {
-                setSelectedNoteId(null);
-                setSearchParams({ view: 'notes' });
-              }}
+              onClick={() => void handleSwitchView('notes')}
               className={`flex-1 text-xs font-medium px-3 py-1.5 rounded-md ${view === 'notes' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-600 hover:bg-white/60'}`}
             >
               文档
             </button>
             <button
-              onClick={() => {
-                setSelectedNoteId(null);
-                setSearchParams({ view: 'sop' });
-              }}
+              onClick={() => void handleSwitchView('sop')}
               className={`flex-1 text-xs font-medium px-3 py-1.5 rounded-md ${view === 'sop' ? 'bg-white shadow-sm text-gray-900' : 'text-gray-600 hover:bg-white/60'}`}
             >
               SOP 冷库
@@ -372,7 +446,7 @@ export default function NoteManager() {
                     filteredNotes.map(note => (
                         <div 
                             key={note.id}
-                            onClick={() => handleOpenDetail(note.id)}
+                            onClick={() => void handleOpenDetail(note.id)}
                             className={`p-3 rounded-lg cursor-pointer transition-colors group ${
                                 selectedNoteId === note.id 
                                 ? 'bg-primary/5 border-l-2 border-primary' 
@@ -407,7 +481,10 @@ export default function NoteManager() {
         {selectedNote ? (
             <NoteDetailView 
                 note={selectedNote}
-                isSaving={isSaving}
+                saveStatus={selectedSaveStatus}
+                onRetrySave={() => saveQueue.retry(selectedNote.id)}
+                onReloadAfterConflict={() => window.location.reload()}
+                serializationFlushRef={activeEditorFlushRef}
                 onBack={handleBack}
                 onUpdate={handleSaveNote}
                 onDelete={() => handleDeleteNote(selectedNote.id)}
@@ -460,7 +537,7 @@ function DocumentMissingState({
   onCreate,
 }: {
   documentId: string;
-  onBack: () => void;
+  onBack: () => void | Promise<void>;
   onCreate: () => void;
 }) {
   return (
@@ -498,7 +575,10 @@ function DocumentMissingState({
 
 function NoteDetailView({
   note,
-  isSaving,
+  saveStatus,
+  onRetrySave,
+  onReloadAfterConflict,
+  serializationFlushRef,
   onBack,
   onUpdate,
   onDelete,
@@ -507,7 +587,10 @@ function NoteDetailView({
   pages,
 }: {
   note: SOPEntity;
-  isSaving: boolean;
+  saveStatus: DocumentSaveStatus;
+  onRetrySave: () => void;
+  onReloadAfterConflict: () => void;
+  serializationFlushRef: React.MutableRefObject<(() => Promise<void>) | null>;
   onBack: () => void;
   onUpdate: (note: SOPEntity) => void;
   onDelete: () => void;
@@ -519,6 +602,10 @@ function NoteDetailView({
   const [showPublish, setShowPublish] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [publishCat, setPublishCat] = useState<'people' | 'business' | 'brand'>('people');
+  const { mode, setMode, theme, setTheme } = useDocumentViewPreferences();
+  const handleBackFromEditor = async () => {
+    await onBack();
+  };
 
   useEffect(() => {
     if (!isFullscreen) return;
@@ -537,9 +624,7 @@ function NoteDetailView({
     };
   }, [isFullscreen]);
 
-  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const newTitle = e.target.value;
-      
+  const handleTitleChange = (newTitle: string) => {
       onUpdate({ 
           ...note, 
           title: newTitle, 
@@ -580,123 +665,191 @@ function NoteDetailView({
   };
 
   return (
-    <div
-      className={`flex-1 flex flex-col h-full overflow-hidden bg-white ${
-        isFullscreen ? 'fixed inset-0 z-[80] shadow-2xl' : ''
-      }`}
-    >
-      {/* Header */}
-      <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between bg-white flex-shrink-0">
-        <div className="flex items-center flex-1 mr-4">
-          <button onClick={onBack} className="mr-4 p-2 hover:bg-gray-100 rounded-full transition-colors lg:hidden">
-            <ArrowLeft className="h-5 w-5 text-gray-500" />
-          </button>
-          <div className="flex-1">
-             <input
-                value={note.title}
-                onChange={handleTitleChange}
-                className="text-xl font-bold text-gray-900 w-full px-0 py-1 border-none focus:ring-0 focus:outline-none bg-transparent"
-                placeholder="文档标题"
-             />
-          </div>
-        </div>
-        <div className="flex items-center space-x-3">
-            <span className="text-xs text-gray-400">
-                {isSaving ? (
-                    <span className="flex items-center text-primary">
-                        <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-primary mr-1"></div>
-                        保存中...
-                    </span>
-                ) : "已保存"}
-            </span>
-            <div className="h-4 w-px bg-gray-200"></div>
-            <button
-                type="button"
-                onClick={() => {
+    <>
+      <DocumentWorkspaceShell
+        className="flex-1"
+        data-testid="document-workspace"
+        theme={theme}
+        mode={mode}
+        fullscreen={isFullscreen}
+        scrollMode="workspace"
+        topbar={(
+          <DocumentTopbar
+            leading={(
+              <button type="button" onClick={handleBackFromEditor} className="smart-document-icon-button lg:hidden" aria-label="返回文档列表">
+                <ArrowLeft aria-hidden="true" />
+              </button>
+            )}
+            center={<span>{note.category === 'note' ? '文档' : 'SOP'} · 更新于 {note.updated_at || '-'}</span>}
+            actions={(
+              <>
+                <DocumentSaveIndicator status={saveStatus} onRetry={onRetrySave} onReload={onReloadAfterConflict} />
+                <DocumentViewControls mode={mode} theme={theme} onModeChange={setMode} onThemeChange={setTheme} />
+                <button
+                  type="button"
+                  onClick={() => {
                     setShowMenu(false);
-                    setIsFullscreen((current) => !current);
-                }}
-                className="p-2 text-gray-400 hover:text-gray-700 rounded-full hover:bg-gray-50 transition-colors"
-                title={isFullscreen ? '退出全屏 (Esc)' : '全屏编辑'}
-                aria-label={isFullscreen ? '退出全屏' : '全屏编辑'}
-            >
-                {isFullscreen ? <Minimize2 className="h-5 w-5" /> : <Maximize2 className="h-5 w-5" />}
-            </button>
-            <div className="relative">
-                <button 
-                    onClick={() => setShowMenu(!showMenu)}
-                    className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-50"
+                    setIsFullscreen(current => !current);
+                  }}
+                  className="smart-document-icon-button"
+                  title={isFullscreen ? '退出全屏 (Esc)' : '全屏编辑'}
+                  aria-label={isFullscreen ? '退出全屏' : '全屏编辑'}
                 >
-                    <MoreHorizontal className="h-5 w-5" />
+                  {isFullscreen ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
                 </button>
-                
-                {showMenu && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowMenu(!showMenu)}
+                    className="smart-document-icon-button"
+                    aria-label="更多文档操作"
+                    aria-expanded={showMenu}
+                  >
+                    <MoreHorizontal aria-hidden="true" />
+                  </button>
+                  {showMenu ? (
                     <>
-                        <div 
-                            className="fixed inset-0 z-10" 
-                            onClick={() => setShowMenu(false)}
-                        ></div>
-                        <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-100 z-20 py-1">
-                            {note.category === 'note' ? (
-                              <button
-                                onClick={() => { setPublishCat('people'); setShowPublish(true); setShowMenu(false); }}
-                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center"
-                              >
-                                <FileText className="w-4 h-4 mr-2" />
-                                发布为 SOP
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => { onUnpublish(); setShowMenu(false); }}
-                                className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 flex items-center"
-                              >
-                                <FileText className="w-4 h-4 mr-2" />
-                                转回文档
-                              </button>
-                            )}
-                            <button 
-                                onClick={() => { onDelete(); setShowMenu(false); }}
-                                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center"
-                            >
-                                <Trash2 className="w-4 h-4 mr-2" />
-                                删除文档
-                            </button>
-                        </div>
+                      <button
+                        type="button"
+                        className="fixed inset-0 z-10 cursor-default"
+                        aria-label="关闭文档菜单"
+                        onClick={() => setShowMenu(false)}
+                      />
+                      <div className="absolute right-0 z-20 mt-2 w-48 rounded-lg border border-gray-100 bg-white py-1 shadow-lg">
+                        {note.category === 'note' ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPublishCat('people');
+                              setShowPublish(true);
+                              setShowMenu(false);
+                            }}
+                            className="flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                          >
+                            <FileText className="mr-2 h-4 w-4" aria-hidden="true" />
+                            发布为 SOP
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onUnpublish();
+                              setShowMenu(false);
+                            }}
+                            className="flex w-full items-center px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50"
+                          >
+                            <FileText className="mr-2 h-4 w-4" aria-hidden="true" />
+                            转回文档
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onDelete();
+                            setShowMenu(false);
+                          }}
+                          className="flex w-full items-center px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" aria-hidden="true" />
+                          删除文档
+                        </button>
+                      </div>
                     </>
-                )}
-            </div>
-        </div>
-      </div>
+                  ) : null}
+                </div>
+              </>
+            )}
+          />
+        )}
+        header={(
+          <DocumentPageHeader
+            title={note.title}
+            onTitleChange={handleTitleChange}
+            readOnly={mode === 'read'}
+            titlePlaceholder="文档标题"
+            icon={<FileText />}
+            eyebrow={note.category === 'note' ? 'DOCUMENT' : 'STANDARD OPERATING PROCEDURE'}
+            meta={(
+              <>
+                <span>{note.version || 'V1.0'}</span>
+                <span>创建于 {note.created_at || '-'}</span>
+                <span>更新于 {note.updated_at || '-'}</span>
+              </>
+            )}
+          />
+        )}
+        properties={(
+          <DocumentProperties>
+            <DocumentProperty label="标签" icon={<Tag />}>
+              <input
+                type="text"
+                value={note.tags ? note.tags.join(', ') : ''}
+                onChange={handleTagsChange}
+                disabled={mode === 'read'}
+                placeholder="添加标签，用逗号分隔"
+                aria-label="文档标签"
+              />
+            </DocumentProperty>
+          </DocumentProperties>
+        )}
+      >
+        <SmartDocumentEditor
+          key={note.id}
+          content={note.content || ''}
+          contentJson={note.content_json || null}
+          pages={pages}
+          currentDocumentId={note.id}
+          mode={mode}
+          theme={theme}
+          serializationFlushRef={serializationFlushRef}
+          onChange={handleContentUpdate}
+        />
+      </DocumentWorkspaceShell>
 
-      {showPublish && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4" onClick={() => setShowPublish(false)}>
-          <div className="bg-white w-full max-w-sm rounded-xl shadow-xl border border-gray-100" onClick={(e) => e.stopPropagation()}>
-            <div className="p-5 border-b border-gray-100 flex items-center justify-between">
-              <div className="text-sm font-bold text-gray-900">发布为 SOP</div>
-              <button onClick={() => setShowPublish(false)} className="text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
+      {showPublish ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/40 p-4" onClick={() => setShowPublish(false)}>
+          <div
+            className="w-full max-w-sm rounded-xl border border-gray-100 bg-white shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="publish-sop-title"
+            onClick={event => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-gray-100 p-5">
+              <div id="publish-sop-title" className="text-sm font-bold text-gray-900">发布为 SOP</div>
+              <button
+                type="button"
+                onClick={() => setShowPublish(false)}
+                className="text-gray-400 hover:text-gray-600"
+                aria-label="关闭发布对话框"
+              >
+                <X className="h-5 w-5" aria-hidden="true" />
               </button>
             </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <div className="text-xs text-gray-600 mb-1">选择分类</div>
+            <div className="space-y-4 p-5">
+              <label className="block">
+                <span className="mb-1 block text-xs text-gray-600">选择分类</span>
                 <select
                   value={publishCat}
-                  onChange={(e) => setPublishCat(e.target.value as any)}
-                  className="w-full bg-white border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  onChange={event => setPublishCat(event.target.value as 'people' | 'business' | 'brand')}
+                  className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
                   <option value="people">识人能力</option>
                   <option value="business">商业认知</option>
                   <option value="brand">个人品牌</option>
                 </select>
-              </div>
+              </label>
               <div className="flex items-center justify-end gap-2">
-                <button onClick={() => setShowPublish(false)} className="px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded-lg">
+                <button type="button" onClick={() => setShowPublish(false)} className="rounded-lg px-3 py-2 text-sm text-gray-600 hover:bg-gray-50">
                   取消
                 </button>
                 <button
-                  onClick={() => { onPublish(publishCat); setShowPublish(false); }}
-                  className="px-3 py-2 text-sm bg-primary text-white rounded-lg hover:bg-primary/90"
+                  type="button"
+                  onClick={() => {
+                    onPublish(publishCat);
+                    setShowPublish(false);
+                  }}
+                  className="rounded-lg bg-primary px-3 py-2 text-sm text-white hover:bg-primary/90"
                 >
                   发布
                 </button>
@@ -704,35 +857,7 @@ function NoteDetailView({
             </div>
           </div>
         </div>
-      )}
-
-      <div className="flex-1 overflow-y-auto bg-white">
-          <div className="max-w-4xl mx-auto h-full flex flex-col">
-              {/* Meta inputs */}
-              <div className="px-8 pt-6 pb-2 flex items-center space-x-2">
-                  <Tag className="w-4 h-4 text-gray-400" />
-                  <input 
-                    type="text" 
-                    value={note.tags ? note.tags.join(', ') : ''} 
-                    onChange={handleTagsChange}
-                    className="flex-1 border-none bg-transparent text-sm focus:ring-0 px-0 placeholder-gray-400"
-                    placeholder="添加标签..."
-                  />
-              </div>
-              
-              {/* Editor */}
-              <div className="flex-1 flex flex-col">
-                 <SmartDocumentEditor
-                    key={note.id}
-                    content={note.content || ''}
-                    contentJson={note.content_json || null}
-                    pages={pages}
-                    currentDocumentId={note.id}
-                    onChange={handleContentUpdate}
-                  />
-              </div>
-          </div>
-      </div>
-    </div>
+      ) : null}
+    </>
   );
 }

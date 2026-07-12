@@ -1,0 +1,336 @@
+/* Core long-form typography. Every selector is anchored to a document root. */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--smart-doc-body-track);
+  min-height: 18rem;
+  margin-inline: auto;
+  padding: 0 !important;
+  color: var(--smart-doc-text);
+  font-family: var(--smart-doc-font-sans);
+  font-size: var(--smart-doc-body-size);
+  font-synthesis: none;
+  font-weight: 400;
+  line-height: var(--smart-doc-body-leading);
+  overflow-wrap: anywhere;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror),
+:is(.smart-document-content, .smart-document-shell .ProseMirror) *,
+:is(.smart-document-content, .smart-document-shell .ProseMirror) *::before,
+:is(.smart-document-content, .smart-document-shell .ProseMirror) *::after {
+  box-sizing: border-box;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror)::selection,
+:is(.smart-document-content, .smart-document-shell .ProseMirror) *::selection {
+  background: var(--smart-doc-selection);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror):focus {
+  outline: none;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) > :first-child {
+  margin-top: 0 !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) > :last-child {
+  margin-bottom: 0 !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) p {
+  margin-block: 0.4em;
+  min-height: 1.7em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) p + p {
+  margin-top: 0.5em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :is(h1, h2, h3, h4, h5, h6) {
+  color: var(--smart-doc-text);
+  font-family: inherit;
+  font-weight: 680;
+  letter-spacing: -0.018em;
+  text-wrap: pretty;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) h1 {
+  margin: 2.5rem 0 0.75rem;
+  font-size: 2.125rem;
+  line-height: 1.235;
+  letter-spacing: -0.03em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) h2 {
+  margin: 2.125rem 0 0.625rem;
+  font-size: 1.6875rem;
+  line-height: 1.33;
+  letter-spacing: -0.026em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) h3 {
+  margin: 1.75rem 0 0.5rem;
+  font-size: 1.375rem;
+  line-height: 1.41;
+  letter-spacing: -0.022em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) h4 {
+  margin: 1.5rem 0 0.4rem;
+  font-size: 1.125rem;
+  line-height: 1.5;
+  letter-spacing: -0.012em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) h5 {
+  margin: 1.35rem 0 0.35rem;
+  font-size: 1rem;
+  line-height: 1.6;
+  letter-spacing: -0.006em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) h6 {
+  margin: 1.25rem 0 0.35rem;
+  color: var(--smart-doc-text-secondary);
+  font-size: 0.9375rem;
+  line-height: 1.65;
+  letter-spacing: 0.01em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) strong {
+  color: color-mix(in srgb, var(--smart-doc-text) 94%, black);
+  font-weight: 680;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) em {
+  font-style: italic;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) u {
+  text-decoration-color: color-mix(in srgb, currentColor 55%, transparent);
+  text-decoration-thickness: 0.08em;
+  text-underline-offset: 0.16em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) s {
+  color: var(--smart-doc-text-secondary);
+  text-decoration-thickness: 0.08em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) a:not(.smart-doc-page-link):not(.smart-doc-bookmark) {
+  border-radius: 2px;
+  color: var(--smart-doc-link);
+  text-decoration-color: color-mix(in srgb, var(--smart-doc-link) 50%, transparent);
+  text-decoration-line: underline;
+  text-decoration-thickness: 0.06em;
+  text-underline-offset: 0.18em;
+  transition: color var(--smart-doc-motion-fast) var(--smart-doc-ease), text-decoration-color var(--smart-doc-motion-fast) var(--smart-doc-ease);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) a:not(.smart-doc-page-link):not(.smart-doc-bookmark):hover {
+  color: var(--smart-doc-link-hover);
+  text-decoration-color: currentColor;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :is(ul, ol) {
+  margin-block: 0.72em;
+  padding-left: 1.55em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) ul:not([data-type="taskList"]) {
+  list-style: disc;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) ul:not([data-type="taskList"]) ul {
+  list-style: circle;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) ol {
+  list-style: decimal;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :is(ul, ol) :is(ul, ol) {
+  margin-block: 0.2em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) li {
+  padding-left: 0.2em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) li + li {
+  margin-top: 0.22em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) li::marker {
+  color: var(--smart-doc-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) li > p {
+  margin-block: 0.12em;
+  min-height: auto;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: 0;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) li[data-type="taskItem"] {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding-left: 0;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) li[data-type="taskItem"] > label {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 1.7em;
+  margin-top: 0.04em;
+  user-select: none;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) li[data-type="taskItem"] > label input {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  border: 1px solid var(--smart-doc-border-strong);
+  border-radius: 3px;
+  accent-color: var(--smart-doc-accent);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) li[data-type="taskItem"] > div {
+  min-width: 0;
+  flex: 1;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) li[data-checked="true"] > div {
+  color: var(--smart-doc-text-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--smart-doc-text-muted) 65%, transparent);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) blockquote {
+  margin: 1.1rem 0;
+  padding: 0.1rem 0 0.1rem 1.05rem;
+  border-left: 3px solid var(--smart-doc-quote-border);
+  color: var(--smart-doc-text-secondary);
+  font-style: normal;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) blockquote > :first-child {
+  margin-top: 0;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) hr {
+  height: 1px;
+  margin: 2rem 0;
+  border: 0;
+  background: var(--smart-doc-border);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) code {
+  font-family: var(--smart-doc-font-mono);
+  font-size: 0.875em;
+  font-variant-ligatures: none;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :not(pre) > code {
+  padding: 0.14em 0.34em;
+  border-radius: var(--smart-doc-radius-xs);
+  background: var(--smart-doc-inline-code-bg);
+  color: var(--smart-doc-code-text);
+  overflow-wrap: break-word;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) pre {
+  position: relative;
+  margin: 1.15rem 0;
+  padding: 1rem 1.125rem;
+  overflow: auto;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: var(--smart-doc-radius-md);
+  background: var(--smart-doc-code-bg);
+  color: var(--smart-doc-code-text);
+  font-family: var(--smart-doc-font-mono);
+  font-size: 0.875rem;
+  line-height: 1.57;
+  tab-size: 2;
+  white-space: pre;
+  -webkit-overflow-scrolling: touch;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) pre code {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) mark {
+  margin-inline: -0.05em;
+  padding-inline: 0.08em;
+  border-radius: 2px;
+  background: #fff1a8;
+  color: inherit;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) sub,
+:is(.smart-document-content, .smart-document-shell .ProseMirror) sup {
+  font-size: 0.72em;
+  line-height: 0;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) p.is-editor-empty:first-child::before,
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .is-empty::before {
+  float: left;
+  height: 0;
+  color: var(--smart-doc-text-faint);
+  content: attr(data-placeholder);
+  pointer-events: none;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .ProseMirror-gapcursor::after {
+  border-top-color: var(--smart-doc-text);
+}
+
+@media (max-width: 50rem) {
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) {
+    --smart-doc-body-size: 0.9875rem;
+    --smart-doc-body-leading: 1.68;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) h1 {
+    margin-top: 2rem;
+    font-size: 1.875rem;
+    line-height: 1.28;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) h2 {
+    margin-top: 1.75rem;
+    font-size: 1.5rem;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) h3 {
+    margin-top: 1.5rem;
+    font-size: 1.25rem;
+  }
+
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) pre {
+    padding: 0.875rem;
+    border-radius: var(--smart-doc-radius-sm);
+    font-size: 0.8125rem;
+  }
+}
