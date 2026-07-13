@@ -3,19 +3,24 @@ import { useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
   CheckCircle2,
+  ChevronRight,
   FileText,
   Lightbulb,
+  Link2,
   MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Search,
   Tag,
   Trash2,
   UploadCloud,
   UserPlus,
+  RefreshCw,
   X,
 } from 'lucide-react';
 import { api, CURRENT_USER_ID } from '../services/api';
-import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue } from '../components/SmartDocumentEditor';
+import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue, type SmartDocumentValueGetter } from '../components/SmartDocumentEditor';
 import {
   normalizeDocumentRevision,
   restoreLocalDocumentDraft,
@@ -33,6 +38,11 @@ import {
 import { DocumentViewControls } from '../features/document-editor/ui/DocumentViewControls';
 import { useDocumentViewPreferences } from '../features/document-editor/useDocumentViewPreferences';
 import { withoutRelationsForDocumentAutosave } from '../features/document-editor/savePayload';
+import { serializeToPlainText } from '../features/document-editor/serialization/toPlainText';
+import { truncateGraphemes } from '../features/document-editor/text/graphemes';
+import { DocumentExportMenu } from '../features/document-editor/ui/DocumentExportMenu';
+import { GuardedLink, useDocumentNavigationGuard } from '../features/document-editor/navigation/DocumentNavigationGuard';
+import { documentLinksToPage } from '../features/document-editor/pageLinks/pageLinkIndex';
 
 type ResearchType = 'document' | 'idea' | 'meeting';
 type ResearchStatus = 'seed' | 'to_verify' | 'absorbed' | 'paused';
@@ -197,13 +207,80 @@ const makeDefaultTitle = (type: ResearchType) => {
   return '未命名科研文档';
 };
 
+const getDocumentNodeText = (node: any): string => {
+  if (!node || typeof node !== 'object') return '';
+  if (typeof node.text === 'string') return node.text;
+  if (!Array.isArray(node.content)) return '';
+  return node.content.map(getDocumentNodeText).join('');
+};
+
+const cleanTitleCandidate = (value: string) => value
+  .replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)/, '')
+  .replace(/[*_~`]+/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const decodeLegacyHtmlEntities = (value: string) => {
+  if (!value.includes('&')) return value;
+  if (typeof document !== 'undefined') {
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = value;
+    return textarea.value;
+  }
+  return value
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'");
+};
+
+export const inferResearchDocumentTitle = (value: SmartDocumentValue): string | null => {
+  const topLevelNodes = Array.isArray(value.json?.content) ? value.json.content : [];
+  const proseNodes = topLevelNodes.filter((node: any) => (
+    node?.type === 'heading' || node?.type === 'paragraph' || node?.type === 'blockquote'
+  ));
+  const orderedNodes = [
+    ...proseNodes.filter((node: any) => node?.type === 'heading'),
+    ...proseNodes.filter((node: any) => node?.type !== 'heading'),
+  ];
+
+  for (const node of orderedNodes) {
+    const candidate = cleanTitleCandidate(getDocumentNodeText(node));
+    if (candidate && candidate.length <= 50) return candidate;
+  }
+
+  const markdownLines = String(value.markdown || value.text || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('```'))
+    .filter((line) => !/^(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|erDiagram|gantt|pie|mindmap)\b/i.test(line));
+
+  for (const line of markdownLines) {
+    const candidate = cleanTitleCandidate(line);
+    if (candidate && candidate.length <= 50) return candidate;
+  }
+
+  const diagramNode = topLevelNodes.find((node: any) => (
+    node?.type === 'codeBlock' && String(node?.attrs?.language || '').toLowerCase() === 'mermaid'
+  ));
+  return diagramNode ? 'Mermaid 图表' : null;
+};
+
 export default function ResearchWorkspace() {
   const [items, setItems] = useState<ResearchItem[]>([]);
   const [people, setPeople] = useState<RelatedPerson[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+  const [libraryCollapsed, setLibraryCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const stored = window.localStorage.getItem('nmdd.research.library-collapsed');
+    return stored === null ? window.innerWidth < 1440 : stored === 'true';
+  });
   const activeEditorFlushRef = React.useRef<(() => Promise<void>) | null>(null);
   const urlSyncTargetRef = React.useRef<string | undefined>(undefined);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
@@ -214,14 +291,32 @@ export default function ResearchWorkspace() {
   const selectedItem = items.find((item) => item.id === selectedItemId) || null;
   const showMainContent = Boolean(selectedItem || selectedItemId || (docParam && loading));
   const shouldShowSidebar = showMobileSidebar || !showMainContent;
+  const desktopLibraryHidden = Boolean(selectedItemId && libraryCollapsed);
+
+  useEffect(() => {
+    window.localStorage.setItem('nmdd.research.library-collapsed', String(libraryCollapsed));
+  }, [libraryCollapsed]);
 
   const pages = useMemo<SmartDocumentPageLink[]>(() => (
     items.map((item) => ({
       id: item.id,
       title: item.title || makeDefaultTitle(item.research_type),
       category: item.research_type,
+      href: `/research?type=${item.research_type}&doc=${encodeURIComponent(item.id)}`,
     }))
   ), [items]);
+  const backlinks = useMemo<SmartDocumentPageLink[]>(() => (
+    selectedItemId
+      ? items
+          .filter((item) => item.id !== selectedItemId && documentLinksToPage(item.content_json, selectedItemId))
+          .map((item) => ({
+            id: item.id,
+            title: item.title || makeDefaultTitle(item.research_type),
+            category: item.research_type,
+            href: `/research?type=${item.research_type}&doc=${encodeURIComponent(item.id)}`,
+          }))
+      : []
+  ), [items, selectedItemId]);
 
   const handleOptimisticResearchUpdate = useCallback((updatedItem: ResearchSavePayload) => {
     setItems((current) => current.map((item) => item.id === updatedItem.id
@@ -252,10 +347,12 @@ export default function ResearchWorkspace() {
     onConfirmed: handleConfirmedResearchSave,
   });
   const selectedSaveStatus = saveQueue.getStatus(selectedItemId);
+  useDocumentNavigationGuard(flushBeforeNavigation, Boolean(selectedItemId));
 
   const fetchData = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
       const [rawItems, rawPeople] = await Promise.all([
         api.getSOPs(CURRENT_USER_ID, { domain: 'research' }),
         api.getAllPeople(CURRENT_USER_ID),
@@ -283,6 +380,7 @@ export default function ResearchWorkspace() {
       })).filter((person) => person.id && person.name));
     } catch (error) {
       console.error('Failed to load research workspace', error);
+      setLoadError('科研记录加载失败。请检查本地服务或网络连接后重试。');
     } finally {
       setLoading(false);
     }
@@ -296,6 +394,12 @@ export default function ResearchWorkspace() {
     const target = docParam ? items.find((item) => item.id === docParam) || null : null;
     if (docParam && !target) return;
     const desiredId = target?.id || null;
+    const targetKey = desiredId || '__research_list__';
+
+    // A click updates React state and the URL in two separate render passes.
+    // Ignore the transient render that still carries the previous URL; otherwise
+    // it can race the click and reopen the document the user just left.
+    if (urlSyncTargetRef.current !== undefined && urlSyncTargetRef.current !== targetKey) return;
 
     if (desiredId === selectedItemId) {
       urlSyncTargetRef.current = undefined;
@@ -305,14 +409,19 @@ export default function ResearchWorkspace() {
       return;
     }
 
+    if (urlSyncTargetRef.current === targetKey) {
+      urlSyncTargetRef.current = undefined;
+      setSelectedItemId(desiredId);
+      setShowMobileSidebar(false);
+      return;
+    }
+
     if (!selectedItemId) {
       setSelectedItemId(desiredId);
       setShowMobileSidebar(false);
       return;
     }
 
-    const targetKey = desiredId || '__research_list__';
-    if (urlSyncTargetRef.current === targetKey) return;
     urlSyncTargetRef.current = targetKey;
     void (async () => {
       const canLeave = await flushBeforeNavigation();
@@ -387,6 +496,7 @@ export default function ResearchWorkspace() {
         updated_at: new Date().toISOString().split('T')[0],
       } as ResearchItem;
       setItems((prev) => [createdItem, ...prev]);
+      urlSyncTargetRef.current = result.id;
       setSelectedItemId(result.id);
       setSearchParams({ type: activeType, doc: result.id });
     } catch (error: any) {
@@ -403,6 +513,7 @@ export default function ResearchWorkspace() {
       await api.deleteSOP(id);
       setItems((prev) => prev.filter((item) => item.id !== id));
       if (selectedItemId === id) {
+        urlSyncTargetRef.current = '__research_list__';
         setSelectedItemId(null);
         setSearchParams({ type: activeType });
       }
@@ -414,6 +525,7 @@ export default function ResearchWorkspace() {
 
   const handleOpenItem = async (item: ResearchItem) => {
     if (!await flushBeforeNavigation()) return;
+    urlSyncTargetRef.current = item.id;
     setSelectedItemId(item.id);
     setShowMobileSidebar(false);
     setSearchParams({ type: item.research_type, doc: item.id });
@@ -421,6 +533,7 @@ export default function ResearchWorkspace() {
 
   const handleSwitchType = async (type: ResearchType) => {
     if (!await flushBeforeNavigation()) return;
+    urlSyncTargetRef.current = '__research_list__';
     setSelectedItemId(null);
     setSearchParams({ type });
   };
@@ -473,16 +586,24 @@ export default function ResearchWorkspace() {
       <aside className={`
         fixed inset-y-0 left-0 z-50 flex w-80 flex-col border-r border-gray-100 bg-white transition-transform duration-300 lg:static lg:translate-x-0
         ${shouldShowSidebar ? 'translate-x-0' : '-translate-x-full'}
-        ${selectedItemId ? 'hidden lg:flex' : 'flex'}
+        ${selectedItemId ? 'hidden' : 'flex'}
+        ${desktopLibraryHidden ? 'lg:hidden' : 'lg:flex'}
       `}>
         <div className="flex items-center justify-between border-b border-gray-100 p-4">
           <div>
             <h2 className="text-lg font-bold text-gray-900">科研工作台</h2>
             <div className="mt-1 text-xs text-gray-500">独立科研记录区</div>
           </div>
-          <button onClick={() => setShowMobileSidebar(false)} className="text-gray-500 lg:hidden">
-            <X className="h-5 w-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            {selectedItemId ? (
+              <button type="button" onClick={() => setLibraryCollapsed(true)} className="hidden rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 lg:inline-flex" title="收起科研文档列表" aria-label="收起科研文档列表">
+                <PanelLeftClose className="h-4 w-4" />
+              </button>
+            ) : null}
+            <button onClick={() => setShowMobileSidebar(false)} className="text-gray-500 lg:hidden">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
         </div>
 
         <div className="border-b border-gray-100 p-3">
@@ -527,6 +648,19 @@ export default function ResearchWorkspace() {
             <div className="flex justify-center p-6">
               <div className="h-6 w-6 animate-spin rounded-full border-2 border-gray-200 border-b-primary" />
             </div>
+          ) : loadError && items.length === 0 ? (
+            <div className="m-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="alert">
+              <div className="font-medium">无法载入科研记录</div>
+              <p className="mt-1 text-xs leading-5 text-amber-700">{loadError}</p>
+              <button
+                type="button"
+                onClick={() => void fetchData()}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium transition-colors hover:bg-amber-100"
+              >
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                重新加载
+              </button>
+            </div>
           ) : visibleItems.length > 0 ? (
             <div className="space-y-1">
               {visibleItems.map((item) => (
@@ -550,6 +684,9 @@ export default function ResearchWorkspace() {
             item={selectedItem}
             people={people}
             pages={pages}
+            backlinks={backlinks}
+            libraryCollapsed={desktopLibraryHidden}
+            onOpenLibrary={() => setLibraryCollapsed(false)}
             saveStatus={selectedSaveStatus}
             onRetrySave={() => saveQueue.retry(selectedItem.id)}
             onReloadAfterConflict={() => window.location.reload()}
@@ -557,6 +694,7 @@ export default function ResearchWorkspace() {
             isPromoting={promotingId === selectedItem.id}
             onBack={async () => {
               if (!await flushBeforeNavigation()) return;
+              urlSyncTargetRef.current = '__research_list__';
               setSelectedItemId(null);
               setSearchParams({ type: activeType });
             }}
@@ -566,6 +704,15 @@ export default function ResearchWorkspace() {
           />
         ) : docParam && loading ? (
           <div className="flex flex-1 items-center justify-center text-sm text-gray-400">正在打开科研记录...</div>
+        ) : docParam && loadError ? (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-amber-50/30 px-6 text-center" role="alert">
+            <div className="text-sm font-medium text-amber-900">科研记录暂时无法打开</div>
+            <p className="max-w-md text-xs leading-5 text-amber-700">{loadError}</p>
+            <button type="button" onClick={() => void fetchData()} className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-amber-800 hover:bg-amber-50">
+              <RefreshCw className="h-4 w-4" aria-hidden="true" />
+              重新加载
+            </button>
+          </div>
         ) : (
           <div className="flex flex-1 flex-col items-center justify-center bg-gray-50/30 text-gray-400">
             <FileText className="mb-4 h-16 w-16 opacity-20" />
@@ -586,7 +733,26 @@ function ResearchListItem({
   active: boolean;
   onClick: () => void;
 }) {
-  const snippet = item.content.replace(/[#>*_`[\]()~-]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+  let source = '';
+  if (item.content_json?.type === 'doc') {
+    try {
+      source = serializeToPlainText(item.content_json);
+    } catch {
+      source = '';
+    }
+  }
+  if (!source) {
+    source = decodeLegacyHtmlEntities(item.content
+      .replace(/```mindmap[\s\S]*?```/gi, ' 脑图 ')
+      .replace(/```[\s\S]*?```/g, ' 代码块 ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'));
+  }
+  const snippet = truncateGraphemes(
+    source.replace(/[#>*_`[\]()~-]+/g, ' ').replace(/\s+/g, ' ').trim(),
+    80,
+  );
   const Icon = item.research_type === 'idea' ? Lightbulb : item.research_type === 'meeting' ? MessageSquare : FileText;
   return (
     <button
@@ -624,6 +790,9 @@ function ResearchDetail({
   item,
   people,
   pages,
+  backlinks,
+  libraryCollapsed,
+  onOpenLibrary,
   saveStatus,
   onRetrySave,
   onReloadAfterConflict,
@@ -637,6 +806,9 @@ function ResearchDetail({
   item: ResearchItem;
   people: RelatedPerson[];
   pages: SmartDocumentPageLink[];
+  backlinks: SmartDocumentPageLink[];
+  libraryCollapsed: boolean;
+  onOpenLibrary: () => void;
   saveStatus: DocumentSaveStatus;
   onRetrySave: () => void;
   onReloadAfterConflict: () => void;
@@ -648,7 +820,12 @@ function ResearchDetail({
   onPromote: (draft: PromoteDraft) => Promise<void>;
 }) {
   const [showPromote, setShowPromote] = useState(false);
-  const { mode, setMode, theme, setTheme } = useDocumentViewPreferences();
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const exportValueRef = React.useRef<SmartDocumentValueGetter | null>(null);
+  const {
+    mode, setMode, theme, setTheme,
+    width, setWidth, font, setFont, smallText, setSmallText,
+  } = useDocumentViewPreferences();
   const handleBackFromEditor = async () => {
     await onBack();
   };
@@ -670,6 +847,20 @@ function ResearchDetail({
     });
   }, [item.id]);
 
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const previousOverflow = document.body.style.overflow;
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsFullscreen(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [isFullscreen]);
+
   const handleTitleChange = (title: string) => {
     onUpdate({ ...item, title, updated_at: new Date().toISOString().split('T')[0] });
   };
@@ -682,11 +873,7 @@ function ResearchDetail({
   const handleContentUpdate = (value: SmartDocumentValue) => {
     let nextTitle = item.title;
     if (!item.title || item.title === makeDefaultTitle(item.research_type)) {
-      const firstLine = (value.text || value.markdown)
-        .split('\n')
-        .map((line) => line.replace(/^#+\s*/, '').trim())
-        .find(Boolean);
-      if (firstLine && firstLine.length < 50) nextTitle = firstLine;
+      nextTitle = inferResearchDocumentTitle(value) || nextTitle;
     }
 
     onUpdate({
@@ -736,33 +923,64 @@ function ResearchDetail({
         data-testid="research-document-workspace"
         theme={theme}
         mode={mode}
+        width={width}
+        font={font}
+        smallText={smallText}
+        fullscreen={isFullscreen}
         scrollMode="workspace"
         topbar={(
           <DocumentTopbar
             leading={(
-              <button type="button" onClick={handleBackFromEditor} className="smart-document-icon-button lg:hidden" aria-label="返回科研记录列表">
-                <ArrowLeft aria-hidden="true" />
-              </button>
+              <>
+                <button type="button" onClick={handleBackFromEditor} className="smart-document-icon-button lg:hidden" aria-label="返回科研记录列表">
+                  <ArrowLeft aria-hidden="true" />
+                </button>
+                {libraryCollapsed ? (
+                  <button type="button" onClick={onOpenLibrary} className="smart-document-icon-button hidden lg:inline-flex" aria-label="打开科研文档列表" title="打开科研文档列表">
+                    <PanelLeftOpen aria-hidden="true" />
+                  </button>
+                ) : null}
+              </>
             )}
             center={(
-              <span>
-                {RESEARCH_TYPES.find(type => type.key === item.research_type)?.label || '科研记录'}
-                {' · '}
-                更新于 {item.updated_at || '-'}
+              <span className="smart-document-breadcrumbs">
+                <span>科研工作台</span>
+                <ChevronRight aria-hidden="true" />
+                <span>{RESEARCH_TYPES.find(type => type.key === item.research_type)?.label || '科研记录'}</span>
+                <ChevronRight aria-hidden="true" />
+                <strong>{item.title || makeDefaultTitle(item.research_type)}</strong>
               </span>
             )}
             actions={(
               <>
                 <DocumentSaveIndicator status={saveStatus} onRetry={onRetrySave} onReload={onReloadAfterConflict} />
-                <DocumentViewControls mode={mode} theme={theme} onModeChange={setMode} onThemeChange={setTheme} />
+                <DocumentViewControls
+                  mode={mode}
+                  theme={theme}
+                  width={width}
+                  font={font}
+                  smallText={smallText}
+                  fullscreen={isFullscreen}
+                  onModeChange={setMode}
+                  onThemeChange={setTheme}
+                  onWidthChange={setWidth}
+                  onFontChange={setFont}
+                  onSmallTextChange={setSmallText}
+                  onFullscreenChange={setIsFullscreen}
+                />
+                <DocumentExportMenu
+                  title={item.title || makeDefaultTitle(item.research_type)}
+                  valueRef={exportValueRef}
+                  beforeExport={async () => serializationFlushRef.current?.()}
+                />
                 <button
                   type="button"
                   onClick={() => setShowPromote(true)}
                   disabled={isPromoting}
-                  className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-60"
+                  className="research-promote-button inline-flex min-h-9 flex-none items-center gap-1.5 whitespace-nowrap rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-60"
                 >
                   <UploadCloud className="h-4 w-4" aria-hidden="true" />
-                  <span className="hidden xl:inline">{item.promoted_to_life ? '再次上浮' : '上浮到人生主线'}</span>
+                  <span className="research-promote-button__label">{item.promoted_to_life ? '再次上浮' : '上浮到人生主线'}</span>
                 </button>
                 <button type="button" onClick={onDelete} className="smart-document-icon-button text-red-500" title="删除" aria-label="删除科研记录">
                   <Trash2 aria-hidden="true" />
@@ -841,6 +1059,19 @@ function ResearchDetail({
                 ))}
               </select>
             </DocumentProperty>
+
+            <DocumentProperty label="反向链接" icon={<Link2 />}>
+              {backlinks.length ? backlinks.map((page) => (
+                <GuardedLink
+                  key={page.id}
+                  to={page.href || `/research?type=${page.category || 'document'}&doc=${encodeURIComponent(page.id)}`}
+                  className="smart-document-backlink"
+                >
+                  <FileText aria-hidden="true" />
+                  <span>{page.title}</span>
+                </GuardedLink>
+              )) : <span className="smart-document-property-empty">暂无反向链接</span>}
+            </DocumentProperty>
           </DocumentProperties>
         )}
       >
@@ -853,6 +1084,7 @@ function ResearchDetail({
           mode={mode}
           theme={theme}
           serializationFlushRef={serializationFlushRef}
+          exportValueRef={exportValueRef}
           onChange={handleContentUpdate}
         />
       </DocumentWorkspaceShell>

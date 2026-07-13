@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
-  Plus, Tag, Search, X, 
+  Plus, RefreshCw, Tag, Search, X,
   MoreHorizontal, Trash2, FileText, 
-  ArrowLeft, Maximize2, Minimize2
+  ArrowLeft, ChevronRight, Link2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import { api, CURRENT_USER_ID } from '../services/api';
-import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue } from '../components/SmartDocumentEditor';
+import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue, type SmartDocumentValueGetter } from '../components/SmartDocumentEditor';
 import { useSearchParams } from 'react-router-dom';
 import {
   normalizeDocumentRevision,
@@ -24,6 +24,9 @@ import {
 import { DocumentViewControls } from '../features/document-editor/ui/DocumentViewControls';
 import { useDocumentViewPreferences } from '../features/document-editor/useDocumentViewPreferences';
 import { withoutRelationsForDocumentAutosave } from '../features/document-editor/savePayload';
+import { DocumentExportMenu } from '../features/document-editor/ui/DocumentExportMenu';
+import { GuardedLink, useDocumentNavigationGuard } from '../features/document-editor/navigation/DocumentNavigationGuard';
+import { documentLinksToPage } from '../features/document-editor/pageLinks/pageLinkIndex';
 
 // --- Types ---
 interface SOPEntity {
@@ -113,8 +116,14 @@ const getDocumentView = (note: Pick<SOPEntity, 'category'>) => {
 export default function NoteManager() {
   const [items, setItems] = useState<SOPEntity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+  const [libraryCollapsed, setLibraryCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const stored = window.localStorage.getItem('nmdd.notes.library-collapsed');
+    return stored === null ? window.innerWidth < 1440 : stored === 'true';
+  });
 
   const [searchParams, setSearchParams] = useSearchParams();
   const view = (searchParams.get('view') || 'notes') === 'sop' ? 'sop' : 'notes';
@@ -128,7 +137,7 @@ export default function NoteManager() {
   const selectedNote = items.find(n => n.id === selectedNoteId) || null;
   const docParamTarget = docParam ? items.find((item) => item.id === docParam) || null : null;
   const isDeepLinkLoading = Boolean(docParam && loading && !docParamTarget && !selectedNote);
-  const missingDocumentId = !loading
+  const missingDocumentId = !loading && !loadError
     ? (
         docParam && !docParamTarget
           ? docParam
@@ -141,14 +150,32 @@ export default function NoteManager() {
   const showMainContent = Boolean(selectedNote || selectedNoteId || isDeepLinkLoading || showMissingDocument);
 
   const shouldShowSidebar = showMobileSidebar || !showMainContent;
+  const desktopLibraryHidden = Boolean(selectedNoteId && libraryCollapsed);
+
+  useEffect(() => {
+    window.localStorage.setItem('nmdd.notes.library-collapsed', String(libraryCollapsed));
+  }, [libraryCollapsed]);
 
   const documentPages = useMemo<SmartDocumentPageLink[]>(() => (
     items.map((item) => ({
       id: item.id,
       title: item.title || '未命名文档',
       category: item.category,
+      href: `/notes?view=${getDocumentView(item)}&doc=${encodeURIComponent(item.id)}`,
     }))
   ), [items]);
+  const backlinks = useMemo<SmartDocumentPageLink[]>(() => (
+    selectedNoteId
+      ? items
+          .filter((item) => item.id !== selectedNoteId && documentLinksToPage(item.content_json, selectedNoteId))
+          .map((item) => ({
+            id: item.id,
+            title: item.title || '未命名文档',
+            category: item.category,
+            href: `/notes?view=${getDocumentView(item)}&doc=${encodeURIComponent(item.id)}`,
+          }))
+      : []
+  ), [items, selectedNoteId]);
 
   const handleOptimisticDocumentUpdate = useCallback((updatedNote: SOPEntitySavePayload) => {
     setItems((current) => current.map((item) => item.id === updatedNote.id
@@ -179,10 +206,12 @@ export default function NoteManager() {
     onConfirmed: handleConfirmedDocumentSave,
   });
   const selectedSaveStatus = saveQueue.getStatus(selectedNoteId);
+  useDocumentNavigationGuard(flushBeforeNavigation, Boolean(selectedNoteId));
 
   const fetchData = async () => {
     try {
         setLoading(true);
+        setLoadError(null);
         const fetchedSops = await api.getSOPs(CURRENT_USER_ID, { domain: 'life' });
         const normalizedItems = (Array.isArray(fetchedSops) ? fetchedSops : [])
           .map(normalizeSopEntity)
@@ -201,6 +230,7 @@ export default function NoteManager() {
         setItems(restoredItems);
     } catch (error) {
         console.error("Failed to load notes", error);
+        setLoadError('文档列表加载失败。请检查本地服务或网络连接后重试。');
     } finally {
         setLoading(false);
     }
@@ -214,6 +244,9 @@ export default function NoteManager() {
     const target = docParam ? items.find((item) => item.id === docParam) || null : null;
     if (docParam && !target) return;
     const desiredId = target?.id || null;
+    const targetKey = desiredId || '__document_list__';
+
+    if (urlSyncTargetRef.current !== undefined && urlSyncTargetRef.current !== targetKey) return;
 
     if (desiredId === selectedNoteId) {
       urlSyncTargetRef.current = undefined;
@@ -226,14 +259,19 @@ export default function NoteManager() {
       return;
     }
 
+    if (urlSyncTargetRef.current === targetKey) {
+      urlSyncTargetRef.current = undefined;
+      setSelectedNoteId(desiredId);
+      setShowMobileSidebar(false);
+      return;
+    }
+
     if (!selectedNoteId) {
       setSelectedNoteId(desiredId);
       setShowMobileSidebar(false);
       return;
     }
 
-    const targetKey = desiredId || '__document_list__';
-    if (urlSyncTargetRef.current === targetKey) return;
     urlSyncTargetRef.current = targetKey;
     void (async () => {
       const canLeave = await flushBeforeNavigation();
@@ -270,6 +308,7 @@ export default function NoteManager() {
     if (!await flushBeforeNavigation()) return;
     const note = items.find((item) => item.id === id);
     const nextView = note ? getDocumentView(note) : view;
+    urlSyncTargetRef.current = id;
     setSelectedNoteId(id);
     setShowMobileSidebar(false);
     setSearchParams({ view: nextView, doc: id });
@@ -277,6 +316,7 @@ export default function NoteManager() {
 
   const handleBack = async () => {
     if (!await flushBeforeNavigation()) return;
+    urlSyncTargetRef.current = '__document_list__';
     setSelectedNoteId(null);
     setSearchParams({ view });
     await fetchData();
@@ -285,6 +325,7 @@ export default function NoteManager() {
   const handleSwitchView = async (nextView: 'notes' | 'sop') => {
     if (nextView === view && !selectedNoteId) return;
     if (!await flushBeforeNavigation()) return;
+    urlSyncTargetRef.current = '__document_list__';
     setSelectedNoteId(null);
     setSearchParams({ view: nextView });
   };
@@ -315,6 +356,7 @@ export default function NoteManager() {
             await api.deleteSOP(id);
             setItems(prev => prev.filter(n => n.id !== id));
             if (selectedNoteId === id) {
+                urlSyncTargetRef.current = '__document_list__';
                 setSelectedNoteId(null);
                 setSearchParams({ view });
             }
@@ -362,6 +404,7 @@ export default function NoteManager() {
           } as SOPEntity;
 
           setItems(prev => [createdNote, ...prev]);
+          urlSyncTargetRef.current = result.id;
           setSelectedNoteId(result.id);
           setSearchParams({ view, doc: result.id });
       } catch (error: any) {
@@ -383,18 +426,26 @@ export default function NoteManager() {
 
       {/* Sidebar List */}
       <div className={`
-        fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-100 flex flex-col transform transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 lg:flex
+        fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-100 flex flex-col transform transition-transform duration-300 ease-in-out lg:static lg:translate-x-0
         ${shouldShowSidebar ? 'translate-x-0' : '-translate-x-full'}
-        ${selectedNoteId ? 'hidden lg:flex' : 'flex'}
+        ${selectedNoteId ? 'hidden' : 'flex'}
+        ${desktopLibraryHidden ? 'lg:hidden' : 'lg:flex'}
       `}>
         <div className="p-4 border-b border-gray-100 flex justify-between items-center">
             <h2 className="text-lg font-bold text-gray-900 flex items-center">
                 <FileText className="w-5 h-5 mr-2 text-primary" />
                 {view === 'sop' ? 'SOP 冷库' : '随笔/文档'}
             </h2>
-            <button onClick={() => setShowMobileSidebar(false)} className="lg:hidden text-gray-500">
-                <X className="w-5 h-5" />
-            </button>
+            <div className="flex items-center gap-1">
+              {selectedNoteId ? (
+                <button type="button" onClick={() => setLibraryCollapsed(true)} className="hidden rounded-md p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700 lg:inline-flex" title="收起文档列表" aria-label="收起文档列表">
+                  <PanelLeftClose className="h-4 w-4" />
+                </button>
+              ) : null}
+              <button onClick={() => setShowMobileSidebar(false)} className="lg:hidden text-gray-500">
+                  <X className="w-5 h-5" />
+              </button>
+            </div>
         </div>
 
         <div className="px-4 pt-3">
@@ -441,6 +492,15 @@ export default function NoteManager() {
                  <div className="flex justify-center p-4">
                       <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
                  </div>
+            ) : loadError && items.length === 0 ? (
+                <div className="m-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900" role="alert">
+                    <div className="font-medium">无法载入文档</div>
+                    <p className="mt-1 text-xs leading-5 text-amber-700">{loadError}</p>
+                    <button type="button" onClick={() => void fetchData()} className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-amber-100">
+                        <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
+                        重新加载
+                    </button>
+                </div>
             ) : (
                 filteredNotes.length > 0 ? (
                     filteredNotes.map(note => (
@@ -501,9 +561,21 @@ export default function NoteManager() {
                   setSearchParams({ view: 'notes', doc: selectedNote.id });
                 }}
                 pages={documentPages}
+                backlinks={backlinks}
+                libraryCollapsed={desktopLibraryHidden}
+                onOpenLibrary={() => setLibraryCollapsed(false)}
             />
         ) : isDeepLinkLoading ? (
             <DocumentLoadingState />
+        ) : docParam && loadError ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 bg-amber-50/30 px-6 text-center" role="alert">
+                <div className="text-sm font-medium text-amber-900">文档暂时无法打开</div>
+                <p className="max-w-md text-xs leading-5 text-amber-700">{loadError}</p>
+                <button type="button" onClick={() => void fetchData()} className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-amber-800 hover:bg-amber-50">
+                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
+                    重新加载
+                </button>
+            </div>
         ) : showMissingDocument ? (
             <DocumentMissingState
                 documentId={missingDocumentId || ''}
@@ -585,6 +657,9 @@ function NoteDetailView({
   onPublish,
   onUnpublish,
   pages,
+  backlinks,
+  libraryCollapsed,
+  onOpenLibrary,
 }: {
   note: SOPEntity;
   saveStatus: DocumentSaveStatus;
@@ -597,12 +672,19 @@ function NoteDetailView({
   onPublish: (cat: 'people' | 'business' | 'brand') => void;
   onUnpublish: () => void;
   pages: SmartDocumentPageLink[];
+  backlinks: SmartDocumentPageLink[];
+  libraryCollapsed: boolean;
+  onOpenLibrary: () => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [showPublish, setShowPublish] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const exportValueRef = React.useRef<SmartDocumentValueGetter | null>(null);
   const [publishCat, setPublishCat] = useState<'people' | 'business' | 'brand'>('people');
-  const { mode, setMode, theme, setTheme } = useDocumentViewPreferences();
+  const {
+    mode, setMode, theme, setTheme,
+    width, setWidth, font, setFont, smallText, setSmallText,
+  } = useDocumentViewPreferences();
   const handleBackFromEditor = async () => {
     await onBack();
   };
@@ -671,20 +753,54 @@ function NoteDetailView({
         data-testid="document-workspace"
         theme={theme}
         mode={mode}
+        width={width}
+        font={font}
+        smallText={smallText}
         fullscreen={isFullscreen}
         scrollMode="workspace"
         topbar={(
           <DocumentTopbar
             leading={(
-              <button type="button" onClick={handleBackFromEditor} className="smart-document-icon-button lg:hidden" aria-label="返回文档列表">
-                <ArrowLeft aria-hidden="true" />
-              </button>
+              <>
+                <button type="button" onClick={handleBackFromEditor} className="smart-document-icon-button lg:hidden" aria-label="返回文档列表">
+                  <ArrowLeft aria-hidden="true" />
+                </button>
+                {libraryCollapsed ? (
+                  <button type="button" onClick={onOpenLibrary} className="smart-document-icon-button hidden lg:inline-flex" aria-label="打开文档列表" title="打开文档列表">
+                    <PanelLeftOpen aria-hidden="true" />
+                  </button>
+                ) : null}
+              </>
             )}
-            center={<span>{note.category === 'note' ? '文档' : 'SOP'} · 更新于 {note.updated_at || '-'}</span>}
+            center={(
+              <span className="smart-document-breadcrumbs">
+                <span>记录中心</span>
+                <ChevronRight aria-hidden="true" />
+                <span>{note.category === 'note' ? '文档' : 'SOP'}</span>
+                <ChevronRight aria-hidden="true" />
+                <strong>{note.title || '未命名文档'}</strong>
+              </span>
+            )}
             actions={(
               <>
                 <DocumentSaveIndicator status={saveStatus} onRetry={onRetrySave} onReload={onReloadAfterConflict} />
-                <DocumentViewControls mode={mode} theme={theme} onModeChange={setMode} onThemeChange={setTheme} />
+                <DocumentViewControls
+                  mode={mode}
+                  theme={theme}
+                  width={width}
+                  font={font}
+                  smallText={smallText}
+                  onModeChange={setMode}
+                  onThemeChange={setTheme}
+                  onWidthChange={setWidth}
+                  onFontChange={setFont}
+                  onSmallTextChange={setSmallText}
+                />
+                <DocumentExportMenu
+                  title={note.title || '未命名文档'}
+                  valueRef={exportValueRef}
+                  beforeExport={async () => serializationFlushRef.current?.()}
+                />
                 <button
                   type="button"
                   onClick={() => {
@@ -790,6 +906,18 @@ function NoteDetailView({
                 aria-label="文档标签"
               />
             </DocumentProperty>
+            <DocumentProperty label="反向链接" icon={<Link2 />}>
+              {backlinks.length ? backlinks.map((page) => (
+                <GuardedLink
+                  key={page.id}
+                  to={page.href || `/notes?view=${page.category === 'note' ? 'notes' : 'sop'}&doc=${encodeURIComponent(page.id)}`}
+                  className="smart-document-backlink"
+                >
+                  <FileText aria-hidden="true" />
+                  <span>{page.title}</span>
+                </GuardedLink>
+              )) : <span className="smart-document-property-empty">暂无反向链接</span>}
+            </DocumentProperty>
           </DocumentProperties>
         )}
       >
@@ -802,6 +930,7 @@ function NoteDetailView({
           mode={mode}
           theme={theme}
           serializationFlushRef={serializationFlushRef}
+          exportValueRef={exportValueRef}
           onChange={handleContentUpdate}
         />
       </DocumentWorkspaceShell>

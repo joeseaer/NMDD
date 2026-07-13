@@ -23,6 +23,10 @@ import {
 import { MindMapComponent } from './MindMapExtension';
 import { createSmartDocumentExtensions } from '../features/document-editor/createEditorExtensions';
 import { SmartClipboardExtension } from '../features/document-editor/SmartClipboardExtension';
+import { decodeLegacyEncodedFormula } from '../features/document-editor/serialization/serializationUtils';
+import { takeGraphemes } from '../features/document-editor/text/graphemes';
+import { useNavigate } from 'react-router-dom';
+import { useDocumentNavigationRequest } from '../features/document-editor/navigation/DocumentNavigationGuard';
 
 // --- Module Augmentation for Commands ---
 declare module '@tiptap/core' {
@@ -325,6 +329,7 @@ export const MindMap = Node.create({
 const normalizeToggleAttrs = (attrs: any) => ({
   title: String(attrs?.title || 'Toggle').trim() || 'Toggle',
   open: attrs?.open !== false,
+  level: [1, 2, 3].includes(Number(attrs?.level)) ? Number(attrs.level) : 0,
 });
 
 type CalloutTone = 'gray' | 'yellow' | 'blue' | 'green' | 'red' | 'purple';
@@ -400,9 +405,11 @@ const getNodeViewCommentsAttr = (attrs: any) => (
     : undefined
 );
 
-const ToggleBlockView = ({ node, updateAttributes, selected }: any) => {
+const ToggleBlockView = ({ node, updateAttributes, selected, editor }: any) => {
   const attrs = normalizeToggleAttrs(node.attrs);
   const commentsAttr = getNodeViewCommentsAttr(node.attrs);
+  const [readOpen, setReadOpen] = useState(attrs.open);
+  const effectiveOpen = editor.isEditable ? attrs.open : readOpen;
 
   return (
     <NodeViewWrapper
@@ -412,6 +419,7 @@ const ToggleBlockView = ({ node, updateAttributes, selected }: any) => {
       data-type="toggle"
       data-title={attrs.title}
       data-open={attrs.open ? 'true' : 'false'}
+      data-level={attrs.level || undefined}
       data-block-id={node.attrs.blockId || undefined}
       data-comments={commentsAttr}
       id={blockDomId(node.attrs.blockId)}
@@ -419,23 +427,27 @@ const ToggleBlockView = ({ node, updateAttributes, selected }: any) => {
       <div className="flex items-center gap-1 px-2 py-1.5" contentEditable={false}>
         <button
           type="button"
-          title={attrs.open ? '收起' : '展开'}
+          title={effectiveOpen ? '收起' : '展开'}
           onMouseDown={(event) => event.preventDefault()}
-          onClick={() => updateAttributes({ open: !attrs.open })}
+          onClick={() => {
+            if (editor.isEditable) updateAttributes({ open: !attrs.open });
+            else setReadOpen((current: boolean) => !current);
+          }}
           className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-gray-500 hover:bg-gray-100 hover:text-gray-800"
         >
-          <ChevronRight className={`h-4 w-4 transition-transform ${attrs.open ? 'rotate-90' : ''}`} />
+          <ChevronRight className={`h-4 w-4 transition-transform ${effectiveOpen ? 'rotate-90' : ''}`} />
         </button>
         <input
           value={attrs.title}
           onChange={(event) => updateAttributes({ title: event.target.value })}
-          className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-1 text-sm font-medium text-gray-800 outline-none hover:border-gray-200 focus:border-gray-300 focus:bg-white"
+          disabled={!editor.isEditable}
+          className={`smart-doc-toggle-title min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-1 text-gray-800 outline-none hover:border-gray-200 focus:border-gray-300 focus:bg-white ${attrs.level ? `smart-doc-toggle-title--h${attrs.level}` : 'text-sm font-medium'}`}
           aria-label="Toggle 标题"
           placeholder="Toggle"
         />
       </div>
       <NodeViewContent
-        className={`smart-doc-toggle-content px-4 pb-3 pt-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 ${attrs.open ? '' : 'hidden'}`}
+        className={`smart-doc-toggle-content px-4 pb-3 pt-1 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 ${effectiveOpen ? '' : 'hidden'}`}
       />
     </NodeViewWrapper>
   );
@@ -461,7 +473,7 @@ const CalloutBlockView = ({ node, updateAttributes, selected }: any) => {
       <div className="flex flex-shrink-0 flex-col items-center gap-2" contentEditable={false}>
         <input
           value={attrs.icon}
-          onChange={(event) => updateAttributes({ icon: Array.from(event.target.value).slice(0, 2).join('') })}
+          onChange={(event) => updateAttributes({ icon: takeGraphemes(event.target.value, 2) })}
           className={`flex h-7 w-7 rounded border px-0 text-center text-sm font-semibold outline-none focus:ring-2 focus:ring-white/70 ${tone.iconClassName}`}
           aria-label="Callout 图标"
         />
@@ -505,6 +517,11 @@ export const ToggleBlock = Node.create({
         parseHTML: element => element.hasAttribute('open'),
         renderHTML: attributes => attributes.open ? { open: 'open' } : {},
       },
+      level: {
+        default: 0,
+        parseHTML: element => Number(element.getAttribute('data-level') || 0),
+        renderHTML: attributes => Number(attributes.level) ? { 'data-level': Number(attributes.level) } : {},
+      },
     }
   },
 
@@ -516,8 +533,8 @@ export const ToggleBlock = Node.create({
     const attrs = normalizeToggleAttrs(node.attrs);
     return [
       'details',
-      mergeAttributes(HTMLAttributes, { 'data-type': 'toggle', 'data-title': attrs.title, class: 'smart-doc-toggle my-3 rounded-md border border-gray-200 bg-white' }),
-      ['summary', { class: 'smart-doc-toggle-summary cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-800' }, attrs.title],
+      mergeAttributes(HTMLAttributes, { 'data-type': 'toggle', 'data-title': attrs.title, 'data-level': attrs.level || undefined, class: 'smart-doc-toggle my-3 rounded-md border border-gray-200 bg-white' }),
+      ['summary', { class: `smart-doc-toggle-summary smart-doc-toggle-title${attrs.level ? ` smart-doc-toggle-title--h${attrs.level}` : ''} cursor-pointer select-none px-3 py-2 text-sm font-medium text-gray-800` }, attrs.title],
       ['div', { class: 'smart-doc-toggle-content px-4 pb-3 pt-1' }, 0],
     ]
   },
@@ -3042,7 +3059,7 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
               >
                 {isPerson && (
                   <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-full bg-blue-100 text-[9px] font-semibold text-blue-700">
-                    {choice.slice(0, 1).toUpperCase()}
+                    {takeGraphemes(choice, 1).toUpperCase()}
                   </span>
                 )}
                 <span className="truncate">{choice}</span>
@@ -3068,9 +3085,9 @@ const DatabaseBlockView = ({ node, updateAttributes, selected, editor }: any) =>
       );
     }
 
-    if (property.type === 'date') return <input type="date" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
-    if (property.type === 'number') return <input type="number" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
-    if (property.type === 'url') return <input type="url" value={String(rawValue || '')} onInput={(event) => updateCell(row.id, property.id, (event.target as HTMLInputElement).value)} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} placeholder="https://" />;
+    if (property.type === 'date') return <input type="date" value={String(rawValue || '')} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
+    if (property.type === 'number') return <input type="number" value={String(rawValue || '')} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} />;
+    if (property.type === 'url') return <input type="url" value={String(rawValue || '')} onChange={(event) => updateCell(row.id, property.id, event.target.value)} className={inputClass} placeholder="https://" />;
     if (property.type === 'files') {
       const files = normalizeDatabaseFileValue(rawValue);
       const removeFile = (fileId: string) => {
@@ -3996,12 +4013,17 @@ const normalizePageTitle = (title: string | null | undefined) => {
   return (title || '').trim() || '未命名文档';
 };
 
+const RESEARCH_PAGE_CATEGORIES = new Set(['document', 'idea', 'meeting']);
+
 const getPageLinkView = (category?: string | null) => {
   return category === 'note' || !category ? 'notes' : 'sop';
 };
 
 const getPageLinkHref = (pageId?: string | null, category?: string | null) => {
   if (!pageId) return '#';
+  if (category && RESEARCH_PAGE_CATEGORIES.has(category)) {
+    return `/research?type=${encodeURIComponent(category)}&doc=${encodeURIComponent(pageId)}`;
+  }
   return `/notes?view=${getPageLinkView(category)}&doc=${encodeURIComponent(pageId)}`;
 };
 
@@ -4010,6 +4032,9 @@ const getPageLinkCategoryLabel = (category?: string | null) => {
   if (category === 'people') return '识人 SOP';
   if (category === 'business') return '商业 SOP';
   if (category === 'brand') return '品牌 SOP';
+  if (category === 'document') return '科研文档';
+  if (category === 'idea') return '科研想法';
+  if (category === 'meeting') return '科研会议';
   return 'SOP';
 };
 
@@ -4027,6 +4052,8 @@ const getPageLinkOptions = (editor: any): SmartDocumentPageLinkOption[] => {
 };
 
 const PageLinkBlockView = ({ node, updateAttributes, selected, editor }: any) => {
+  const navigate = useNavigate();
+  const requestNavigation = useDocumentNavigationRequest();
   const pageId = node.attrs.pageId || '';
   const title = normalizePageTitle(node.attrs.title);
   const category = node.attrs.category || 'note';
@@ -4042,6 +4069,7 @@ const PageLinkBlockView = ({ node, updateAttributes, selected, editor }: any) =>
   const selectOptions = pages.filter((page) => page.id !== currentDocumentId || page.id === pageId);
 
   const handleSelectPage = (event: any) => {
+    if (!editor.isEditable) return;
     const nextPageId = event.target.value;
     const nextPage = pages.find((page) => page.id === nextPageId);
 
@@ -4078,7 +4106,15 @@ const PageLinkBlockView = ({ node, updateAttributes, selected, editor }: any) =>
             pageId ? 'text-gray-800 hover:text-primary' : 'pointer-events-none text-gray-400'
           }`}
           onClick={(event) => {
-            if (!pageId) event.preventDefault();
+            if (!pageId) {
+              event.preventDefault();
+              return;
+            }
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+            event.preventDefault();
+            void requestNavigation().then((canNavigate) => {
+              if (canNavigate) navigate(href);
+            });
           }}
         >
           <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-gray-200 bg-gray-50 text-gray-500">
@@ -4091,6 +4127,7 @@ const PageLinkBlockView = ({ node, updateAttributes, selected, editor }: any) =>
         <select
           value={pageId}
           onChange={handleSelectPage}
+          disabled={!editor.isEditable}
           className="h-8 max-w-full rounded border border-gray-200 bg-white px-2 text-xs text-gray-600 outline-none focus:border-gray-400 focus:ring-2 focus:ring-gray-100 sm:w-44"
         >
           <option value="">选择页面...</option>
@@ -4175,22 +4212,9 @@ const renderEquation = (formula: string) => {
   }
 };
 
-const decodeEquationAttribute = (value: string | null) => {
-  if (!value) return '';
-  let decoded = value;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const next = decodeURIComponent(decoded);
-      if (next === decoded) break;
-      decoded = next;
-    } catch {
-      break;
-    }
-  }
-  return decoded;
-};
+const decodeEquationAttribute = (value: string | null) => decodeLegacyEncodedFormula(value);
 
-const normalizeEquationFormula = (value: unknown) => decodeEquationAttribute(String(value || '')).trim();
+const normalizeEquationFormula = (value: unknown) => decodeLegacyEncodedFormula(value);
 
 const renderInlineEquation = (formula: string) => {
   const source = formula.trim() || DEFAULT_EQUATION;
@@ -4943,6 +4967,7 @@ const SLASH_COMMAND_METADATA: Record<string, Pick<SlashCommandItem, 'category' |
   '/dblb': { category: 'basic', description: '可勾选待办事项', aliases: ['todo', 'task', 'checkbox', '待办'] },
   '/yywz': { category: 'basic', description: '引用一段文字', aliases: ['quote', 'blockquote', '引用'] },
   '/dmk': { category: 'basic', description: '多行代码块', aliases: ['code', 'codeblock', '代码'] },
+  '/mermaid': { category: 'advanced', description: '把流程图、时序图或状态图渲染为可编辑图表', aliases: ['diagram', 'flowchart', '流程图', '图表'] },
   '/fgx': { category: 'basic', description: '页面分割线', aliases: ['divider', 'hr', '分割线'] },
   '/tp': { category: 'media', description: '上传本地图片', aliases: ['image', 'picture', 'upload image', '图片'] },
   '/tpurl': { category: 'media', description: '通过 URL 插入图片', aliases: ['image url', 'picture url', '图片链接'] },
@@ -4961,6 +4986,9 @@ const SLASH_COMMAND_METADATA: Record<string, Pick<SlashCommandItem, 'category' |
   '/table': { category: 'layout', description: '插入普通 3x3 表格', aliases: ['simple table', '表格', 'table'] },
   '/swdt': { category: 'advanced', description: '插入可编辑思维导图', aliases: ['mindmap', 'mind map', '导图'] },
   '/toggle': { category: 'advanced', description: '可折叠内容块', aliases: ['toggle list', '折叠', 'toggle'] },
+  '/toggle1': { category: 'advanced', description: '可折叠的一级章节标题', aliases: ['toggle h1', '折叠一级标题'] },
+  '/toggle2': { category: 'advanced', description: '可折叠的二级章节标题', aliases: ['toggle h2', '折叠二级标题'] },
+  '/toggle3': { category: 'advanced', description: '可折叠的三级章节标题', aliases: ['toggle h3', '折叠三级标题'] },
   '/callout': { category: 'advanced', description: '强调提示块', aliases: ['notice', 'hint', '提示', '标注'] },
   '/equation': { category: 'advanced', description: 'LaTeX 公式块', aliases: ['math', 'formula', '公式'] },
   '/sync': { category: 'advanced', description: '同一文档内同步内容块', aliases: ['synced', 'sync block', '同步块'] },
@@ -5053,6 +5081,18 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
         },
     },
     {
+      title: 'Mermaid 图表',
+      shortcut: '/mermaid',
+      icon: <Network className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        editor.chain().focus().deleteRange(range).insertContent({
+          type: 'codeBlock',
+          attrs: { language: 'mermaid' },
+          content: [{ type: 'text', text: 'flowchart TD\n  A[开始] --> B[下一步]' }],
+        }).run();
+      },
+    },
+    {
       title: '分隔线',
       shortcut: '/fgx',
       icon: <Minus className="w-3 h-3" />,
@@ -5123,31 +5163,47 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
         },
     },
     {
-      title: 'Toggle',
+      title: '折叠块',
       shortcut: '/toggle',
       icon: <ChevronRight className="w-3 h-3" />,
       command: ({ editor, range }: any) => {
         editor.chain().focus().deleteRange(range).insertContent({
           type: 'toggleBlock',
-          attrs: { title: 'Toggle', open: true },
+          attrs: { title: '折叠内容', open: true },
           content: [{ type: 'paragraph' }],
         }).run();
       },
     },
+    ...([1, 2, 3] as const).map((level) => ({
+      title: `折叠${['一', '二', '三'][level - 1]}级标题`,
+      shortcut: `/toggle${level}`,
+      icon: level === 1
+        ? <Heading1 className="w-3 h-3" />
+        : level === 2
+          ? <Heading2 className="w-3 h-3" />
+          : <Heading3 className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        editor.chain().focus().deleteRange(range).insertContent({
+          type: 'toggleBlock',
+          attrs: { title: '折叠标题', open: true, level },
+          content: [{ type: 'paragraph' }],
+        }).run();
+      },
+    })),
     {
-      title: 'Callout',
+      title: '提示块',
       shortcut: '/callout',
       icon: <AlertTriangle className="w-3 h-3" />,
       command: ({ editor, range }: any) => {
         editor.chain().focus().deleteRange(range).insertContent({
           type: 'calloutBlock',
           attrs: { icon: '!', tone: 'yellow' },
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Callout' }] }],
+          content: [{ type: 'paragraph', content: [{ type: 'text', text: '补充说明' }] }],
         }).run();
       },
     },
     {
-      title: 'Bookmark',
+      title: '网页书签',
       shortcut: '/bookmark',
       icon: <Bookmark className="w-3 h-3" />,
       command: async ({ editor, range }: any) => {
@@ -5164,7 +5220,7 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
       },
     },
     {
-      title: 'Embed',
+      title: '网页嵌入',
       shortcut: '/embed',
       icon: <Globe className="w-3 h-3" />,
       command: async ({ editor, range }: any) => {
@@ -5241,7 +5297,7 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
       },
     },
     {
-      title: 'File',
+      title: '上传文件',
       shortcut: '/file',
       icon: <Paperclip className="w-3 h-3" />,
       command: ({ editor, range }: any) => insertUploadedMedia({ editor, range }),
@@ -5253,7 +5309,7 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
       command: ({ editor, range }: any) => insertMediaFromUrl({ editor, range, title: '插入文件 URL' }),
     },
     {
-      title: 'Video',
+      title: '上传视频',
       shortcut: '/video',
       icon: <Video className="w-3 h-3" />,
       command: ({ editor, range }: any) => insertUploadedMedia({ editor, range, accept: 'video/*', forcedKind: 'video' }),
@@ -5265,7 +5321,7 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
       command: ({ editor, range }: any) => insertMediaFromUrl({ editor, range, forcedKind: 'video', title: '插入视频 URL' }),
     },
     {
-      title: 'Audio',
+      title: '上传音频',
       shortcut: '/audio',
       icon: <Music className="w-3 h-3" />,
       command: ({ editor, range }: any) => insertUploadedMedia({ editor, range, accept: 'audio/*', forcedKind: 'audio' }),

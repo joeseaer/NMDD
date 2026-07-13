@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import {
+  decodeEquationValue,
   isLikelyStandaloneMath,
   normalizeMathElements,
   protectMathInMarkdown,
@@ -35,5 +36,12 @@ describe('clipboard math normalization', () => {
     const protectedValue = protectMathInMarkdown('before \\(x^2 after');
     expect(protectedValue.tokens).toHaveLength(0);
     expect(protectedValue.text).toBe('before \\(x^2 after');
+  });
+
+  it('decodes legacy encoded attributes without changing raw percent sequences', () => {
+    expect(decodeEquationValue('%5Cfrac%7Ba%7D%7Bb%7D')).toBe('\\frac{a}{b}');
+    expect(decodeEquationValue('%255Cfrac%257Ba%257D%257Bb%257D')).toBe('\\frac{a}{b}');
+    expect(decodeEquationValue('\\text{产率 50\\%25}')).toBe('\\text{产率 50\\%25}');
+    expect(decodeEquationValue('\\text{https://example.com/a%20b}')).toBe('\\text{https://example.com/a%20b}');
   });
 });

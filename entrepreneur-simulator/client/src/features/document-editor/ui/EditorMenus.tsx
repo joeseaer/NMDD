@@ -1,5 +1,6 @@
 import React from 'react';
 import type { Editor } from '@tiptap/core';
+import { useEditorState } from '@tiptap/react';
 import { BubbleMenu, FloatingMenu } from '@tiptap/react/menus';
 import {
   AlignCenter,
@@ -80,8 +81,22 @@ export const EditorSelectionMenu = ({
 }: {
   editor: Editor;
   onSetLink: () => void;
-}) => (
-  <BubbleMenu
+}) => {
+  const formatState = useEditorState({
+    editor,
+    selector: ({ editor: current }) => ({
+      bold: current.isActive('bold'),
+      italic: current.isActive('italic'),
+      underline: current.isActive('underline'),
+      strike: current.isActive('strike'),
+      code: current.isActive('code'),
+      link: current.isActive('link'),
+      subscript: current.isActive('subscript'),
+      superscript: current.isActive('superscript'),
+    }),
+  });
+
+  return <BubbleMenu
     editor={editor}
     pluginKey="smartDocumentSelectionMenu"
     updateDelay={80}
@@ -91,29 +106,29 @@ export const EditorSelectionMenu = ({
     role="toolbar"
     aria-label="文字格式"
   >
-    <MenuButton label="粗体 (Ctrl+B)" active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()}>
+    <MenuButton label="粗体 (Ctrl+B)" active={formatState.bold} onClick={() => editor.chain().focus().toggleBold().run()}>
       <Bold />
     </MenuButton>
-    <MenuButton label="斜体 (Ctrl+I)" active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()}>
+    <MenuButton label="斜体 (Ctrl+I)" active={formatState.italic} onClick={() => editor.chain().focus().toggleItalic().run()}>
       <Italic />
     </MenuButton>
-    <MenuButton label="下划线 (Ctrl+U)" active={editor.isActive('underline')} onClick={() => editor.chain().focus().toggleUnderline().run()}>
+    <MenuButton label="下划线 (Ctrl+U)" active={formatState.underline} onClick={() => editor.chain().focus().toggleUnderline().run()}>
       <Underline />
     </MenuButton>
-    <MenuButton label="删除线" active={editor.isActive('strike')} onClick={() => editor.chain().focus().toggleStrike().run()}>
+    <MenuButton label="删除线" active={formatState.strike} onClick={() => editor.chain().focus().toggleStrike().run()}>
       <Strikethrough />
     </MenuButton>
-    <MenuButton label="行内代码" active={editor.isActive('code')} onClick={() => editor.chain().focus().toggleCode().run()}>
+    <MenuButton label="行内代码" active={formatState.code} onClick={() => editor.chain().focus().toggleCode().run()}>
       <Code />
     </MenuButton>
     <span className="smart-document-toolbar-separator" aria-hidden="true" />
-    <MenuButton label="添加或编辑链接" active={editor.isActive('link')} onClick={onSetLink}>
+    <MenuButton label="添加或编辑链接" active={formatState.link} onClick={onSetLink}>
       <Link />
     </MenuButton>
-    <MenuButton label="下标" active={editor.isActive('subscript')} onClick={() => editor.chain().focus().toggleSubscript().run()}>
+    <MenuButton label="下标" active={formatState.subscript} onClick={() => editor.chain().focus().toggleSubscript().run()}>
       <Subscript />
     </MenuButton>
-    <MenuButton label="上标" active={editor.isActive('superscript')} onClick={() => editor.chain().focus().toggleSuperscript().run()}>
+    <MenuButton label="上标" active={formatState.superscript} onClick={() => editor.chain().focus().toggleSuperscript().run()}>
       <Superscript />
     </MenuButton>
     <details className="smart-document-palette-menu">
@@ -161,8 +176,8 @@ export const EditorSelectionMenu = ({
     <MenuButton label="清除文字格式" onClick={() => editor.chain().focus().unsetAllMarks().run()}>
       <RemoveFormatting />
     </MenuButton>
-  </BubbleMenu>
-);
+  </BubbleMenu>;
+};
 
 export const EditorEmptyBlockMenu = ({ editor }: { editor: Editor }) => (
   <FloatingMenu
@@ -189,20 +204,35 @@ export const EditorEmptyBlockMenu = ({ editor }: { editor: Editor }) => (
 );
 
 export const EditorTableMenu = ({ editor }: { editor: Editor }) => {
-  if (!editor.isActive('table')) return null;
+  const tableState = useEditorState({
+    editor,
+    selector: ({ editor: current }) => ({
+      active: current.isActive('table'),
+      addColumnBefore: current.can().addColumnBefore(),
+      addColumnAfter: current.can().addColumnAfter(),
+      addRowBefore: current.can().addRowBefore(),
+      addRowAfter: current.can().addRowAfter(),
+      mergeCells: current.can().mergeCells(),
+      splitCell: current.can().splitCell(),
+      deleteColumn: current.can().deleteColumn(),
+      deleteRow: current.can().deleteRow(),
+      deleteTable: current.can().deleteTable(),
+    }),
+  });
+  if (!tableState.active) return null;
 
   return (
     <div className="smart-document-context-menu smart-document-table-menu" role="toolbar" aria-label="表格操作">
-      <MenuButton label="左侧添加列" disabled={!editor.can().addColumnBefore()} onClick={() => editor.chain().focus().addColumnBefore().run()}><Columns3 /></MenuButton>
-      <MenuButton label="右侧添加列" disabled={!editor.can().addColumnAfter()} onClick={() => editor.chain().focus().addColumnAfter().run()}><Columns3 /></MenuButton>
-      <MenuButton label="上方添加行" disabled={!editor.can().addRowBefore()} onClick={() => editor.chain().focus().addRowBefore().run()}><Table /></MenuButton>
-      <MenuButton label="下方添加行" disabled={!editor.can().addRowAfter()} onClick={() => editor.chain().focus().addRowAfter().run()}><Table /></MenuButton>
-      <MenuButton label="合并单元格" disabled={!editor.can().mergeCells()} onClick={() => editor.chain().focus().mergeCells().run()}>合</MenuButton>
-      <MenuButton label="拆分单元格" disabled={!editor.can().splitCell()} onClick={() => editor.chain().focus().splitCell().run()}>拆</MenuButton>
+      <MenuButton label="左侧添加列" disabled={!tableState.addColumnBefore} onClick={() => editor.chain().focus().addColumnBefore().run()}><Columns3 /></MenuButton>
+      <MenuButton label="右侧添加列" disabled={!tableState.addColumnAfter} onClick={() => editor.chain().focus().addColumnAfter().run()}><Columns3 /></MenuButton>
+      <MenuButton label="上方添加行" disabled={!tableState.addRowBefore} onClick={() => editor.chain().focus().addRowBefore().run()}><Table /></MenuButton>
+      <MenuButton label="下方添加行" disabled={!tableState.addRowAfter} onClick={() => editor.chain().focus().addRowAfter().run()}><Table /></MenuButton>
+      <MenuButton label="合并单元格" disabled={!tableState.mergeCells} onClick={() => editor.chain().focus().mergeCells().run()}>合</MenuButton>
+      <MenuButton label="拆分单元格" disabled={!tableState.splitCell} onClick={() => editor.chain().focus().splitCell().run()}>拆</MenuButton>
       <span className="smart-document-toolbar-separator" aria-hidden="true" />
-      <MenuButton label="删除当前列" disabled={!editor.can().deleteColumn()} onClick={() => editor.chain().focus().deleteColumn().run()}><Trash2 /></MenuButton>
-      <MenuButton label="删除当前行" disabled={!editor.can().deleteRow()} onClick={() => editor.chain().focus().deleteRow().run()}><Trash2 /></MenuButton>
-      <MenuButton label="删除表格" disabled={!editor.can().deleteTable()} onClick={() => editor.chain().focus().deleteTable().run()}><Trash2 /></MenuButton>
+      <MenuButton label="删除当前列" disabled={!tableState.deleteColumn} onClick={() => editor.chain().focus().deleteColumn().run()}><Trash2 /></MenuButton>
+      <MenuButton label="删除当前行" disabled={!tableState.deleteRow} onClick={() => editor.chain().focus().deleteRow().run()}><Trash2 /></MenuButton>
+      <MenuButton label="删除表格" disabled={!tableState.deleteTable} onClick={() => editor.chain().focus().deleteTable().run()}><Trash2 /></MenuButton>
     </div>
   );
 };
@@ -219,17 +249,34 @@ export const EditorCompactToolbar = ({
   onAddImage: () => void;
   onAddImageUrl: () => void;
 }) => {
-  const blockValue = editor.isActive('heading', { level: 1 })
+  const toolbarState = useEditorState({
+    editor,
+    selector: ({ editor: current }) => ({
+      blockValue: current.isActive('heading', { level: 1 })
     ? 'h1'
-    : editor.isActive('heading', { level: 2 })
+    : current.isActive('heading', { level: 2 })
       ? 'h2'
-      : editor.isActive('heading', { level: 3 })
+      : current.isActive('heading', { level: 3 })
         ? 'h3'
-        : editor.isActive('codeBlock')
+        : current.isActive('codeBlock')
           ? 'code'
-          : editor.isActive('blockquote')
+          : current.isActive('blockquote')
             ? 'quote'
-            : 'paragraph';
+            : 'paragraph',
+      canUndo: current.can().undo(),
+      canRedo: current.can().redo(),
+      bold: current.isActive('bold'),
+      italic: current.isActive('italic'),
+      underline: current.isActive('underline'),
+      bulletList: current.isActive('bulletList'),
+      orderedList: current.isActive('orderedList'),
+      taskList: current.isActive('taskList'),
+      alignLeft: current.isActive({ textAlign: 'left' }),
+      alignCenter: current.isActive({ textAlign: 'center' }),
+      alignRight: current.isActive({ textAlign: 'right' }),
+    }),
+  });
+  const blockValue = toolbarState.blockValue;
 
   const changeBlock = (value: string) => {
     const chain = editor.chain().focus();
@@ -245,8 +292,8 @@ export const EditorCompactToolbar = ({
     <div className="smart-document-toolbar" role="toolbar" aria-label="文档工具栏">
       <div className="smart-document-toolbar-group">
         <MenuButton label={outlineOpen ? '隐藏大纲' : '显示大纲'} active={outlineOpen} onClick={onToggleOutline}><PanelLeft /></MenuButton>
-        <MenuButton label="撤销 (Ctrl+Z)" disabled={!editor.can().undo()} onClick={() => editor.chain().focus().undo().run()}><Undo2 /></MenuButton>
-        <MenuButton label="重做 (Ctrl+Shift+Z)" disabled={!editor.can().redo()} onClick={() => editor.chain().focus().redo().run()}><Redo2 /></MenuButton>
+        <MenuButton label="撤销 (Ctrl+Z)" disabled={!toolbarState.canUndo} onClick={() => editor.chain().focus().undo().run()}><Undo2 /></MenuButton>
+        <MenuButton label="重做 (Ctrl+Shift+Z)" disabled={!toolbarState.canRedo} onClick={() => editor.chain().focus().redo().run()}><Redo2 /></MenuButton>
       </div>
       <span className="smart-document-toolbar-separator" aria-hidden="true" />
       <label className="smart-document-block-select-label">
@@ -261,21 +308,21 @@ export const EditorCompactToolbar = ({
         </select>
       </label>
       <div className="smart-document-toolbar-group smart-document-toolbar-inline-actions">
-        <MenuButton label="粗体" active={editor.isActive('bold')} onClick={() => editor.chain().focus().toggleBold().run()}><Bold /></MenuButton>
-        <MenuButton label="斜体" active={editor.isActive('italic')} onClick={() => editor.chain().focus().toggleItalic().run()}><Italic /></MenuButton>
-        <MenuButton label="下划线" active={editor.isActive('underline')} onClick={() => editor.chain().focus().toggleUnderline().run()}><Underline /></MenuButton>
+        <MenuButton label="粗体" active={toolbarState.bold} onClick={() => editor.chain().focus().toggleBold().run()}><Bold /></MenuButton>
+        <MenuButton label="斜体" active={toolbarState.italic} onClick={() => editor.chain().focus().toggleItalic().run()}><Italic /></MenuButton>
+        <MenuButton label="下划线" active={toolbarState.underline} onClick={() => editor.chain().focus().toggleUnderline().run()}><Underline /></MenuButton>
       </div>
       <span className="smart-document-toolbar-separator" aria-hidden="true" />
       <div className="smart-document-toolbar-group">
-        <MenuButton label="项目列表" active={editor.isActive('bulletList')} onClick={() => editor.chain().focus().toggleBulletList().run()}><List /></MenuButton>
-        <MenuButton label="编号列表" active={editor.isActive('orderedList')} onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered /></MenuButton>
-        <MenuButton label="待办列表" active={editor.isActive('taskList')} onClick={() => editor.chain().focus().toggleTaskList().run()}><CheckSquare /></MenuButton>
+        <MenuButton label="项目列表" active={toolbarState.bulletList} onClick={() => editor.chain().focus().toggleBulletList().run()}><List /></MenuButton>
+        <MenuButton label="编号列表" active={toolbarState.orderedList} onClick={() => editor.chain().focus().toggleOrderedList().run()}><ListOrdered /></MenuButton>
+        <MenuButton label="待办列表" active={toolbarState.taskList} onClick={() => editor.chain().focus().toggleTaskList().run()}><CheckSquare /></MenuButton>
       </div>
       <span className="smart-document-toolbar-spacer" />
       <div className="smart-document-toolbar-group">
-        <MenuButton label="左对齐" active={editor.isActive({ textAlign: 'left' })} onClick={() => editor.chain().focus().setTextAlign('left').run()}><AlignLeft /></MenuButton>
-        <MenuButton label="居中" active={editor.isActive({ textAlign: 'center' })} onClick={() => editor.chain().focus().setTextAlign('center').run()}><AlignCenter /></MenuButton>
-        <MenuButton label="右对齐" active={editor.isActive({ textAlign: 'right' })} onClick={() => editor.chain().focus().setTextAlign('right').run()}><AlignRight /></MenuButton>
+        <MenuButton label="左对齐" active={toolbarState.alignLeft} onClick={() => editor.chain().focus().setTextAlign('left').run()}><AlignLeft /></MenuButton>
+        <MenuButton label="居中" active={toolbarState.alignCenter} onClick={() => editor.chain().focus().setTextAlign('center').run()}><AlignCenter /></MenuButton>
+        <MenuButton label="右对齐" active={toolbarState.alignRight} onClick={() => editor.chain().focus().setTextAlign('right').run()}><AlignRight /></MenuButton>
         <MenuButton label="插入表格" onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table /></MenuButton>
         <MenuButton label="上传图片" onClick={onAddImage}><Image /></MenuButton>
         <MenuButton label="通过网址插入图片" onClick={onAddImageUrl}><Link /></MenuButton>

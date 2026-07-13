@@ -2,6 +2,8 @@
 .smart-document-shell {
   position: relative;
   isolation: isolate;
+  container-type: inline-size;
+  container-name: smart-document-shell;
   display: flex;
   width: 100%;
   min-width: 0;
@@ -64,6 +66,122 @@
   color: var(--smart-doc-warning);
 }
 
+.smart-document-find-panel {
+  position: absolute;
+  z-index: 65;
+  top: 0.65rem;
+  right: 0.85rem;
+  width: min(31rem, calc(100% - 1.5rem));
+  overflow: hidden;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: var(--smart-doc-radius-lg);
+  background: color-mix(in srgb, var(--smart-doc-surface) 97%, transparent);
+  box-shadow: var(--smart-doc-shadow-menu);
+  backdrop-filter: blur(14px);
+}
+
+.smart-document-find-panel__row {
+  display: flex;
+  min-height: 2.65rem;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.35rem 0.45rem 0.35rem 0.75rem;
+}
+
+.smart-document-find-panel__replace-row {
+  border-top: 1px solid var(--smart-doc-border);
+}
+
+.smart-document-find-panel__row > svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  color: var(--smart-doc-text-muted);
+}
+
+.smart-document-find-panel input {
+  min-width: 0;
+  height: 2rem;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--smart-doc-text);
+  font-size: 0.8125rem;
+  outline: none;
+}
+
+.smart-document-find-panel input::placeholder {
+  color: var(--smart-doc-text-faint);
+}
+
+.smart-document-find-panel button {
+  display: inline-flex;
+  min-width: 2rem;
+  min-height: 2rem;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--smart-doc-radius-sm);
+  color: var(--smart-doc-text-muted);
+  transition: background var(--smart-doc-motion-fast) var(--smart-doc-ease), color var(--smart-doc-motion-fast) var(--smart-doc-ease);
+}
+
+.smart-document-find-panel button:hover:not(:disabled),
+.smart-document-find-panel button.is-active {
+  background: var(--smart-doc-surface-hover);
+  color: var(--smart-doc-text);
+}
+
+.smart-document-find-panel button:disabled {
+  opacity: 0.35;
+}
+
+.smart-document-find-panel button svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.smart-document-find-panel__count {
+  min-width: 3.5rem;
+  flex: none;
+  color: var(--smart-doc-text-muted);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.smart-document-find-panel .smart-document-find-panel__text-button {
+  min-width: auto;
+  padding-inline: 0.55rem;
+  color: var(--smart-doc-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.smart-document-find-match {
+  border-radius: 0.12em;
+  background: color-mix(in srgb, var(--smart-doc-warning) 32%, transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--smart-doc-warning) 58%, transparent);
+}
+
+.smart-document-find-match--active {
+  background: color-mix(in srgb, var(--smart-doc-accent) 28%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--smart-doc-accent) 42%, transparent);
+}
+
+@container smart-document-shell (max-width: 34rem) {
+  .smart-document-find-panel {
+    top: 0.4rem;
+    right: 0.4rem;
+    width: calc(100% - 0.8rem);
+  }
+
+  .smart-document-find-panel__count {
+    min-width: 2.65rem;
+  }
+}
+
 .smart-document-content-rail {
   position: relative;
   width: 100%;
@@ -77,6 +195,32 @@
   z-index: 80;
   inset: 0;
   height: 100dvh;
+}
+
+.smart-document-shell[data-width="wide"] {
+  --smart-doc-body-track: var(--smart-doc-wide-track);
+}
+
+.smart-document-shell[data-width="full"] {
+  --smart-doc-body-track: min(100%, 90rem);
+  --smart-doc-gutter: clamp(1rem, 3vw, 3rem);
+}
+
+.smart-document-shell[data-font="serif"] {
+  --smart-doc-content-font: var(--smart-doc-font-serif);
+}
+
+.smart-document-shell[data-font="mono"] {
+  --smart-doc-content-font: var(--smart-doc-font-mono);
+}
+
+.smart-document-shell[data-small-text="true"] {
+  --smart-doc-body-size: 0.9rem;
+  --smart-doc-body-leading: 1.66;
+}
+
+.smart-document-shell[data-font] :is(.smart-document-page-header__title, .smart-document-page-header__title-input) {
+  font-family: var(--smart-doc-content-font);
 }
 
 .smart-document-shell__topbar {
@@ -161,7 +305,7 @@
   display: grid;
   width: 100%;
   height: 100%;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.75rem;
   padding-inline: clamp(0.625rem, 2vw, 1rem);
@@ -177,10 +321,14 @@
 
 .smart-document-topbar__actions {
   justify-content: flex-end;
+  flex-wrap: nowrap;
+  white-space: nowrap;
 }
 
 .smart-document-topbar__center {
-  max-width: min(34rem, 42vw);
+  width: 100%;
+  max-width: 34rem;
+  justify-self: center;
   overflow: hidden;
   color: var(--smart-doc-text-secondary);
   font-size: 0.8125rem;
@@ -188,6 +336,264 @@
   text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.smart-document-breadcrumbs {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 0.25rem;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.smart-document-breadcrumbs > span,
+.smart-document-breadcrumbs > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.smart-document-breadcrumbs > strong {
+  color: var(--smart-doc-text-secondary);
+  font-weight: 620;
+}
+
+.smart-document-breadcrumbs > svg {
+  width: 0.75rem;
+  height: 0.75rem;
+  flex: none;
+  color: var(--smart-doc-text-faint);
+}
+
+.smart-document-backlink {
+  display: inline-flex;
+  max-width: 16rem;
+  min-height: 1.75rem;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: 999px;
+  padding-inline: 0.55rem;
+  background: var(--smart-doc-surface-muted);
+  color: var(--smart-doc-text-secondary);
+  font-size: 0.75rem;
+  text-decoration: none;
+}
+
+.smart-document-backlink:hover {
+  border-color: var(--smart-doc-border-strong);
+  background: var(--smart-doc-surface-hover);
+  color: var(--smart-doc-text);
+}
+
+.smart-document-backlink svg {
+  width: 0.8rem;
+  height: 0.8rem;
+  flex: none;
+}
+
+.smart-document-backlink span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.smart-document-property-empty {
+  color: var(--smart-doc-text-faint);
+  font-size: 0.75rem;
+}
+
+.smart-document-display-menu-anchor {
+  position: relative;
+  flex: none;
+}
+
+.smart-document-display-menu-backdrop {
+  position: fixed;
+  z-index: 70;
+  inset: 0;
+  cursor: default;
+}
+
+.smart-document-display-menu {
+  position: absolute;
+  z-index: 75;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  display: grid;
+  width: min(19rem, calc(100vw - 1rem));
+  gap: 0.9rem;
+  padding: 0.9rem;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: var(--smart-doc-radius-lg);
+  background: var(--smart-doc-surface-raised);
+  box-shadow: var(--smart-doc-shadow-menu);
+  color: var(--smart-doc-text);
+}
+
+.smart-document-display-menu fieldset {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+}
+
+.smart-document-display-menu legend {
+  margin-bottom: 0.4rem;
+  color: var(--smart-doc-text-muted);
+  font-size: 0.6875rem;
+  font-weight: 650;
+}
+
+.smart-document-display-menu__segments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+  padding: 0.2rem;
+  border-radius: var(--smart-doc-radius-sm);
+  background: var(--smart-doc-surface-muted);
+}
+
+.smart-document-display-menu__segments button {
+  min-height: 2rem;
+  border-radius: calc(var(--smart-doc-radius-sm) - 2px);
+  color: var(--smart-doc-text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.smart-document-display-menu__segments button:hover,
+.smart-document-display-menu__segments button[data-active="true"] {
+  background: var(--smart-doc-surface);
+  color: var(--smart-doc-text);
+  box-shadow: var(--smart-doc-shadow-node);
+}
+
+.smart-document-display-menu__check-row {
+  display: flex;
+  min-height: 2.2rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-radius: var(--smart-doc-radius-sm);
+  padding: 0.35rem 0.45rem;
+  color: var(--smart-doc-text-secondary);
+  font-size: 0.8125rem;
+  text-align: left;
+}
+
+.smart-document-display-menu__check-row:hover {
+  background: var(--smart-doc-surface-hover);
+}
+
+.smart-document-display-menu__check-row svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.smart-document-display-menu__check {
+  display: inline-grid;
+  width: 1.1rem;
+  height: 1.1rem;
+  flex: none;
+  place-items: center;
+  border: 1px solid var(--smart-doc-border-strong);
+  border-radius: 4px;
+  color: var(--smart-doc-accent);
+}
+
+.smart-document-export-anchor {
+  position: relative;
+  flex: none;
+}
+
+.smart-document-export-backdrop {
+  position: fixed;
+  z-index: 70;
+  inset: 0;
+  cursor: default;
+}
+
+.smart-document-export-menu {
+  position: absolute;
+  z-index: 75;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  width: min(20rem, calc(100vw - 1rem));
+  padding: 0.35rem;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: var(--smart-doc-radius-lg);
+  background: var(--smart-doc-surface-raised);
+  box-shadow: var(--smart-doc-shadow-menu);
+}
+
+.smart-document-export-menu > button {
+  display: flex;
+  width: 100%;
+  align-items: flex-start;
+  gap: 0.7rem;
+  border-radius: var(--smart-doc-radius-sm);
+  padding: 0.65rem 0.7rem;
+  color: var(--smart-doc-text-secondary);
+  text-align: left;
+}
+
+.smart-document-export-menu > button:hover {
+  background: var(--smart-doc-surface-hover);
+  color: var(--smart-doc-text);
+}
+
+.smart-document-export-menu > button > svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  margin-top: 0.1rem;
+  color: var(--smart-doc-text-muted);
+}
+
+.smart-document-export-menu > button > span {
+  display: grid;
+  min-width: 0;
+  gap: 0.15rem;
+}
+
+.smart-document-export-menu strong {
+  font-size: 0.8125rem;
+  font-weight: 650;
+}
+
+.smart-document-export-menu small {
+  color: var(--smart-doc-text-muted);
+  font-size: 0.6875rem;
+  line-height: 1.45;
+}
+
+@container smart-document-shell (max-width: 52rem) {
+  .smart-document-topbar {
+    gap: 0.35rem;
+  }
+
+  .smart-document-topbar__center,
+  .research-promote-button__label {
+    display: none;
+  }
+}
+
+@container smart-document-shell (max-width: 34rem) {
+  .smart-document-topbar {
+    padding-inline: 0.45rem;
+  }
+
+  .smart-document-save-state > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
 }
 
 .smart-document-save-state {
@@ -820,6 +1226,10 @@
   background: color-mix(in srgb, var(--smart-doc-surface) 96%, transparent);
   backdrop-filter: blur(12px);
   scrollbar-width: none;
+}
+
+.smart-document-context-toolbar-row:empty {
+  display: none;
 }
 
 .smart-document-context-toolbar-row::-webkit-scrollbar {

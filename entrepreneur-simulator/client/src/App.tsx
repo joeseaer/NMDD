@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Routes, Route, Link, Navigate, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Brain, MessageSquare, User, Settings, LayoutDashboard, Users, FileText, Menu, X, Notebook, ChevronLeft, ChevronRight, Calendar, Microscope } from 'lucide-react'
 
 // Pages
@@ -17,6 +17,7 @@ import ResearchWorkspace from './pages/ResearchWorkspace'
 import EditorLab from './pages/EditorLab'
 import FloatingAssistant from './components/FloatingAssistant'
 import { CURRENT_USER_ID } from './config/currentUser'
+import { GuardedLink } from './features/document-editor/navigation/DocumentNavigationGuard'
 
 function App() {
   const location = useLocation();
@@ -183,9 +184,9 @@ function App() {
               <span className="font-bold">牛马大队无限公司</span>
             </div>
           </div>
-          <Link to="/settings" className="p-2 rounded-md text-gray-400 hover:text-gray-500">
+          <GuardedLink to="/settings" className="p-2 rounded-md text-gray-400 hover:text-gray-500">
             <Settings size={20} />
-          </Link>
+          </GuardedLink>
         </header>
 
         <div className="flex-1 overflow-auto p-2 sm:p-4 lg:p-8 w-full">
@@ -216,7 +217,7 @@ function App() {
 
 function SidebarLink({ to, icon, label, active = false, collapsed = false }: { to: string; icon: React.ReactNode; label: string; active?: boolean; collapsed?: boolean }) {
   return (
-    <Link
+    <GuardedLink
       to={to}
       title={collapsed ? label : undefined}
       className={`
@@ -231,7 +232,7 @@ function SidebarLink({ to, icon, label, active = false, collapsed = false }: { t
         {icon}
       </span>
       {collapsed ? <span className="sr-only">{label}</span> : label}
-    </Link>
+    </GuardedLink>
   )
 }
 

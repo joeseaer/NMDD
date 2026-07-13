@@ -1,7 +1,16 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { collectJsonBlocks } = require('../services/documentContextService');
+const { collectJsonBlocks, compactText } = require('../services/documentContextService');
+
+test('document context truncation never splits a grapheme cluster', () => {
+  assert.equal(compactText('甲乙👩‍🔬丙丁', 4), '甲乙👩‍🔬...');
+});
+
+test('document context does not truncate text that only exceeds the UTF-16 code-unit limit', () => {
+  const emojiText = '😀'.repeat(100);
+  assert.equal(compactText(emojiText, 160), emojiText);
+});
 
 test('AI document context keeps inline equations and text carrying basic marks', () => {
   const blocks = collectJsonBlocks({

@@ -177,8 +177,10 @@ const renderNode = (node: DocumentNodeJson, context: MarkdownContext): string =>
   }
   if (node.type === 'toggleBlock') {
     const title = String(node.attrs?.title || 'Toggle');
+    const level = [1, 2, 3].includes(Number(node.attrs?.level)) ? Number(node.attrs?.level) : 0;
     const body = nodeChildren(node).map(child => renderNode(child, context)).join('\n\n');
-    return `▶ ${escapeMarkdownText(title)}${body ? `\n\n${body}` : ''}`;
+    const headingPrefix = level ? `${'#'.repeat(level)} ` : '';
+    return `${headingPrefix}▶ ${escapeMarkdownText(title)}${body ? `\n\n${body}` : ''}`;
   }
   if (node.type === 'bookmarkBlock' || node.type === 'embedBlock' || node.type === 'mediaBlock') {
     const url = destination(node.attrs?.url);
@@ -189,6 +191,10 @@ const renderNode = (node: DocumentNodeJson, context: MarkdownContext): string =>
   if (node.type === 'pageLinkBlock') {
     const title = escapeMarkdownText(String(node.attrs?.title || 'Page'));
     const pageId = String(node.attrs?.pageId || '');
+    const category = String(node.attrs?.category || 'note');
+    if (pageId && ['document', 'idea', 'meeting'].includes(category)) {
+      return `[${title}](/research?type=${encodeURIComponent(category)}&doc=${encodeURIComponent(pageId)})`;
+    }
     const view = node.attrs?.category === 'note' || !node.attrs?.category ? 'notes' : 'sop';
     return pageId ? `[${title}](/notes?view=${view}&doc=${encodeURIComponent(pageId)})` : title;
   }

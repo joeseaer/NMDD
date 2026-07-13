@@ -2,8 +2,10 @@ export {
   DocumentTopbar,
   DocumentWorkspaceShell,
   type DocumentMode,
+  type DocumentFont,
   type DocumentSaveState,
   type DocumentTheme,
+  type DocumentWidth,
   type DocumentTopbarProps,
   type DocumentWorkspaceShellProps,
 } from './DocumentWorkspaceShell';

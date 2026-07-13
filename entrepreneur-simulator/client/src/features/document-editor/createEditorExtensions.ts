@@ -25,6 +25,7 @@ export type SmartDocumentTableExtensions = {
 
 export type CreateSmartDocumentExtensionsOptions = {
   placeholder?: string;
+  codeBlock?: AnyExtension | null;
   image?: AnyExtension | null;
   table?: SmartDocumentTableExtensions | null;
   before?: Extensions;
@@ -40,6 +41,7 @@ export type CreateSmartDocumentExtensionsOptions = {
  */
 export const createSmartDocumentExtensions = ({
   placeholder = '开始输入内容… 输入 / 唤起命令菜单',
+  codeBlock,
   image = null,
   table = null,
   before = [],
@@ -82,7 +84,7 @@ export const createSmartDocumentExtensions = ({
   TextAlign.configure({ types: ['heading', 'paragraph'] }),
   Subscript,
   Superscript,
-  CodeBlockLowlight.configure({ lowlight }),
+  ...(codeBlock === null ? [] : [codeBlock || CodeBlockLowlight.configure({ lowlight })]),
   ...(image ? [image] : []),
   ...custom,
   ...(table ? [table.table, table.row, table.header, table.cell] : []),
