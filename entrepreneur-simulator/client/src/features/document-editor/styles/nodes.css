@@ -7,10 +7,11 @@
   .tableWrapper,
   .smart-doc-database,
   .smart-doc-column-list,
+  .smart-doc-mermaid,
   [data-type="mind-map"]
 ) {
   position: relative;
-  width: min(var(--smart-doc-wide-track), calc(100vw - var(--smart-doc-gutter) - var(--smart-doc-gutter)));
+  width: min(var(--smart-doc-node-track), calc(100vw - var(--smart-doc-gutter) - var(--smart-doc-gutter)));
   max-width: calc(100vw - var(--smart-doc-gutter) - var(--smart-doc-gutter));
   margin-left: 50% !important;
   transform: translateX(-50%);
@@ -21,9 +22,10 @@
     .tableWrapper,
     .smart-doc-database,
     .smart-doc-column-list,
+    .smart-doc-mermaid,
     [data-type="mind-map"]
   ) {
-    width: min(var(--smart-doc-wide-track), 100cqw);
+    width: min(var(--smart-doc-node-track), 100cqw);
     max-width: 100cqw;
   }
 }
@@ -453,6 +455,7 @@
   .tableWrapper,
   .smart-doc-database,
   .smart-doc-column-list,
+  .smart-doc-mermaid,
   [data-type="mind-map"]
 ) {
   width: 100%;
@@ -580,6 +583,7 @@
     .tableWrapper,
     .smart-doc-database,
     .smart-doc-column-list,
+    .smart-doc-mermaid,
     [data-type="mind-map"]
   ) {
     width: 100%;
@@ -690,23 +694,98 @@
 
 :is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-preview {
   min-height: 13rem;
-  padding: clamp(1rem, 3vw, 2rem);
+  padding: 0;
   background: color-mix(in srgb, var(--smart-doc-surface) 94%, var(--smart-doc-accent-soft));
 }
 
-:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-svg {
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-renderer {
   display: grid;
-  min-height: 10rem;
-  place-items: center;
-  overflow: auto;
+  min-width: 0;
 }
 
-:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-svg svg {
-  display: block;
-  width: auto;
-  max-width: 100%;
-  height: auto;
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.2rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--smart-doc-border) 78%, transparent);
+  background: color-mix(in srgb, var(--smart-doc-surface) 93%, transparent);
+  color: var(--smart-doc-text-muted);
+  font-family: var(--smart-doc-font-sans);
+  font-size: 0.7rem;
+  backdrop-filter: blur(10px);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls > span {
+  min-width: 2.7rem;
+  color: var(--smart-doc-text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls button {
+  display: inline-flex;
+  min-width: 1.9rem;
+  min-height: 1.9rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.4rem;
+  border: 0;
+  border-radius: var(--smart-doc-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  transition: background var(--smart-doc-motion-fast) var(--smart-doc-ease), color var(--smart-doc-motion-fast) var(--smart-doc-ease);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls button:hover:not(:disabled),
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls button[data-active="true"] {
+  background: var(--smart-doc-surface-active);
+  color: var(--smart-doc-text);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls button:disabled {
+  opacity: 0.35;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls button svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-svg {
+  min-height: 10rem;
   max-height: min(70vh, 48rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: clamp(0.9rem, 3vw, 1.75rem);
+}
+
+@supports (width: 1cqw) {
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-svg {
+    padding: clamp(0.9rem, 2.5cqw, 1.75rem);
+  }
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-stage {
+  min-width: 0;
+  margin-inline: auto;
+  transition: width var(--smart-doc-motion-normal) var(--smart-doc-ease);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-stage svg {
+  display: block;
+  width: 100% !important;
+  max-width: none !important;
+  height: auto !important;
+  max-height: none !important;
 }
 
 :is(.smart-document-content, .smart-document-shell .ProseMirror) :is(.smart-doc-mermaid-state, .smart-doc-mermaid-error) {
@@ -752,4 +831,25 @@
   overflow: auto;
   color: var(--smart-doc-text-secondary);
   overflow-wrap: anywhere;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-error button {
+  display: inline-flex;
+  width: max-content;
+  min-height: 1.9rem;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--smart-doc-danger) 26%, transparent);
+  border-radius: var(--smart-doc-radius-sm);
+  background: color-mix(in srgb, var(--smart-doc-surface) 82%, transparent);
+  color: inherit;
+  font: inherit;
+  font-weight: 620;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-error button svg {
+  width: 0.85rem;
+  height: 0.85rem;
 }

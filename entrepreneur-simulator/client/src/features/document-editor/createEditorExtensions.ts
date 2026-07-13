@@ -13,6 +13,8 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { TextStyle } from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import { common, createLowlight } from 'lowlight';
+import { DocumentLinkInteractionExtension } from './DocumentLinkInteractionExtension';
+import { isSafeLinkUrl } from './clipboard/urlPolicy';
 
 const lowlight = createLowlight(common);
 
@@ -67,7 +69,14 @@ export const createSmartDocumentExtensions = ({
     autolink: true,
     linkOnPaste: true,
     defaultProtocol: 'https',
+    isAllowedUri: url => isSafeLinkUrl(url),
+    shouldAutoLink: url => isSafeLinkUrl(url),
+    HTMLAttributes: {
+      target: '_blank',
+      rel: 'noopener noreferrer',
+    },
   }),
+  DocumentLinkInteractionExtension,
   Heading.configure({ levels: [1, 2, 3, 4, 5, 6] }),
   TaskList,
   TaskItem.configure({

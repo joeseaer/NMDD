@@ -283,6 +283,7 @@ export default function ResearchWorkspace() {
   });
   const activeEditorFlushRef = React.useRef<(() => Promise<void>) | null>(null);
   const urlSyncTargetRef = React.useRef<string | undefined>(undefined);
+  const documentSwitchRequestRef = React.useRef(0);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -524,7 +525,15 @@ export default function ResearchWorkspace() {
   };
 
   const handleOpenItem = async (item: ResearchItem) => {
-    if (!await flushBeforeNavigation()) return;
+    if (selectedItemId === item.id) {
+      setShowMobileSidebar(false);
+      return;
+    }
+
+    const requestId = ++documentSwitchRequestRef.current;
+    if (!await flushEditorBeforeDocumentSwitch()) return;
+    if (documentSwitchRequestRef.current !== requestId) return;
+
     urlSyncTargetRef.current = item.id;
     setSelectedItemId(item.id);
     setShowMobileSidebar(false);
@@ -538,13 +547,19 @@ export default function ResearchWorkspace() {
     setSearchParams({ type });
   };
 
-  async function flushBeforeNavigation() {
+  async function flushEditorBeforeDocumentSwitch() {
     try {
       await activeEditorFlushRef.current?.();
     } catch (error) {
       alert(error instanceof Error ? error.message : '附件仍在上传，请稍后再离开文档。');
       return false;
     }
+
+    return true;
+  }
+
+  async function flushBeforeNavigation() {
+    if (!await flushEditorBeforeDocumentSwitch()) return false;
 
     const result = await saveQueue.flush();
     if (result.ok) return true;
@@ -821,11 +836,30 @@ function ResearchDetail({
 }) {
   const [showPromote, setShowPromote] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [fullscreenEntryWidth, setFullscreenEntryWidth] = useState<number | null>(null);
+  const workspaceShellRef = React.useRef<HTMLDivElement | null>(null);
   const exportValueRef = React.useRef<SmartDocumentValueGetter | null>(null);
   const {
     mode, setMode, theme, setTheme,
     width, setWidth, font, setFont, smallText, setSmallText,
   } = useDocumentViewPreferences();
+  const handleFullscreenChange = useCallback((nextFullscreen: boolean) => {
+    if (nextFullscreen) {
+      const currentWidth = workspaceShellRef.current
+        ?.querySelector<HTMLElement>('.smart-document-shell__page')
+        ?.getBoundingClientRect().width || 0;
+      setFullscreenEntryWidth(currentWidth > 0 ? Math.round(currentWidth) : null);
+    } else {
+      setFullscreenEntryWidth(null);
+    }
+    setIsFullscreen(nextFullscreen);
+  }, []);
+  const handleWidthChange = useCallback((nextWidth: typeof width) => {
+    setWidth(nextWidth);
+    // Entering fullscreen preserves the existing page geometry. A deliberate
+    // width choice made while fullscreen unlocks that geometry immediately.
+    if (isFullscreen) setFullscreenEntryWidth(null);
+  }, [isFullscreen, setWidth]);
   const handleBackFromEditor = async () => {
     await onBack();
   };
@@ -851,7 +885,7 @@ function ResearchDetail({
     if (!isFullscreen) return;
     const previousOverflow = document.body.style.overflow;
     const handleEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsFullscreen(false);
+      if (event.key === 'Escape') handleFullscreenChange(false);
     };
     document.body.style.overflow = 'hidden';
     window.addEventListener('keydown', handleEscape);
@@ -859,7 +893,7 @@ function ResearchDetail({
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', handleEscape);
     };
-  }, [isFullscreen]);
+  }, [handleFullscreenChange, isFullscreen]);
 
   const handleTitleChange = (title: string) => {
     onUpdate({ ...item, title, updated_at: new Date().toISOString().split('T')[0] });
@@ -919,8 +953,13 @@ function ResearchDetail({
   return (
     <>
       <DocumentWorkspaceShell
+        ref={workspaceShellRef}
         className="flex-1"
         data-testid="research-document-workspace"
+        data-fullscreen-width-locked={fullscreenEntryWidth ? 'true' : 'false'}
+        style={fullscreenEntryWidth ? ({
+          '--smart-doc-fullscreen-entry-width': `${fullscreenEntryWidth}px`,
+        } as React.CSSProperties) : undefined}
         theme={theme}
         mode={mode}
         width={width}
@@ -963,10 +1002,10 @@ function ResearchDetail({
                   fullscreen={isFullscreen}
                   onModeChange={setMode}
                   onThemeChange={setTheme}
-                  onWidthChange={setWidth}
+                  onWidthChange={handleWidthChange}
                   onFontChange={setFont}
                   onSmallTextChange={setSmallText}
-                  onFullscreenChange={setIsFullscreen}
+                  onFullscreenChange={handleFullscreenChange}
                 />
                 <DocumentExportMenu
                   title={item.title || makeDefaultTitle(item.research_type)}
@@ -978,6 +1017,8 @@ function ResearchDetail({
                   onClick={() => setShowPromote(true)}
                   disabled={isPromoting}
                   className="research-promote-button inline-flex min-h-9 flex-none items-center gap-1.5 whitespace-nowrap rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 text-sm font-medium text-emerald-700 transition-colors hover:bg-emerald-100 disabled:opacity-60"
+                  aria-label={item.promoted_to_life ? '再次上浮到人生主线' : '上浮到人生主线'}
+                  title={item.promoted_to_life ? '再次上浮到人生主线' : '上浮到人生主线'}
                 >
                   <UploadCloud className="h-4 w-4" aria-hidden="true" />
                   <span className="research-promote-button__label">{item.promoted_to_life ? '再次上浮' : '上浮到人生主线'}</span>

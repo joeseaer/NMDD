@@ -10,6 +10,7 @@ import {
   CheckSquare,
   Code,
   Columns3,
+  ExternalLink,
   Heading1,
   Heading2,
   Highlighter,
@@ -27,26 +28,29 @@ import {
   Superscript,
   Table,
   Trash2,
+  Unlink,
   Underline,
   Undo2,
 } from 'lucide-react';
+import { openSafeDocumentUrl } from '../DocumentLinkInteractionExtension';
 
 type MenuButtonProps = {
   label: string;
   onClick: () => void;
   active?: boolean;
   disabled?: boolean;
+  className?: string;
   children: React.ReactNode;
 };
 
-const MenuButton = ({ label, onClick, active = false, disabled = false, children }: MenuButtonProps) => (
+const MenuButton = ({ label, onClick, active = false, disabled = false, className = '', children }: MenuButtonProps) => (
   <button
     type="button"
     aria-label={label}
     aria-pressed={active || undefined}
     title={label}
     disabled={disabled}
-    className="smart-document-icon-button"
+    className={`smart-document-icon-button ${className}`.trim()}
     data-active={active ? 'true' : 'false'}
     onMouseDown={(event) => event.preventDefault()}
     onClick={onClick}
@@ -91,6 +95,7 @@ export const EditorSelectionMenu = ({
       strike: current.isActive('strike'),
       code: current.isActive('code'),
       link: current.isActive('link'),
+      linkHref: String(current.getAttributes('link').href || ''),
       subscript: current.isActive('subscript'),
       superscript: current.isActive('superscript'),
     }),
@@ -122,9 +127,24 @@ export const EditorSelectionMenu = ({
       <Code />
     </MenuButton>
     <span className="smart-document-toolbar-separator" aria-hidden="true" />
-    <MenuButton label="添加或编辑链接" active={formatState.link} onClick={onSetLink}>
+    {formatState.link ? (
+      <MenuButton
+        label="打开链接（Ctrl/Cmd+单击可直接打开）"
+        className="smart-document-link-open-button"
+        onClick={() => openSafeDocumentUrl(formatState.linkHref)}
+      >
+        <ExternalLink />
+        <span>打开</span>
+      </MenuButton>
+    ) : null}
+    <MenuButton label={formatState.link ? '编辑链接' : '添加链接'} active={formatState.link} onClick={onSetLink}>
       <Link />
     </MenuButton>
+    {formatState.link ? (
+      <MenuButton label="移除链接" onClick={() => editor.chain().focus().extendMarkRange('link').unsetLink().run()}>
+        <Unlink />
+      </MenuButton>
+    ) : null}
     <MenuButton label="下标" active={formatState.subscript} onClick={() => editor.chain().focus().toggleSubscript().run()}>
       <Subscript />
     </MenuButton>

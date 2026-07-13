@@ -9,6 +9,17 @@ interface Score {
   reasons: string[];
 }
 
+const MERMAID_HEADER = /^(?:(?:flowchart|graph)\s+(?:TB|TD|BT|RL|LR)\b|sequenceDiagram\b|classDiagram(?:-v2)?\b|stateDiagram(?:-v2)?\b|erDiagram\b|journey\b|gantt\b|pie(?:\s+showData)?\b|quadrantChart\b|requirementDiagram\b|gitGraph\b|C4(?:Context|Container|Component|Dynamic|Deployment)\b|mindmap\b|timeline\b|xychart-beta\b|block-beta\b|packet-beta\b|architecture-beta\b|sankey-beta\b|radar-beta\b|kanban\b)/;
+
+export const isMermaidPlainText = (value: string): boolean => {
+  const normalized = normalizeClipboardText(value).replace(/^\uFEFF/, '').trimStart();
+  const withoutFrontmatter = normalized.replace(/^---\s*\n[\s\S]*?\n---\s*(?:\n|$)/, '').trimStart();
+  const withoutDirectives = withoutFrontmatter
+    .replace(/^(?:%%\{[^\n]*\}%%\s*\n)+/, '')
+    .trimStart();
+  return MERMAID_HEADER.test(withoutDirectives);
+};
+
 const scoreMarkdown = (value: string, source: ClipboardSource): Score => {
   const lines = value.split('\n');
   const reasons: string[] = [];
@@ -139,6 +150,15 @@ export const detectPlainText = (
 ): PlainTextDetection => {
   const value = normalizeClipboardText(input);
   if (!value) return { kind: 'empty', confidence: 1, reasons: ['empty clipboard text'] };
+
+  if (isMermaidPlainText(value)) {
+    return {
+      kind: 'code',
+      confidence: 0.99,
+      reasons: ['Mermaid diagram header'],
+      language: 'mermaid',
+    };
+  }
 
   if (source === 'vscode' || source === 'terminal') {
     return {

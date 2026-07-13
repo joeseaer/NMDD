@@ -51,6 +51,75 @@ test.describe('Editor Lab interaction and layout', () => {
     expect(editorBox!.x + editorBox!.width).toBeLessThanOrEqual(391);
   });
 
+  test('inline links expose an Open action and Ctrl+click opens directly', async ({ page }) => {
+    await page.evaluate(() => {
+      const opened: Array<[string, string, string]> = [];
+      (window as typeof window & { __editorLinkOpens?: typeof opened }).__editorLinkOpens = opened;
+      window.open = ((url?: string | URL, target?: string, features?: string) => {
+        opened.push([String(url || ''), String(target || ''), String(features || '')]);
+        return null;
+      }) as typeof window.open;
+    });
+
+    const link = editor(page).getByRole('link', { name: 'NMDD 示例' });
+    await link.click();
+    const openAction = page.getByRole('button', { name: /打开链接/ });
+    await expect(openAction).toBeVisible();
+    await expect.poll(() => page.evaluate(() => (
+      (window as typeof window & { __editorLinkOpens?: unknown[] }).__editorLinkOpens?.length || 0
+    ))).toBe(0);
+
+    await openAction.click();
+    await expect.poll(() => page.evaluate(() => (
+      (window as typeof window & { __editorLinkOpens?: unknown[] }).__editorLinkOpens?.length || 0
+    ))).toBe(1);
+
+    await link.click({ modifiers: ['Control'] });
+    const calls = await page.evaluate(() => (
+      (window as typeof window & { __editorLinkOpens?: Array<[string, string, string]> }).__editorLinkOpens || []
+    ));
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual(['https://example.com/nmdd', '_blank', 'noopener,noreferrer']);
+    await expect(page.getByTestId('editor-change-count')).toHaveText('0');
+  });
+
+  test('tables and Mermaid render as legible semantic content', async ({ page }) => {
+    await page.goto('/editor-lab?fixture=mermaid');
+    await expect(editor(page)).toContainText('Editor Lab');
+    const table = editor(page).locator('.tableWrapper table');
+    await expect(table).toHaveCount(1);
+    await expect(table.locator('tr')).toHaveCount(2);
+    await expect(table.locator('th, td')).toHaveCount(4);
+    await expect(table).toContainText('Codex / ChatGPT');
+
+    const preview = page.getByTestId('mermaid-preview');
+    await expect(preview).toBeVisible({ timeout: 15_000 });
+    const diagramSvg = preview.locator('.smart-doc-mermaid-stage svg');
+    await expect(diagramSvg).toHaveCount(1);
+    await expect(diagramSvg).toContainText('复制网页内容');
+    await expect(diagramSvg.locator('foreignObject')).toHaveCount(0);
+
+    const metrics = await preview.evaluate((element) => {
+      const viewport = element.querySelector<HTMLElement>('.smart-doc-mermaid-svg');
+      const svg = element.querySelector<SVGElement>('.smart-doc-mermaid-stage svg');
+      return {
+        viewportWidth: viewport?.clientWidth || 0,
+        viewportHeight: viewport?.clientHeight || 0,
+        scrollHeight: viewport?.scrollHeight || 0,
+        svgWidth: svg?.getBoundingClientRect().width || 0,
+        viewBoxWidth: svg?.viewBox.baseVal.width || 0,
+        labelFontSize: svg?.querySelector('text')
+          ? Number.parseFloat(window.getComputedStyle(svg.querySelector('text')!).fontSize)
+          : 0,
+        textCount: svg?.querySelectorAll('text, tspan').length || 0,
+      };
+    });
+    expect(metrics.textCount).toBeGreaterThan(0);
+    expect(metrics.svgWidth).toBeGreaterThanOrEqual(metrics.viewBoxWidth * 0.95);
+    expect(metrics.labelFontSize).toBeGreaterThanOrEqual(12);
+    expect(metrics.scrollHeight).toBeGreaterThanOrEqual(metrics.viewportHeight);
+  });
+
   test('edit and read surfaces have no WCAG A/AA violations', async ({ page }) => {
     const editResults = await new AxeBuilder({ page })
       .include('[data-testid="editor-lab"]')

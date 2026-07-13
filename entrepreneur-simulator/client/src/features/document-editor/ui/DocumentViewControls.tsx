@@ -145,7 +145,16 @@ export function DocumentViewControls({
                 ) : null}
 
                 {onFullscreenChange ? (
-                  <button type="button" className="smart-document-display-menu__check-row" onClick={() => onFullscreenChange(!fullscreen)}>
+                  <button
+                    type="button"
+                    className="smart-document-display-menu__check-row"
+                    onClick={() => {
+                      // The shell changes containing block in fullscreen. Close
+                      // this popover first so it never jumps to a new anchor.
+                      setShowDisplayMenu(false);
+                      onFullscreenChange(!fullscreen);
+                    }}
+                  >
                     <span className="inline-flex items-center gap-2"><Maximize2 aria-hidden="true" /> 专注全屏</span>
                     <span className="smart-document-display-menu__check">{fullscreen ? <Check aria-hidden="true" /> : null}</span>
                   </button>

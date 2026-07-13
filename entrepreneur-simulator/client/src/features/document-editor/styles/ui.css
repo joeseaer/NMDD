@@ -197,12 +197,25 @@
   height: 100dvh;
 }
 
+.smart-document-shell[data-fullscreen="true"][data-fullscreen-width-locked="true"] .smart-document-shell__scroll {
+  background: var(--smart-doc-canvas);
+}
+
+.smart-document-shell[data-fullscreen="true"][data-fullscreen-width-locked="true"] .smart-document-shell__page {
+  width: 100%;
+  max-width: var(--smart-doc-fullscreen-entry-width);
+  margin-inline: auto;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--smart-doc-border) 72%, transparent);
+}
+
 .smart-document-shell[data-width="wide"] {
   --smart-doc-body-track: var(--smart-doc-wide-track);
+  --smart-doc-node-track: var(--smart-doc-wide-track);
 }
 
 .smart-document-shell[data-width="full"] {
-  --smart-doc-body-track: min(100%, 90rem);
+  --smart-doc-body-track: var(--smart-doc-full-track);
+  --smart-doc-node-track: var(--smart-doc-full-track);
   --smart-doc-gutter: clamp(1rem, 3vw, 3rem);
 }
 
@@ -242,6 +255,8 @@
 }
 
 .smart-document-shell__scroll {
+  container-name: smart-document-scroll;
+  container-type: inline-size;
   min-width: 0;
   min-height: 0;
   flex: 1;
@@ -260,10 +275,22 @@
 }
 
 .smart-document-shell__page {
+  container-name: smart-document-page;
+  container-type: inline-size;
   width: 100%;
   min-width: 0;
   min-height: 100%;
   background: var(--smart-doc-page);
+}
+
+@supports (width: 1cqw) {
+  .smart-document-shell__page {
+    --smart-doc-gutter: clamp(1.25rem, 5cqw, 4.5rem);
+  }
+
+  .smart-document-shell[data-width="full"] .smart-document-shell__page {
+    --smart-doc-gutter: clamp(1rem, 3cqw, 3rem);
+  }
 }
 
 .smart-document-shell[data-scroll-mode="editor"] .smart-document-shell__page,
@@ -567,12 +594,31 @@
   line-height: 1.45;
 }
 
-@container smart-document-shell (max-width: 52rem) {
+.research-promote-button {
+  flex: 0 0 auto;
+  inline-size: max-content;
+  max-inline-size: none;
+  white-space: nowrap;
+  word-break: keep-all;
+  writing-mode: horizontal-tb;
+}
+
+.research-promote-button__label {
+  white-space: nowrap;
+  word-break: keep-all;
+}
+
+@container smart-document-shell (max-width: 68rem) {
   .smart-document-topbar {
     gap: 0.35rem;
   }
 
-  .smart-document-topbar__center,
+  .smart-document-topbar__center {
+    display: none;
+  }
+}
+
+@container smart-document-shell (max-width: 58rem) {
   .research-promote-button__label {
     display: none;
   }
@@ -1038,6 +1084,14 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* Full-page workspaces use the page container so tables/diagrams keep the same
+ * geometry across fullscreen. Standalone editor surfaces retain their own
+ * canvas container for backwards-compatible embedding. */
+.smart-document-shell .smart-document-canvas {
+  container-name: none;
+  container-type: normal;
+}
+
 .smart-document-shell[data-scroll-mode="workspace"] .smart-document-editor-shell,
 .smart-document-shell[data-scroll-mode="workspace"] .smart-document-editor-main {
   height: auto;
@@ -1206,6 +1260,18 @@
 
 .smart-document-bubble-menu::-webkit-scrollbar {
   display: none;
+}
+
+.smart-document-bubble-menu .smart-document-link-open-button {
+  width: auto;
+  padding-inline: 0.6rem;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+
+.smart-document-bubble-menu .smart-document-link-open-button span {
+  font-size: 0.75rem;
+  font-weight: 620;
 }
 
 .smart-document-floating-menu {

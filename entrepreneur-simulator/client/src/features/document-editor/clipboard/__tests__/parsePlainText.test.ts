@@ -68,6 +68,21 @@ describe('parsePlainText', () => {
     expect(parsePlainText(text).html).toContain('<pre><code class="language-python">');
   });
 
+  it('recognizes a raw Mermaid diagram copied without a Markdown fence', () => {
+    const text = 'flowchart TD\n  A[开始] --> B{通过?}\n  B -->|是| C[完成]';
+    const detection = detectPlainText(text, 'codex');
+    const parsed = parsePlainText(text, { source: 'codex' });
+
+    expect(detection).toMatchObject({ kind: 'code', language: 'mermaid' });
+    expect(parsed.kind).toBe('code');
+    expect(parsed.html).toContain('<pre><code class="language-mermaid">');
+    expect(parsed.html).toContain('A[开始] --&gt; B{通过?}');
+  });
+
+  it('does not mistake ordinary prose about graphs for Mermaid source', () => {
+    expect(detectPlainText('graph theory is useful in materials science').language).not.toBe('mermaid');
+  });
+
   it.each(['foo_bar', 'a=b', '$5.00'])('does not misclassify %s as math', value => {
     expect(detectPlainText(value).kind).not.toBe('math');
     expect(parsePlainText(value).html).not.toContain('data-type="equation"');

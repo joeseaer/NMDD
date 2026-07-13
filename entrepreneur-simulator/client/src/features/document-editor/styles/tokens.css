@@ -72,6 +72,8 @@
   --smart-doc-body-leading: 1.7;
   --smart-doc-body-track: 45rem;
   --smart-doc-wide-track: 65rem;
+  --smart-doc-full-track: 80rem;
+  --smart-doc-node-track: var(--smart-doc-wide-track);
   --smart-doc-gutter: clamp(1.25rem, 5vw, 4.5rem);
   --smart-doc-topbar-height: 3rem;
   --smart-doc-control-height: 2.5rem;
