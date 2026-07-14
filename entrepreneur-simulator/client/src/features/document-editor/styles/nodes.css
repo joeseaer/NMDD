@@ -7,10 +7,11 @@
   .tableWrapper,
   .smart-doc-database,
   .smart-doc-column-list,
+  .smart-doc-mermaid,
   [data-type="mind-map"]
 ) {
   position: relative;
-  width: min(var(--smart-doc-wide-track), calc(100vw - var(--smart-doc-gutter) - var(--smart-doc-gutter)));
+  width: min(var(--smart-doc-node-track), calc(100vw - var(--smart-doc-gutter) - var(--smart-doc-gutter)));
   max-width: calc(100vw - var(--smart-doc-gutter) - var(--smart-doc-gutter));
   margin-left: 50% !important;
   transform: translateX(-50%);
@@ -21,9 +22,10 @@
     .tableWrapper,
     .smart-doc-database,
     .smart-doc-column-list,
+    .smart-doc-mermaid,
     [data-type="mind-map"]
   ) {
-    width: min(var(--smart-doc-wide-track), 100cqw);
+    width: min(var(--smart-doc-node-track), 100cqw);
     max-width: 100cqw;
   }
 }
@@ -296,6 +298,29 @@
   color: var(--smart-doc-text);
 }
 
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle-title {
+  font-family: inherit;
+  line-height: 1.35;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle-title--h1 {
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle-title--h2 {
+  font-size: 1.4rem;
+  font-weight: 680;
+  letter-spacing: -0.02em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-toggle-title--h3 {
+  font-size: 1.15rem;
+  font-weight: 660;
+  letter-spacing: -0.012em;
+}
+
 :is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-callout {
   --smart-doc-callout-bg: var(--smart-doc-callout-gray-bg);
   --smart-doc-callout-border: var(--smart-doc-callout-gray-border);
@@ -430,6 +455,7 @@
   .tableWrapper,
   .smart-doc-database,
   .smart-doc-column-list,
+  .smart-doc-mermaid,
   [data-type="mind-map"]
 ) {
   width: 100%;
@@ -557,6 +583,7 @@
     .tableWrapper,
     .smart-doc-database,
     .smart-doc-column-list,
+    .smart-doc-mermaid,
     [data-type="mind-map"]
   ) {
     width: 100%;
@@ -584,4 +611,245 @@
     left: 0.375rem;
     max-width: none !important;
   }
+}
+
+/* Code and Mermaid blocks */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-code-block {
+  position: relative;
+  margin: 1.25rem 0;
+  overflow: hidden;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: var(--smart-doc-radius-lg);
+  background: var(--smart-doc-code-bg);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-code-block > pre,
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-code-block__source > pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding-top: 1.1rem;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-code-block__toolbar {
+  display: flex;
+  min-height: 2.4rem;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--smart-doc-border) 74%, transparent);
+  background: color-mix(in srgb, var(--smart-doc-surface-muted) 78%, var(--smart-doc-code-bg));
+  color: var(--smart-doc-text-muted);
+  font-family: var(--smart-doc-font-sans);
+  font-size: 0.75rem;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-code-block__toolbar select {
+  margin-right: auto;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-code-block__toolbar button {
+  display: inline-flex;
+  min-height: 1.8rem;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--smart-doc-radius-sm);
+  color: inherit;
+  transition: background var(--smart-doc-motion-fast) var(--smart-doc-ease), color var(--smart-doc-motion-fast) var(--smart-doc-ease);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-code-block__toolbar button:hover {
+  background: var(--smart-doc-surface-hover);
+  color: var(--smart-doc-text);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-code-block__toolbar svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-code-block__language {
+  margin-right: auto;
+  padding-inline: 0.35rem;
+  color: var(--smart-doc-text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-code-block__source.is-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-preview {
+  min-height: 13rem;
+  padding: 0;
+  background: color-mix(in srgb, var(--smart-doc-surface) 94%, var(--smart-doc-accent-soft));
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-renderer {
+  display: grid;
+  min-width: 0;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  min-height: 2.5rem;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.2rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--smart-doc-border) 78%, transparent);
+  background: color-mix(in srgb, var(--smart-doc-surface) 93%, transparent);
+  color: var(--smart-doc-text-muted);
+  font-family: var(--smart-doc-font-sans);
+  font-size: 0.7rem;
+  backdrop-filter: blur(10px);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls > span {
+  min-width: 2.7rem;
+  color: var(--smart-doc-text-secondary);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls button {
+  display: inline-flex;
+  min-width: 1.9rem;
+  min-height: 1.9rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.4rem;
+  border: 0;
+  border-radius: var(--smart-doc-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  transition: background var(--smart-doc-motion-fast) var(--smart-doc-ease), color var(--smart-doc-motion-fast) var(--smart-doc-ease);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls button:hover:not(:disabled),
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls button[data-active="true"] {
+  background: var(--smart-doc-surface-active);
+  color: var(--smart-doc-text);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls button:disabled {
+  opacity: 0.35;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-controls button svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-svg {
+  min-height: 10rem;
+  max-height: min(70vh, 48rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: clamp(0.9rem, 3vw, 1.75rem);
+}
+
+@supports (width: 1cqw) {
+  :is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-svg {
+    padding: clamp(0.9rem, 2.5cqw, 1.75rem);
+  }
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-stage {
+  min-width: 0;
+  margin-inline: auto;
+  transition: width var(--smart-doc-motion-normal) var(--smart-doc-ease);
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-stage svg {
+  display: block;
+  width: 100% !important;
+  max-width: none !important;
+  height: auto !important;
+  max-height: none !important;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) :is(.smart-doc-mermaid-state, .smart-doc-mermaid-error) {
+  display: flex;
+  min-height: 10rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  color: var(--smart-doc-text-muted);
+  font-family: var(--smart-doc-font-sans);
+  font-size: 0.8125rem;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-state svg,
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-error > svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-spinner {
+  animation: smart-document-spin 0.8s linear infinite;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-error {
+  align-items: flex-start;
+  justify-content: flex-start;
+  min-height: 0;
+  border-radius: var(--smart-doc-radius-md);
+  background: var(--smart-doc-danger-soft);
+  color: var(--smart-doc-danger);
+  padding: 0.85rem;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-error div {
+  display: grid;
+  min-width: 0;
+  gap: 0.2rem;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-error span {
+  max-height: 4.5rem;
+  overflow: auto;
+  color: var(--smart-doc-text-secondary);
+  overflow-wrap: anywhere;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-error button {
+  display: inline-flex;
+  width: max-content;
+  min-height: 1.9rem;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid color-mix(in srgb, var(--smart-doc-danger) 26%, transparent);
+  border-radius: var(--smart-doc-radius-sm);
+  background: color-mix(in srgb, var(--smart-doc-surface) 82%, transparent);
+  color: inherit;
+  font: inherit;
+  font-weight: 620;
+}
+
+:is(.smart-document-content, .smart-document-shell .ProseMirror) .smart-doc-mermaid-error button svg {
+  width: 0.85rem;
+  height: 0.85rem;
 }

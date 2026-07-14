@@ -27,9 +27,18 @@ export const cleanJoinedBlocks = (value: string): string => (
     .trim()
 );
 
-export const normalizeSerializedFormula = (value: unknown): string => {
-  let formula = String(value || '').trim();
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+const ENCODED_FORMULA_TOKEN = /%(?:25)*(?:5c|7b|7d|24|5e|5f|2b|3d|2f|28|29|5b|5d)/i;
+
+/**
+ * Decode only formulas that look like an old URI-encoded attribute payload.
+ * Canonical LaTeX is raw text; blindly decoding `%20` or `%25` changes valid
+ * formulas and URLs every time a document is opened and saved.
+ */
+export const decodeLegacyEncodedFormula = (value: unknown): string => {
+  let formula = String(value ?? '').trim();
+  if (!formula || formula.includes('\\') || !ENCODED_FORMULA_TOKEN.test(formula)) return formula;
+
+  for (let attempt = 0; attempt < 2 && ENCODED_FORMULA_TOKEN.test(formula); attempt += 1) {
     try {
       const decoded = decodeURIComponent(formula);
       if (decoded === formula) break;
@@ -40,6 +49,8 @@ export const normalizeSerializedFormula = (value: unknown): string => {
   }
   return formula.trim();
 };
+
+export const normalizeSerializedFormula = decodeLegacyEncodedFormula;
 
 export const stringifyCellValue = (value: unknown): string => {
   if (value === null || value === undefined) return '';

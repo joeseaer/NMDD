@@ -8,8 +8,10 @@
 :where(.smart-document-shell, .smart-document, .smart-document-content) {
   color-scheme: light;
 
-  --smart-doc-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
-  --smart-doc-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  --smart-doc-font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", sans-serif;
+  --smart-doc-font-serif: "Source Han Serif SC", "Noto Serif CJK SC", "Songti SC", SimSun, Georgia, "Times New Roman", "Segoe UI Emoji", serif;
+  --smart-doc-font-mono: "SFMono-Regular", "Cascadia Mono", Consolas, "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Microsoft YaHei UI", "Segoe UI Emoji", monospace;
+  --smart-doc-content-font: var(--smart-doc-font-sans);
 
   --smart-doc-page: #ffffff;
   --smart-doc-canvas: #fbfbfa;
@@ -70,6 +72,8 @@
   --smart-doc-body-leading: 1.7;
   --smart-doc-body-track: 45rem;
   --smart-doc-wide-track: 65rem;
+  --smart-doc-full-track: 80rem;
+  --smart-doc-node-track: var(--smart-doc-wide-track);
   --smart-doc-gutter: clamp(1.25rem, 5vw, 4.5rem);
   --smart-doc-topbar-height: 3rem;
   --smart-doc-control-height: 2.5rem;

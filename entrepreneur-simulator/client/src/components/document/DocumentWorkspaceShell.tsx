@@ -4,12 +4,17 @@ import { clsx } from 'clsx';
 
 export type DocumentTheme = 'light' | 'dark' | 'system';
 export type DocumentMode = 'edit' | 'read';
+export type DocumentWidth = 'default' | 'wide' | 'full';
+export type DocumentFont = 'sans' | 'serif' | 'mono';
 export type DocumentSaveState = 'idle' | 'saving' | 'saved' | 'error' | 'offline';
 
 export interface DocumentWorkspaceShellProps extends Omit<React.HTMLAttributes<HTMLDivElement>, 'children'> {
   children: React.ReactNode;
   theme?: DocumentTheme;
   mode?: DocumentMode;
+  width?: DocumentWidth;
+  font?: DocumentFont;
+  smallText?: boolean;
   topbar?: React.ReactNode;
   header?: React.ReactNode;
   properties?: React.ReactNode;
@@ -32,6 +37,9 @@ export const DocumentWorkspaceShell = forwardRef<HTMLDivElement, DocumentWorkspa
       children,
       theme = 'system',
       mode = 'edit',
+      width = 'default',
+      font = 'sans',
+      smallText = false,
       topbar,
       header,
       properties,
@@ -52,6 +60,9 @@ export const DocumentWorkspaceShell = forwardRef<HTMLDivElement, DocumentWorkspa
         className={clsx('smart-document-shell', className)}
         data-theme={theme}
         data-mode={mode}
+        data-width={width}
+        data-font={font}
+        data-small-text={smallText ? 'true' : 'false'}
         data-fullscreen={fullscreen ? 'true' : 'false'}
         data-scroll-mode={scrollMode}
         {...rest}

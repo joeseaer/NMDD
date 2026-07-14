@@ -178,9 +178,33 @@ export const EDITOR_LAB_FIXTURE: JSONContent = {
   ],
 };
 
-const initialValue = (): SmartDocumentValue => ({
+const EDITOR_LAB_MERMAID_FIXTURE: JSONContent = {
+  ...EDITOR_LAB_FIXTURE,
+  content: [
+    ...(EDITOR_LAB_FIXTURE.content || []),
+    {
+      type: 'codeBlock',
+      attrs: { language: 'mermaid' },
+      content: [{
+        type: 'text',
+        text: [
+          'flowchart TD',
+          '  A["复制网页内容"] --> B["识别结构"]',
+          '  B --> C["保留标题与列表"]',
+          '  C --> D["保留表格"]',
+          '  D --> E["保留公式"]',
+          '  E --> F["生成流程图"]',
+          '  F --> G["安全清洗"]',
+          '  G --> H["完成粘贴"]',
+        ].join('\n'),
+      }],
+    },
+  ],
+};
+
+const initialValue = (fixture: JSONContent = EDITOR_LAB_FIXTURE): SmartDocumentValue => ({
   markdown: '',
-  json: EDITOR_LAB_FIXTURE,
+  json: fixture,
   html: '',
   text: '',
 });
@@ -205,17 +229,19 @@ const diagnosticsStyle = {
 } as const;
 
 const EditorLab = () => {
-  const shouldRecoverInvalidJson = new URLSearchParams(window.location.search).get('fixture') === 'invalid-json';
+  const fixtureName = new URLSearchParams(window.location.search).get('fixture');
+  const shouldRecoverInvalidJson = fixtureName === 'invalid-json';
+  const selectedFixture = fixtureName === 'mermaid' ? EDITOR_LAB_MERMAID_FIXTURE : EDITOR_LAB_FIXTURE;
   const [mode, setMode] = useState<EditorMode>('edit');
   const [theme, setTheme] = useState<EditorTheme>('light');
   const [fixtureVersion, setFixtureVersion] = useState(0);
-  const [value, setValue] = useState<SmartDocumentValue>(initialValue);
+  const [value, setValue] = useState<SmartDocumentValue>(() => initialValue(selectedFixture));
   const [changeCount, setChangeCount] = useState(0);
   const [flushState, setFlushState] = useState<'idle' | 'waiting' | 'done' | 'error'>('idle');
   const editorFlushRef = useRef<(() => Promise<void>) | null>(null);
 
   const resetFixture = () => {
-    setValue(initialValue());
+    setValue(initialValue(selectedFixture));
     setFixtureVersion(version => version + 1);
   };
 
@@ -298,7 +324,7 @@ const EditorLab = () => {
             content={shouldRecoverInvalidJson ? '# Markdown 恢复副本\n\n旧文档正文已从安全备份恢复。' : ''}
             contentJson={shouldRecoverInvalidJson
               ? ({ type: 'doc', content: [{ type: 'legacyUnknownBlock' }] } as JSONContent)
-              : EDITOR_LAB_FIXTURE}
+              : selectedFixture}
             mode={mode}
             theme={theme}
             serializationFlushRef={editorFlushRef}

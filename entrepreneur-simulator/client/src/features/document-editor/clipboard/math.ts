@@ -1,4 +1,5 @@
 import { escapeHtmlAttribute, normalizeClipboardText, parseHtmlDocument } from './htmlUtils';
+import { decodeLegacyEncodedFormula } from '../serialization/serializationUtils';
 
 export type MathDisplay = 'inline' | 'block';
 
@@ -23,22 +24,8 @@ const EQUATION_ATTRIBUTE_NAMES = [
 
 const LATEX_COMMAND_PATTERN = /\\(?:frac|dfrac|tfrac|sqrt|sum|prod|int|oint|lim|log|ln|sin|cos|tan|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|phi|omega|langle|rangle|left|right|begin|end|mathbf|mathrm|mathbb|text|overline|underline|vec|hat|dot|partial|nabla|infty|times|cdot|leq?|geq?|neq|approx|to|rightarrow)\b/;
 
-const decodeRepeatedly = (value: string): string => {
-  let decoded = value;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      const next = decodeURIComponent(decoded);
-      if (next === decoded) break;
-      decoded = next;
-    } catch {
-      break;
-    }
-  }
-  return decoded;
-};
-
 export const decodeEquationValue = (value: unknown): string => (
-  decodeRepeatedly(String(value ?? '')).trim()
+  decodeLegacyEncodedFormula(value)
 );
 
 export const stripLatexDelimiters = (value: string): string => {

@@ -8,7 +8,7 @@ import {
   Paperclip, Video, Music, FileText, RefreshCw, Palette, ChevronRight, AlertTriangle,
   Plus
 } from 'lucide-react';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, useEditorState } from '@tiptap/react';
 import Image from '@tiptap/extension-image';
 import { Table } from '@tiptap/extension-table';
 import { TableCell } from '@tiptap/extension-table-cell';
@@ -25,12 +25,17 @@ import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
 import { api, CURRENT_USER_ID } from '../services/api';
 import { createSmartDocumentExtensions } from '../features/document-editor/createEditorExtensions';
+import { SmartCodeBlock } from '../features/document-editor/nodes/SmartCodeBlock';
+import { FindReplaceExtension } from '../features/document-editor/findReplace/FindReplaceExtension';
+import { EditorFindReplace, type FindPanelMode } from '../features/document-editor/ui/EditorFindReplace';
+import { ReadOnlyGuardExtension } from '../features/document-editor/ReadOnlyGuardExtension';
 import {
     SmartClipboardExtension,
     type SmartClipboardUploadController,
 } from '../features/document-editor/SmartClipboardExtension';
 import { serializeToMarkdown } from '../features/document-editor/serialization/toMarkdown';
 import { serializeToPlainText } from '../features/document-editor/serialization/toPlainText';
+import { decodeLegacyEncodedFormula } from '../features/document-editor/serialization/serializationUtils';
 import type { DocumentNodeJson } from '../features/document-editor/schema/documentSchema';
 import {
     EditorCompactToolbar,
@@ -309,6 +314,12 @@ const BlockIdentity = Extension.create({
     name: 'blockIdentity',
     priority: 1000,
 
+    addStorage() {
+        return {
+            positions: new Map<string, number>(),
+        };
+    },
+
     addGlobalAttributes() {
         return [
             {
@@ -370,6 +381,7 @@ const BlockIdentity = Extension.create({
 
                     const tr = newState.tr;
                     const seen = new Set<string>();
+                    const positions = new Map<string, number>();
 
                     newState.doc.descendants((node, pos) => {
                         if (!isBlockIdentityNode(node)) return true;
@@ -391,8 +403,11 @@ const BlockIdentity = Extension.create({
                         }
 
                         seen.add(currentId);
+                        positions.set(currentId, pos);
                         return true;
                     });
+
+                    this.storage.positions = positions;
 
                     if (!tr.docChanged) return null;
                     tr.setMeta('addToHistory', false);
@@ -408,6 +423,7 @@ const ensureEditorBlockIds = (editor: any) => {
     const { state, view } = editor;
     const tr = state.tr;
     const seen = new Set<string>();
+    const positions = new Map<string, number>();
 
     state.doc.descendants((node: ProseMirrorNode, pos: number) => {
         if (!isBlockIdentityNode(node)) return true;
@@ -429,8 +445,11 @@ const ensureEditorBlockIds = (editor: any) => {
         }
 
         seen.add(currentId);
+        positions.set(currentId, pos);
         return true;
     });
+
+    if (editor.storage?.blockIdentity) editor.storage.blockIdentity.positions = positions;
 
     if (tr.docChanged) {
         tr.setMeta('addToHistory', false);
@@ -498,7 +517,7 @@ type ColumnResizeHandleInfo = {
 };
 
 type TableCellBackgroundScope = 'cell' | 'row' | 'column';
-type TurnIntoTarget = 'paragraph' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'todo' | 'quote' | 'code' | 'toggle' | 'callout';
+type TurnIntoTarget = 'paragraph' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'todo' | 'quote' | 'code' | 'toggle' | 'toggle-h1' | 'toggle-h2' | 'toggle-h3' | 'callout';
 
 const TABLE_CELL_NODE_TYPES = new Set(['tableCell', 'tableHeader']);
 
@@ -684,6 +703,12 @@ const findBestBlockElement = (target: EventTarget | null, root: HTMLElement) => 
 };
 
 const findBlockById = (editor: any, id: string): { node: ProseMirrorNode; pos: number } | null => {
+    const indexedPos = editor.storage?.blockIdentity?.positions?.get(id);
+    if (typeof indexedPos === 'number') {
+        const indexedNode = editor.state.doc.nodeAt(indexedPos);
+        if (indexedNode?.attrs?.blockId === id) return { node: indexedNode, pos: indexedPos };
+    }
+
     let result: { node: ProseMirrorNode; pos: number } | null = null;
 
     editor.state.doc.descendants((node: ProseMirrorNode, pos: number) => {
@@ -694,7 +719,12 @@ const findBlockById = (editor: any, id: string): { node: ProseMirrorNode; pos: n
         return true;
     });
 
-    return result;
+    const found = result as { node: ProseMirrorNode; pos: number } | null;
+    if (found && editor.storage?.blockIdentity?.positions) {
+        editor.storage.blockIdentity.positions.set(id, found.pos);
+    }
+
+    return found;
 };
 
 const getBlockContext = (editor: any, pos: number) => {
@@ -770,9 +800,13 @@ const getBlockInfoById = (editor: any, id: string, shell: HTMLElement): BlockHan
 };
 
 const getBlockInfoFromEvent = (editor: any, event: React.MouseEvent, shell: HTMLElement | null) => {
+    return getBlockInfoFromTarget(editor, event.target, shell);
+};
+
+const getBlockInfoFromTarget = (editor: any, target: EventTarget | null, shell: HTMLElement | null) => {
     if (!shell) return null;
     const root = editor.view.dom as HTMLElement;
-    const element = findBestBlockElement(event.target, root);
+    const element = findBestBlockElement(target, root);
     const id = element?.getAttribute('data-block-id');
     if (!id) return null;
     return getBlockInfoById(editor, id, shell);
@@ -1085,18 +1119,7 @@ const turndownService = new TurndownService({
 turndownService.use(gfm);
 
 const decodeSmartFormulaAttribute = (value: string | null) => {
-    if (!value) return '';
-    let decoded = value;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-        try {
-            const next = decodeURIComponent(decoded);
-            if (next === decoded) break;
-            decoded = next;
-        } catch {
-            break;
-        }
-    }
-    return decoded.trim();
+    return decodeLegacyEncodedFormula(value);
 };
 
 const getSmartEquationFormula = (node: HTMLElement) => {
@@ -1973,10 +1996,13 @@ export type SmartDocumentValue = {
     text: string;
 };
 
+export type SmartDocumentValueGetter = () => SmartDocumentValue | null;
+
 export type SmartDocumentPageLink = {
     id: string;
     title: string;
     category?: string;
+    href?: string;
 };
 
 type SmartDocumentEditorProps = {
@@ -1987,6 +2013,7 @@ type SmartDocumentEditorProps = {
     mode?: 'edit' | 'read';
     theme?: 'light' | 'dark' | 'system';
     serializationFlushRef?: React.MutableRefObject<(() => Promise<void>) | null>;
+    exportValueRef?: React.MutableRefObject<SmartDocumentValueGetter | null>;
     onChange: (value: SmartDocumentValue) => void;
 };
 
@@ -2006,27 +2033,52 @@ const isMarkdownStructureLine = (line: string) => {
     );
 };
 
-const preserveLegacyMarkdownBlankLines = (value: string) => {
+export const preserveLegacyMarkdownBlankLines = (value: string) => {
     const normalized = (value || '').replace(/\r\n/g, '\n');
     const lines = normalized.split('\n');
+    const output: string[] = [];
     let inFence = false;
+    let previousNonEmpty = '';
 
-    return lines.map((line, index) => {
+    for (let index = 0; index < lines.length;) {
+        const line = lines[index];
         const trimmed = line.trim();
         if (/^(```|~~~)/.test(trimmed)) {
             inFence = !inFence;
-            return line;
+            output.push(line);
+            previousNonEmpty = line;
+            index += 1;
+            continue;
         }
 
-        if (inFence || trimmed !== '') return line;
+        if (inFence || trimmed !== '') {
+            output.push(line);
+            if (trimmed) previousNonEmpty = line;
+            index += 1;
+            continue;
+        }
 
-        const previous = [...lines.slice(0, index)].reverse().find((item) => item.trim() !== '');
-        const next = lines.slice(index + 1).find((item) => item.trim() !== '');
-        if (!previous || !next) return line;
-        if (isMarkdownStructureLine(previous) || isMarkdownStructureLine(next)) return line;
+        const runStart = index;
+        while (index < lines.length && lines[index].trim() === '') index += 1;
+        const blankCount = index - runStart;
+        const nextNonEmpty = index < lines.length ? lines[index] : '';
+        const canPreserveExtraBlankBlocks = (
+            blankCount > 1
+            && previousNonEmpty
+            && nextNonEmpty
+            && !isMarkdownStructureLine(previousNonEmpty)
+            && !isMarkdownStructureLine(nextNonEmpty)
+        );
 
-        return '\n<p data-preserved-blank-line></p>\n';
-    }).join('\n');
+        // One blank line is normal Markdown paragraph syntax. Only additional
+        // blank lines represent intentional visual space in legacy documents.
+        output.push('');
+        for (let offset = 1; offset < blankCount; offset += 1) {
+            output.push(canPreserveExtraBlankBlocks ? '<p data-preserved-blank-line></p>' : '');
+        }
+    }
+
+    return output.join('\n');
 };
 
 const markdownToHtml = (value: string) => mdParser.render(preserveLegacyMarkdownBlankLines(value || ''));
@@ -2081,24 +2133,15 @@ const getContentSignature = (contentJson: JSONContent | null | undefined, markdo
     return `markdown:${markdown || ''}`;
 };
 
-const getSemanticDocumentSignature = (contentJson: JSONContent) => {
-    const stripRuntimeBlockIdentity = (node: JSONContent): JSONContent => {
-        const nextNode: JSONContent = { ...node };
-
-        if (node.attrs) {
-            const attrs = { ...node.attrs };
-            delete attrs.blockId;
-            nextNode.attrs = attrs;
-        }
-
-        if (node.content) {
-            nextNode.content = node.content.map(stripRuntimeBlockIdentity);
-        }
-
-        return nextNode;
+const readSmartDocumentValue = (editorInstance: any): SmartDocumentValue | null => {
+    if (!editorInstance || editorInstance.isDestroyed) return null;
+    const json = editorInstance.getJSON();
+    return {
+        html: normalizeSmartImageLinksForExport(editorInstance.getHTML()),
+        json,
+        markdown: serializeToMarkdown(json as DocumentNodeJson),
+        text: serializeToPlainText(json as DocumentNodeJson),
     };
-
-    return JSON.stringify(stripRuntimeBlockIdentity(contentJson));
 };
 
 export const SmartDocumentEditor = ({
@@ -2109,9 +2152,11 @@ export const SmartDocumentEditor = ({
     mode = 'edit',
     theme = 'system',
     serializationFlushRef,
+    exportValueRef,
     onChange,
 }: SmartDocumentEditorProps) => {
     const [showTOC, setShowTOC] = useState(false);
+    const [findPanelMode, setFindPanelMode] = useState<FindPanelMode | null>(null);
     const [hoveredBlock, setHoveredBlock] = useState<BlockHandleInfo | null>(null);
     const [blockMenuOpen, setBlockMenuOpen] = useState(false);
     const [dragBlock, setDragBlock] = useState<DragBlockState | null>(null);
@@ -2123,38 +2168,30 @@ export const SmartDocumentEditor = ({
     const initialContentRecoveryRef = React.useRef(false);
     const mmSigRef = React.useRef<string>('');
     const externalSigRef = React.useRef<string>(getContentSignature(contentJson, content));
-    const semanticDocumentSigRef = React.useRef<string | null>(null);
     const onChangeRef = React.useRef(onChange);
     const serializationTimerRef = React.useRef<number | null>(null);
+    const pointerFrameRef = React.useRef<number | null>(null);
+    const pendingPointerRef = React.useRef<{ target: EventTarget | null; clientY: number } | null>(null);
 
     useEffect(() => {
         onChangeRef.current = onChange;
     }, [onChange]);
 
     const serializeAndEmit = useCallback((editorInstance: any) => {
-        if (!editorInstance || editorInstance.isDestroyed) return;
-        const html = normalizeSmartImageLinksForExport(editorInstance.getHTML());
-        const json = editorInstance.getJSON();
-        const markdown = serializeToMarkdown(json as DocumentNodeJson);
-        const text = serializeToPlainText(json as DocumentNodeJson);
-        externalSigRef.current = getContentSignature(json, markdown);
-        semanticDocumentSigRef.current = getSemanticDocumentSignature(json);
+        const value = readSmartDocumentValue(editorInstance);
+        if (!value) return;
+        externalSigRef.current = getContentSignature(value.json, value.markdown);
 
         try {
-            const hasDiv = html.includes('data-type="mind-map"');
-            const hasFence = markdown.includes('```mindmap');
-            const sig = `${hasDiv}-${hasFence}-${markdown.length}`;
+            const hasDiv = value.html.includes('data-type="mind-map"');
+            const hasFence = value.markdown.includes('```mindmap');
+            const sig = `${hasDiv}-${hasFence}-${value.markdown.length}`;
             if (hasDiv && sig !== mmSigRef.current) mmSigRef.current = sig;
         } catch {
             // A serialization diagnostic must never interrupt editing.
         }
 
-        onChangeRef.current({
-            markdown,
-            json,
-            html,
-            text,
-        });
+        onChangeRef.current(value);
     }, []);
 
     const uploadImage = useCallback(async (file: File) => {
@@ -2182,7 +2219,9 @@ export const SmartDocumentEditor = ({
     const editor = useEditor({
         editable: mode === 'edit',
         extensions: createSmartDocumentExtensions({
+            codeBlock: SmartCodeBlock,
             before: [
+                ReadOnlyGuardExtension,
                 BlockIdentity,
                 SmartClipboardExtension.configure({
                     uploadImage,
@@ -2269,6 +2308,7 @@ export const SmartDocumentEditor = ({
                 allowBase64: true,
             }),
             custom: [
+                FindReplaceExtension,
                 ColumnList,
                 Column,
                 SlashCommand.configure({
@@ -2304,9 +2344,6 @@ export const SmartDocumentEditor = ({
         }),
         content: getInitialContent(contentJson, content),
         enableContentCheck: true,
-        onCreate: ({ editor }) => {
-            semanticDocumentSigRef.current = getSemanticDocumentSignature(editor.getJSON());
-        },
         onContentError: ({ error }) => {
             initialContentRecoveryRef.current = true;
             console.warn('[document-editor] Invalid structured content detected; using the Markdown recovery copy.', error);
@@ -2319,16 +2356,9 @@ export const SmartDocumentEditor = ({
         onUpdate: ({ editor, transaction, appendedTransactions }) => {
             const changedTransactions = [transaction, ...(appendedTransactions || [])]
                 .filter(candidate => candidate.docChanged);
-            const nextSemanticSignature = getSemanticDocumentSignature(editor.getJSON());
-            const isSemanticNoop = semanticDocumentSigRef.current === nextSemanticSignature;
-            semanticDocumentSigRef.current = nextSemanticSignature;
-
             if (
-                (changedTransactions.length === 0 && isSemanticNoop)
-                || (
-                    changedTransactions.length > 0
-                    && changedTransactions.every(candidate => candidate.getMeta(BLOCK_IDENTITY_TRANSACTION_META))
-                )
+                changedTransactions.length === 0
+                || changedTransactions.every(candidate => candidate.getMeta(BLOCK_IDENTITY_TRANSACTION_META))
             ) {
                 return;
             }
@@ -2366,6 +2396,15 @@ export const SmartDocumentEditor = ({
     }, [flushPendingEditorWork, serializationFlushRef]);
 
     useEffect(() => {
+        if (!exportValueRef) return;
+        const getter: SmartDocumentValueGetter = () => readSmartDocumentValue(editor);
+        exportValueRef.current = getter;
+        return () => {
+            if (exportValueRef.current === getter) exportValueRef.current = null;
+        };
+    }, [editor, exportValueRef]);
+
+    useEffect(() => {
         if (!editor || !initialContentRecoveryRef.current) return;
         const timeoutId = window.setTimeout(() => {
             if (editor.isDestroyed || !initialContentRecoveryRef.current) return;
@@ -2376,7 +2415,6 @@ export const SmartDocumentEditor = ({
                 // be discarded, but their supported text/children must remain.
                 errorOnInvalidContent: false,
             });
-            semanticDocumentSigRef.current = getSemanticDocumentSignature(editor.getJSON());
             externalSigRef.current = getContentSignature(contentJson, content);
             setContentRecoveryWarning(true);
         }, 0);
@@ -2397,12 +2435,34 @@ export const SmartDocumentEditor = ({
         flushPendingSerialization();
     }, [flushPendingSerialization]);
 
+    useEffect(() => () => {
+        if (pointerFrameRef.current !== null) window.cancelAnimationFrame(pointerFrameRef.current);
+    }, []);
+
     useEffect(() => {
         if (!editor) return;
         const timeoutId = window.setTimeout(() => {
             if (!editor.isDestroyed) editor.setEditable(mode === 'edit');
         }, 0);
         return () => window.clearTimeout(timeoutId);
+    }, [editor, mode]);
+
+    useEffect(() => {
+        if (!editor) return;
+        const handleFindShortcut = (event: KeyboardEvent) => {
+            if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+            const key = event.key.toLowerCase();
+            if (key === 'f') {
+                event.preventDefault();
+                setFindPanelMode('find');
+            }
+            if (key === 'h' && mode === 'edit') {
+                event.preventDefault();
+                setFindPanelMode('replace');
+            }
+        };
+        window.addEventListener('keydown', handleFindShortcut);
+        return () => window.removeEventListener('keydown', handleFindShortcut);
     }, [editor, mode]);
 
     useEffect(() => {
@@ -2449,7 +2509,6 @@ export const SmartDocumentEditor = ({
                             errorOnInvalidContent: true,
                         });
                         ensureEditorBlockIds(editor);
-                        semanticDocumentSigRef.current = getSemanticDocumentSignature(editor.getJSON());
                         setContentRecoveryWarning(false);
                     } catch (error) {
                         console.warn('[document-editor] Rejected invalid external JSON and restored its Markdown copy.', error);
@@ -2457,7 +2516,6 @@ export const SmartDocumentEditor = ({
                             emitUpdate: false,
                             errorOnInvalidContent: false,
                         });
-                        semanticDocumentSigRef.current = getSemanticDocumentSignature(editor.getJSON());
                         setContentRecoveryWarning(true);
                     }
                 }
@@ -2472,7 +2530,6 @@ export const SmartDocumentEditor = ({
                     errorOnInvalidContent: false,
                 });
                 ensureEditorBlockIds(editor);
-                semanticDocumentSigRef.current = getSemanticDocumentSignature(editor.getJSON());
             }
             externalSigRef.current = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
         }, 0);
@@ -2751,10 +2808,20 @@ export const SmartDocumentEditor = ({
             return;
         }
 
-        if (target === 'toggle') {
+        if (target === 'toggle' || target === 'toggle-h1' || target === 'toggle-h2' || target === 'toggle-h3') {
             const title = node.textContent.trim() || 'Toggle';
+            const inheritedLevel = node.type.name === 'heading' && [1, 2, 3].includes(Number(node.attrs.level))
+                ? Number(node.attrs.level)
+                : 0;
+            const level = target === 'toggle-h1'
+                ? 1
+                : target === 'toggle-h2'
+                    ? 2
+                    : target === 'toggle-h3'
+                        ? 3
+                        : inheritedLevel;
             const toggle = schema.nodes.toggleBlock.create(
-                { ...attrs, title, open: true },
+                { ...attrs, title, open: true, level },
                 [schema.nodes.paragraph.create({ blockId: createBlockId() })],
             );
             replaceCurrentBlock(toggle);
@@ -2897,24 +2964,47 @@ export const SmartDocumentEditor = ({
     }, [getLiveBlock, updateBlockComments]);
 
     const handleEditorMouseMove = useCallback((event: React.MouseEvent) => {
-        if (!editor) return;
-        setColumnResizeHandles(getColumnResizeHandles(editor, shellRef.current, event.clientY));
-        const nextBlock = getBlockInfoFromEvent(editor, event, shellRef.current);
-        if (!nextBlock) return;
+        if (!editor || mode !== 'edit') return;
+        pendingPointerRef.current = { target: event.target, clientY: event.clientY };
+        if (pointerFrameRef.current !== null) return;
+        pointerFrameRef.current = window.requestAnimationFrame(() => {
+            pointerFrameRef.current = null;
+            const pointer = pendingPointerRef.current;
+            if (!pointer) return;
+            const nextHandles = getColumnResizeHandles(editor, shellRef.current, pointer.clientY);
+            setColumnResizeHandles((current) => {
+                const unchanged = current.length === nextHandles.length && current.every((handle, index) => {
+                    const next = nextHandles[index];
+                    return handle.id === next?.id
+                        && Math.abs(handle.top - next.top) < 1
+                        && Math.abs(handle.left - next.left) < 1
+                        && Math.abs(handle.height - next.height) < 1;
+                });
+                return unchanged ? current : nextHandles;
+            });
 
-        setHoveredBlock((current) => {
-            if (
-                current?.id === nextBlock.id &&
-                Math.abs(current.top - nextBlock.top) < 1 &&
-                Math.abs(current.height - nextBlock.height) < 1
-            ) {
-                return current;
+            const nextBlock = getBlockInfoFromTarget(editor, pointer.target, shellRef.current);
+            if (!nextBlock) {
+                if (!blockMenuOpen && !dragBlock) setHoveredBlock(null);
+                return;
             }
-            return nextBlock;
+            setHoveredBlock((current) => {
+                if (
+                    current?.id === nextBlock.id
+                    && Math.abs(current.top - nextBlock.top) < 1
+                    && Math.abs(current.height - nextBlock.height) < 1
+                ) return current;
+                return nextBlock;
+            });
         });
-    }, [editor]);
+    }, [blockMenuOpen, dragBlock, editor, mode]);
 
     const handleEditorMouseLeave = useCallback(() => {
+        pendingPointerRef.current = null;
+        if (pointerFrameRef.current !== null) {
+            window.cancelAnimationFrame(pointerFrameRef.current);
+            pointerFrameRef.current = null;
+        }
         if (!blockMenuOpen && !dragBlock) setHoveredBlock(null);
         setColumnResizeHandles([]);
     }, [blockMenuOpen, dragBlock]);
@@ -2970,27 +3060,41 @@ export const SmartDocumentEditor = ({
         const widthTotal = Math.max(COLUMN_MIN_WIDTH_PERCENT * 2, leftStart + rightStart);
         const startX = event.clientX;
         const previousCursor = document.body.style.cursor;
+        let latestClientX = startX;
+        let animationFrame = 0;
 
         document.body.style.cursor = 'col-resize';
 
-        const resizeTo = (clientX: number, addToHistory = false) => {
+        const getWidths = (clientX: number) => {
             const deltaPercent = ((clientX - startX) / listWidth) * 100;
             const nextLeft = Math.max(COLUMN_MIN_WIDTH_PERCENT, Math.min(widthTotal - COLUMN_MIN_WIDTH_PERCENT, leftStart + deltaPercent));
             const nextRight = widthTotal - nextLeft;
-            applyColumnWidths(handle.leftColumnId, handle.rightColumnId, nextLeft, nextRight, addToHistory);
+            return { nextLeft, nextRight };
+        };
+
+        const previewResize = () => {
+            animationFrame = 0;
+            const { nextLeft, nextRight } = getWidths(latestClientX);
+            leftElement?.style.setProperty('--smart-column-width', formatColumnWidth(nextLeft));
+            rightElement?.style.setProperty('--smart-column-width', formatColumnWidth(nextRight));
         };
 
         const handleMouseMove = (moveEvent: MouseEvent) => {
             moveEvent.preventDefault();
-            resizeTo(moveEvent.clientX);
+            latestClientX = moveEvent.clientX;
+            if (!animationFrame) animationFrame = window.requestAnimationFrame(previewResize);
         };
 
         const handleMouseUp = (upEvent: MouseEvent) => {
             upEvent.preventDefault();
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
+            if (animationFrame) window.cancelAnimationFrame(animationFrame);
             document.body.style.cursor = previousCursor;
-            resizeTo(upEvent.clientX, true);
+            const { nextLeft, nextRight } = getWidths(upEvent.clientX);
+            leftElement?.style.setProperty('--smart-column-width', formatColumnWidth(nextLeft));
+            rightElement?.style.setProperty('--smart-column-width', formatColumnWidth(nextRight));
+            applyColumnWidths(handle.leftColumnId, handle.rightColumnId, nextLeft, nextRight, true);
         };
 
         document.addEventListener('mousemove', handleMouseMove);
@@ -3208,6 +3312,14 @@ export const SmartDocumentEditor = ({
             )}
 
             <div className="smart-document-editor-main">
+                {findPanelMode ? (
+                    <EditorFindReplace
+                        editor={editor}
+                        mode={findPanelMode}
+                        readOnly={mode === 'read'}
+                        onClose={() => setFindPanelMode(null)}
+                    />
+                ) : null}
                 {contentRecoveryWarning && (
                     <div className="smart-document-recovery-warning" role="status" aria-live="polite">
                         <AlertTriangle aria-hidden="true" />
@@ -3221,7 +3333,7 @@ export const SmartDocumentEditor = ({
                     outlineOpen={showTOC}
                     onToggleOutline={() => setShowTOC(!showTOC)}
                 />}
-                {mode === 'edit' && editor.isActive('table') && (
+                {mode === 'edit' && (
                     <div className="smart-document-context-toolbar-row">
                         <EditorTableMenu editor={editor} />
                         <TableCellBackgroundMenu editor={editor} />
@@ -3446,7 +3558,16 @@ const BlockHandleLayer = ({
                                     <Code className="h-3.5 w-3.5" /> 代码块
                                 </button>
                                 <button className={menuButtonClass} onClick={() => onTurnInto(block, 'toggle')}>
-                                    <ChevronRight className="h-3.5 w-3.5" /> Toggle
+                                    <ChevronRight className="h-3.5 w-3.5" /> 折叠块
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'toggle-h1')}>
+                                    <Heading1 className="h-3.5 w-3.5" /> 折叠一级标题
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'toggle-h2')}>
+                                    <Heading2 className="h-3.5 w-3.5" /> 折叠二级标题
+                                </button>
+                                <button className={menuButtonClass} onClick={() => onTurnInto(block, 'toggle-h3')}>
+                                    <Heading3 className="h-3.5 w-3.5" /> 折叠三级标题
                                 </button>
                                 <button className={menuButtonClass} onClick={() => onTurnInto(block, 'callout')}>
                                     <AlertTriangle className="h-3.5 w-3.5" /> Callout
@@ -3661,6 +3782,8 @@ const TableOfContents = ({ editor }: { editor: any }) => {
 
     useEffect(() => {
         if (!editor) return;
+        let frame = 0;
+        let previousSignature = '';
 
         const updateHeadings = () => {
             const items: any[] = [];
@@ -3673,15 +3796,36 @@ const TableOfContents = ({ editor }: { editor: any }) => {
                         pos: pos
                     });
                 }
+                if (node.type.name === 'toggleBlock' && Number(node.attrs.level) > 0) {
+                    items.push({
+                        level: Number(node.attrs.level),
+                        text: String(node.attrs.title || '折叠标题'),
+                        id: `toggle-heading-${pos}`,
+                        pos,
+                    });
+                }
             });
-            setHeadings(items);
+            const signature = items.map((item) => `${item.level}:${item.pos}:${item.text}`).join('|');
+            if (signature !== previousSignature) {
+                previousSignature = signature;
+                setHeadings(items);
+            }
+        };
+
+        const scheduleUpdate = () => {
+            if (frame) return;
+            frame = window.requestAnimationFrame(() => {
+                frame = 0;
+                updateHeadings();
+            });
         };
 
         updateHeadings();
-        editor.on('update', updateHeadings);
+        editor.on('update', scheduleUpdate);
 
         return () => {
-            editor.off('update', updateHeadings);
+            editor.off('update', scheduleUpdate);
+            if (frame) window.cancelAnimationFrame(frame);
         };
     }, [editor]);
 
@@ -3947,8 +4091,16 @@ const TABLE_BACKGROUND_SCOPE_OPTIONS: Array<{ value: TableCellBackgroundScope; l
 const TableCellBackgroundMenu = ({ editor }: { editor: any }) => {
     const [open, setOpen] = useState(false);
     const [scope, setScope] = useState<TableCellBackgroundScope>('cell');
-    const canUse = canUpdateTableCellBackground(editor);
-    const activeColor = getCurrentTableCellBackground(editor);
+    const tableState = useEditorState({
+        editor,
+        selector: ({ editor: currentEditor }) => ({
+            active: currentEditor.isActive('table'),
+            canUse: canUpdateTableCellBackground(currentEditor),
+            activeColor: getCurrentTableCellBackground(currentEditor),
+        }),
+    });
+    const canUse = tableState.canUse;
+    const activeColor = tableState.activeColor;
 
     useEffect(() => {
         if (!canUse) setOpen(false);
@@ -3958,6 +4110,8 @@ const TableCellBackgroundMenu = ({ editor }: { editor: any }) => {
         if (!canUse) return;
         if (setTableCellBackground(editor, scope, value)) setOpen(false);
     };
+
+    if (!tableState.active) return null;
 
     return (
         <div className="relative flex-shrink-0">

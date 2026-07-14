@@ -13,6 +13,8 @@ import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
 import { TextStyle } from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import { common, createLowlight } from 'lowlight';
+import { DocumentLinkInteractionExtension } from './DocumentLinkInteractionExtension';
+import { isSafeLinkUrl } from './clipboard/urlPolicy';
 
 const lowlight = createLowlight(common);
 
@@ -25,6 +27,7 @@ export type SmartDocumentTableExtensions = {
 
 export type CreateSmartDocumentExtensionsOptions = {
   placeholder?: string;
+  codeBlock?: AnyExtension | null;
   image?: AnyExtension | null;
   table?: SmartDocumentTableExtensions | null;
   before?: Extensions;
@@ -40,6 +43,7 @@ export type CreateSmartDocumentExtensionsOptions = {
  */
 export const createSmartDocumentExtensions = ({
   placeholder = '开始输入内容… 输入 / 唤起命令菜单',
+  codeBlock,
   image = null,
   table = null,
   before = [],
@@ -65,7 +69,14 @@ export const createSmartDocumentExtensions = ({
     autolink: true,
     linkOnPaste: true,
     defaultProtocol: 'https',
+    isAllowedUri: url => isSafeLinkUrl(url),
+    shouldAutoLink: url => isSafeLinkUrl(url),
+    HTMLAttributes: {
+      target: '_blank',
+      rel: 'noopener noreferrer',
+    },
   }),
+  DocumentLinkInteractionExtension,
   Heading.configure({ levels: [1, 2, 3, 4, 5, 6] }),
   TaskList,
   TaskItem.configure({
@@ -82,7 +93,7 @@ export const createSmartDocumentExtensions = ({
   TextAlign.configure({ types: ['heading', 'paragraph'] }),
   Subscript,
   Superscript,
-  CodeBlockLowlight.configure({ lowlight }),
+  ...(codeBlock === null ? [] : [codeBlock || CodeBlockLowlight.configure({ lowlight })]),
   ...(image ? [image] : []),
   ...custom,
   ...(table ? [table.table, table.row, table.header, table.cell] : []),

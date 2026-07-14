@@ -1,7 +1,9 @@
 export const normalizeClipboardText = (value: string): string => (
   value
     .replace(/\r\n?/g, '\n')
-    .replace(/[\u200b-\u200f\u202a-\u202e\u2060\ufeff]/g, '')
+    // U+200C/U+200D are meaningful joiners: deleting them corrupts Persian
+    // spelling and multi-code-point emoji such as 👩‍🔬.
+    .replace(/[\u200b\u2060\ufeff]/g, '')
     .replace(/\u00a0/g, ' ')
 );
 

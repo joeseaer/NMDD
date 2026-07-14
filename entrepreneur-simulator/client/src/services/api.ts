@@ -1,7 +1,42 @@
 import { CURRENT_USER_ID } from '../config/currentUser';
+import { truncateGraphemes } from '../features/document-editor/text/graphemes';
 
 const API_BASE_URL = '/api';
 export { CURRENT_USER_ID };
+
+const htmlToPlainText = (value: string) => {
+    if (!/[<&]/.test(value)) return value;
+    if (typeof DOMParser !== 'undefined') {
+        const document = new DOMParser().parseFromString(value, 'text/html');
+        document.querySelectorAll('script, style, template').forEach((node) => node.remove());
+        return document.body.textContent || '';
+    }
+    return value.replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ');
+};
+
+export const parseApiErrorMessage = (
+    responseText: string,
+    fallback: string,
+    maxLength = 200,
+) => {
+    const text = String(responseText || '').trim();
+    if (!text) return fallback;
+
+    let payload: any = null;
+    try {
+        payload = JSON.parse(text);
+    } catch {
+        // Non-JSON server responses are converted to safe plain text below.
+    }
+
+    const structuredMessage = payload && typeof payload === 'object'
+        ? payload.error || payload.detail || payload.message
+        : null;
+    const message = htmlToPlainText(typeof structuredMessage === 'string' ? structuredMessage : text)
+        .replace(/\s+/g, ' ')
+        .trim();
+    return truncateGraphemes(message || fallback, maxLength);
+};
 
 export type SOPSaveResult = {
     id: string;
@@ -41,13 +76,8 @@ const uploadFileRequest = async (file: File, label: string = 'file') => {
     if (!response.ok) {
         const text = await response.text().catch(() => '');
         const statusHint = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
-        if (!text) throw new Error(`Failed to upload ${label} (${statusHint})`);
-        try {
-            const errorData = JSON.parse(text);
-            throw new Error(errorData.error || errorData.detail || `Failed to upload ${label} (${statusHint})`);
-        } catch {
-            throw new Error(`Failed to upload ${label} (${statusHint}): ${text.substring(0, 160)}`);
-        }
+        const fallback = `Failed to upload ${label} (${statusHint})`;
+        throw new Error(parseApiErrorMessage(text, fallback, 160));
     }
 
     return response.json();
@@ -103,7 +133,7 @@ export const api = {
             if (response.status === 409 && errorData?.code === 'SOP_REVISION_CONFLICT') {
                 throw new SOPRevisionConflictError(errorData);
             }
-            throw new Error(errorData?.error || `创建失败（${statusHint}）：${text.substring(0, 120)}`);
+            throw new Error(errorData?.error || `创建失败（${statusHint}）：${truncateGraphemes(text, 120)}`);
         }
 
         if (!text) {
@@ -118,7 +148,7 @@ export const api = {
             return data;
         } catch (e: any) {
             console.error("JSON Parse Error:", e, "Response Text:", text);
-            throw new Error(e.message || `Invalid JSON response: ${text.substring(0, 100)}...`);
+            throw new Error(e.message || `Invalid JSON response: ${truncateGraphemes(text, 100)}...`);
         }
     },
 
@@ -145,12 +175,7 @@ export const api = {
         });
         if (!response.ok) {
             const text = await response.text().catch(() => '');
-            try {
-                const data = JSON.parse(text);
-                throw new Error(data.error || 'Failed to promote research item');
-            } catch {
-                throw new Error(text || 'Failed to promote research item');
-            }
+            throw new Error(parseApiErrorMessage(text, 'Failed to promote research item'));
         }
         return response.json();
     },
@@ -189,13 +214,8 @@ export const api = {
         if (!response.ok) {
             const text = await response.text().catch(() => '');
             const statusHint = `HTTP ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`;
-            if (!text) throw new Error(`Failed to update person (${statusHint})`);
-            try {
-                const data = JSON.parse(text);
-                throw new Error(data.error || data.detail || `Failed to update person (${statusHint})`);
-            } catch {
-                throw new Error(`Failed to update person (${statusHint}): ${text.substring(0, 160)}`);
-            }
+            const fallback = `Failed to update person (${statusHint})`;
+            throw new Error(parseApiErrorMessage(text, fallback, 160));
         }
         return response.json();
     },
@@ -323,13 +343,7 @@ export const api = {
         });
         if (!response.ok) {
             const text = await response.text().catch(() => '');
-            if (!text) throw new Error('刷新 AI 建议失败');
-            try {
-                const json = JSON.parse(text);
-                throw new Error(json?.detail || json?.error || '刷新 AI 建议失败');
-            } catch {
-                throw new Error(text.substring(0, 160));
-            }
+            throw new Error(parseApiErrorMessage(text, '刷新 AI 建议失败', 160));
         }
         return response.json();
     },
@@ -342,13 +356,7 @@ export const api = {
         });
         if (!response.ok) {
             const text = await response.text().catch(() => '');
-            if (!text) throw new Error('生成策略建议失败');
-            try {
-                const json = JSON.parse(text);
-                throw new Error(json?.detail || json?.error || '生成策略建议失败');
-            } catch {
-                throw new Error(text.substring(0, 160));
-            }
+            throw new Error(parseApiErrorMessage(text, '生成策略建议失败', 160));
         }
         return response.json();
     },
@@ -361,13 +369,7 @@ export const api = {
         });
         if (!response.ok) {
             const text = await response.text().catch(() => '');
-            if (!text) throw new Error('策略评估失败');
-            try {
-                const json = JSON.parse(text);
-                throw new Error(json?.detail || json?.error || '策略评估失败');
-            } catch {
-                throw new Error(text.substring(0, 160));
-            }
+            throw new Error(parseApiErrorMessage(text, '策略评估失败', 160));
         }
         return response.json();
     },
@@ -460,7 +462,7 @@ export const api = {
             }
             const detail = parsed?.detail || parsed?.error;
             if (detail) throw new Error(`获取每日内参失败（${statusHint}）：${detail}`);
-            throw new Error(`获取每日内参失败（${statusHint}）：${text.substring(0, 300)}`);
+            throw new Error(`获取每日内参失败（${statusHint}）：${truncateGraphemes(text, 300)}`);
         }
         return response.json();
     },
@@ -592,13 +594,7 @@ export const api = {
                 throw new Error('云端后端尚未发布 AI 提取接口（/api/interaction/parse-create），请先部署后端最新版');
             }
             const text = await response.text().catch(() => '');
-            if (!text) throw new Error('AI提取互动记录失败');
-            try {
-                const json = JSON.parse(text);
-                throw new Error(json?.detail || json?.error || 'AI提取互动记录失败');
-            } catch {
-                throw new Error(text.substring(0, 200));
-            }
+            throw new Error(parseApiErrorMessage(text, 'AI提取互动记录失败', 200));
         }
         return response.json();
     },

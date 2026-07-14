@@ -35,14 +35,25 @@ const valueToText = (value) => {
   return '';
 };
 
+const splitGraphemes = (value) => {
+  const text = String(value || '');
+  if (typeof Intl?.Segmenter === 'function') {
+    const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+    return Array.from(segmenter.segment(text), (entry) => entry.segment);
+  }
+  return Array.from(text);
+};
+
 const compactText = (value, maxLength = MAX_SNIPPET_LENGTH) => {
   const text = valueToText(value)
     .replace(/\u00a0/g, ' ')
     .replace(/[ \t]+/g, ' ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
-  if (!maxLength || text.length <= maxLength) return text;
-  return `${text.slice(0, maxLength - 1).trim()}...`;
+  if (!maxLength) return text;
+  const graphemes = splitGraphemes(text);
+  if (graphemes.length <= maxLength) return text;
+  return `${graphemes.slice(0, maxLength - 1).join('').trim()}...`;
 };
 
 const getNodeText = (node) => {
@@ -358,6 +369,7 @@ const buildDecisionDocumentContext = async ({ userId, query, maxBlocks = 12, dom
 module.exports = {
   buildDecisionDocumentContext,
   buildDocumentCorpus,
+  compactText,
   collectJsonBlocks,
   collectMarkdownBlocks,
 };

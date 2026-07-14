@@ -7,7 +7,7 @@
   margin-inline: auto;
   padding: 0 !important;
   color: var(--smart-doc-text);
-  font-family: var(--smart-doc-font-sans);
+  font-family: var(--smart-doc-content-font);
   font-size: var(--smart-doc-body-size);
   font-synthesis: none;
   font-weight: 400;
