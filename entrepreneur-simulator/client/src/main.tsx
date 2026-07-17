@@ -5,6 +5,7 @@ import './index.css'
 import { BrowserRouter } from 'react-router-dom'
 import AppErrorBoundary from './components/AppErrorBoundary'
 import { DocumentNavigationGuardProvider } from './features/document-editor/navigation/DocumentNavigationGuard'
+import AuthGate from './components/AuthGate'
 
 const showBootError = (err: unknown) => {
   const root = document.getElementById('root');
@@ -48,7 +49,9 @@ try {
       <AppErrorBoundary>
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <DocumentNavigationGuardProvider>
-            <App />
+            <AuthGate>
+              <App />
+            </AuthGate>
           </DocumentNavigationGuardProvider>
         </BrowserRouter>
       </AppErrorBoundary>

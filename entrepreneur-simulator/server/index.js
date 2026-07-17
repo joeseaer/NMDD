@@ -15,6 +15,15 @@ fastify.register(require('@fastify/multipart'), {
 const dbService = require('./services/dbService');
 const chatService = require('./services/chatService');
 const sceneService = require('./services/sceneService');
+const { isAuthenticated } = require('./routes/auth');
+
+fastify.addHook('onRequest', async (request, reply) => {
+  const pathname = String(request.raw.url || '').split('?')[0];
+  if (!pathname.startsWith('/api/') || pathname.startsWith('/api/auth/')) return;
+  if (!isAuthenticated(request)) {
+    return reply.code(401).send({ error: '请先登录' });
+  }
+});
 
 // WebSocket for Real-time Chat Assistant & Scene Sync
 fastify.register(async function (fastify) {
@@ -40,6 +49,7 @@ fastify.register(async function (fastify) {
 });
 
 // REST API Routes
+fastify.register(require('./routes/auth'), { prefix: '/api/auth' });
 fastify.register(require('./routes/api'), { prefix: '/api' });
 
 const start = async () => {
