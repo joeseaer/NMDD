@@ -7,7 +7,6 @@ import Dashboard from './pages/Dashboard'
 import Training from './pages/Training'
 import Review from './pages/Review'
 import NoteManager from './pages/NoteManager'
-import PersonalityManager from './pages/PersonalityManager'
 import RealReview from './pages/RealReview'
 import ChatAssistant from './pages/ChatAssistant'
 import EvolutionTree from './pages/EvolutionTree'
@@ -15,6 +14,7 @@ import SettingsPage from './pages/Settings'
 import Planner from './pages/Planner'
 import ResearchWorkspace from './pages/ResearchWorkspace'
 import EditorLab from './pages/EditorLab'
+import Relationships from './features/relationships/Relationships'
 import FloatingAssistant from './components/FloatingAssistant'
 import { CURRENT_USER_ID } from './config/currentUser'
 import { GuardedLink } from './features/document-editor/navigation/DocumentNavigationGuard'
@@ -37,7 +37,7 @@ function App() {
     else if (location.pathname.includes('/research')) setActiveTab('research');
     else if (location.pathname.includes('/dashboard')) setActiveTab('dashboard');
     else if (location.pathname.includes('/notes')) setActiveTab('notes');
-    else if (location.pathname.includes('/personality')) setActiveTab('personality');
+    else if (location.pathname.includes('/relationships') || location.pathname.includes('/personality')) setActiveTab('relationships');
     else if (location.pathname.includes('/real-review')) setActiveTab('real-review');
     else if (location.pathname.includes('/assistant')) setActiveTab('assistant');
     else setActiveTab('dashboard');
@@ -76,6 +76,7 @@ function App() {
   }, []);
 
   const defaultHome = (import.meta as any).env?.VITE_DEFAULT_HOME || 'planner';
+  const isRelationshipRoute = location.pathname.startsWith('/relationships') || location.pathname === '/personality';
   const Home = () => {
     if (defaultHome === 'planner') return <Navigate to="/planner" replace />;
     return <Dashboard />;
@@ -90,7 +91,7 @@ function App() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden font-sans text-gray-900">
+    <div className="flex h-[100dvh] bg-gray-50 overflow-hidden font-sans text-gray-900">
       
       {/* Mobile Menu Overlay */}
       {isMobileMenuOpen && (
@@ -138,7 +139,7 @@ function App() {
             <SidebarLink collapsed={isSidebarCollapsed} to="/planner" icon={<Calendar size={20} />} label="日程待办" active={activeTab === 'planner'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/notes?view=notes" icon={<Notebook size={20} />} label="随笔/文档" active={activeTab === 'notes'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/research?type=document" icon={<Microscope size={20} />} label="科研工作台" active={activeTab === 'research'} />
-            <SidebarLink collapsed={isSidebarCollapsed} to="/personality" icon={<Users size={20} />} label="性格分析档案" active={activeTab === 'personality'} />
+            <SidebarLink collapsed={isSidebarCollapsed} to="/relationships/today" icon={<Users size={20} />} label="关系与机会" active={activeTab === 'relationships'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/real-review" icon={<FileText size={20} />} label="真实场景复盘" active={activeTab === 'real-review'} />
           </div>
 
@@ -189,8 +190,8 @@ function App() {
           </GuardedLink>
         </header>
 
-        <div className="flex-1 overflow-auto p-2 sm:p-4 lg:p-8 w-full">
-          <div className="max-w-7xl mx-auto h-full">
+        <div className={`flex-1 p-2 sm:p-4 lg:p-8 w-full ${isRelationshipRoute ? 'overflow-hidden' : 'overflow-auto'}`}>
+          <div className={`${isRelationshipRoute ? 'max-w-none' : 'max-w-7xl'} mx-auto h-full`}>
             <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/dashboard" element={<Dashboard />} />
@@ -200,7 +201,8 @@ function App() {
               <Route path="/sop" element={<Navigate to="/notes?view=sop" replace />} />
               <Route path="/notes" element={<NoteManager />} />
               <Route path="/research" element={<ResearchWorkspace />} />
-              <Route path="/personality" element={<PersonalityManager />} />
+              <Route path="/relationships/*" element={<Relationships />} />
+              <Route path="/personality" element={<Navigate to="/relationships/people" replace />} />
               <Route path="/real-review" element={<RealReview />} />
               <Route path="/evolution-tree" element={<EvolutionTree />} />
               <Route path="/assistant" element={<ChatAssistant />} />
@@ -210,7 +212,7 @@ function App() {
         </div>
       </main>
 
-      <FloatingAssistant />
+      {!isRelationshipRoute && <FloatingAssistant />}
     </div>
   )
 }

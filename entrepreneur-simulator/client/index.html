@@ -27,10 +27,12 @@
         };
 
         window.addEventListener('error', function (e) {
+          if (window.__APP_BOOT_OK__) return;
           var msg = (e && e.error && e.error.message) ? e.error.message : (e && e.message) ? e.message : 'Unknown error';
           show('页面启动失败', msg);
         });
         window.addEventListener('unhandledrejection', function (e) {
+          if (window.__APP_BOOT_OK__) return;
           var r = e && e.reason;
           var msg = r && r.message ? r.message : String(r || 'Unknown error');
           show('页面启动失败', msg);

@@ -1,5 +1,13 @@
 import { CURRENT_USER_ID } from '../config/currentUser';
 import { truncateGraphemes } from '../features/document-editor/text/graphemes';
+import {
+    mindMapImageAssetUrl,
+} from '../features/mindmap/assets/managedImageTransport';
+
+export {
+    mindMapImageAssetUrl,
+    resolveMindMapImageResourceName,
+} from '../features/mindmap/assets/managedImageTransport';
 
 const API_BASE_URL = '/api';
 export { CURRENT_USER_ID };
@@ -64,13 +72,35 @@ export class SOPRevisionConflictError extends Error {
     }
 }
 
-const uploadFileRequest = async (file: File, label: string = 'file') => {
+export type UploadResult = {
+    url: string;
+    /** Present for server-managed raster uploads; absent from legacy mocks/files. */
+    objectKey?: string;
+    fileName: string;
+    mimeType: string;
+    byteSize: number;
+    sha256: string;
+};
+
+export interface ApiRequestOptions {
+    readonly signal?: AbortSignal;
+}
+
+const MIND_MAP_IMAGE_MAX_BYTES = 15 * 1024 * 1024;
+
+const uploadFileRequest = async (
+    file: File,
+    label: string = 'file',
+    kind?: 'image',
+    options: ApiRequestOptions = {},
+): Promise<UploadResult> => {
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${API_BASE_URL}/upload`, {
+    const response = await fetch(`${API_BASE_URL}/upload${kind ? `?kind=${kind}` : ''}`, {
         method: 'POST',
         body: formData,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
 
     if (!response.ok) {
@@ -100,7 +130,34 @@ export const api = {
 
     uploadFile: async (file: File) => uploadFileRequest(file, 'file'),
 
-    uploadImage: async (file: File) => uploadFileRequest(file, 'image'),
+    uploadImage: async (file: File, options: ApiRequestOptions = {}) => (
+        uploadFileRequest(file, 'image', 'image', options)
+    ),
+
+    getMindMapImageAssetBytes: async (
+        resourceNameOrObjectKey: string,
+        options: ApiRequestOptions = {},
+    ): Promise<Uint8Array> => {
+        const response = await fetch(mindMapImageAssetUrl(resourceNameOrObjectKey, API_BASE_URL), {
+            credentials: 'same-origin',
+            ...(options.signal === undefined ? {} : { signal: options.signal }),
+        });
+        if (!response.ok) {
+            const text = await response.text().catch(() => '');
+            const fallback = `Failed to read image asset (HTTP ${response.status})`;
+            throw new Error(parseApiErrorMessage(text, fallback, 160));
+        }
+
+        const declaredLength = Number(response.headers.get('content-length'));
+        if (Number.isFinite(declaredLength) && declaredLength > MIND_MAP_IMAGE_MAX_BYTES) {
+            throw new Error('Managed image exceeds the 15MB read limit.');
+        }
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        if (bytes.byteLength === 0 || bytes.byteLength > MIND_MAP_IMAGE_MAX_BYTES) {
+            throw new Error('Managed image has an invalid byte length.');
+        }
+        return bytes;
+    },
 
     createSOP: async (sopData: any): Promise<SOPSaveResult> => {
         // Ensure user_id is present

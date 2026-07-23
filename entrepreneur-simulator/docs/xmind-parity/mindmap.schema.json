@@ -1,0 +1,4318 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.nmdd.app/mindmap/v1.json",
+  "title": "NMDD Mind Map Canonical Document V1",
+  "description": "Canonical, UI-independent document model for XMind-parity mind maps.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schemaVersion",
+    "minimumReaderVersion",
+    "id",
+    "contentRevision",
+    "title",
+    "sheets",
+    "assets",
+    "styles",
+    "themes",
+    "markerGroups",
+    "markerDefinitions",
+    "presentations",
+    "savedViews",
+    "actors"
+  ],
+  "properties": {
+    "schema": {
+      "const": "app.nmdd.mindmap"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "minimumReaderVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1
+    },
+    "id": {
+      "$ref": "#/$defs/uuidv7"
+    },
+    "contentRevision": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "locale": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 64
+    },
+    "sheets": {
+      "$ref": "#/$defs/sheetMap"
+    },
+    "assets": {
+      "$ref": "#/$defs/assetMap"
+    },
+    "styles": {
+      "$ref": "#/$defs/styleDefinitionMap"
+    },
+    "themes": {
+      "$ref": "#/$defs/themeMap"
+    },
+    "markerGroups": {
+      "$ref": "#/$defs/markerGroupMap"
+    },
+    "markerDefinitions": {
+      "$ref": "#/$defs/markerDefinitionMap"
+    },
+    "presentations": {
+      "$ref": "#/$defs/presentationDeckMap"
+    },
+    "savedViews": {
+      "$ref": "#/$defs/savedViewMap"
+    },
+    "actors": {
+      "$ref": "#/$defs/actorMap"
+    },
+    "collaboration": {
+      "$ref": "#/$defs/collaborationMetadata"
+    },
+    "audit": {
+      "$ref": "#/$defs/entityAudit"
+    },
+    "extensions": {
+      "$ref": "#/$defs/extensions"
+    }
+  },
+  "$defs": {
+    "uuidv7": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "orderKey": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[0-9A-Za-z._~-]+$"
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]*(?:\\.[a-z0-9-]+)+$"
+      },
+      "additionalProperties": true
+    },
+    "entityAudit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdBy": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedBy": {
+          "$ref": "#/$defs/uuidv7"
+        }
+      }
+    },
+    "actorSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "displayName",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "avatarAssetId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "externalRef": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "subject"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "subject": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        },
+        "status": {
+          "enum": [
+            "active",
+            "deactivated"
+          ]
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1000000,
+          "maximum": 1000000
+        }
+      }
+    },
+    "size": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height"
+      ],
+      "properties": {
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1000000
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1000000
+        }
+      }
+    },
+    "partialSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1000000
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1000000
+        }
+      },
+      "minProperties": 1
+    },
+    "rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "width": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1000000
+        },
+        "height": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 1000000
+        }
+      }
+    },
+    "zoneRect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "width",
+        "height"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "width": {
+          "type": "number",
+          "minimum": 100,
+          "maximum": 1000000
+        },
+        "height": {
+          "type": "number",
+          "minimum": 100,
+          "maximum": 1000000
+        }
+      }
+    },
+    "viewport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "x",
+        "y",
+        "zoom"
+      ],
+      "properties": {
+        "x": {
+          "type": "number",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "zoom": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 64
+        }
+      }
+    },
+    "richText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "version",
+        "blocks"
+      ],
+      "properties": {
+        "type": {
+          "const": "doc"
+        },
+        "version": {
+          "const": 1
+        },
+        "blocks": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/paragraph"
+              },
+              {
+                "$ref": "#/$defs/richList"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "paragraph": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "children"
+      ],
+      "properties": {
+        "type": {
+          "const": "paragraph"
+        },
+        "align": {
+          "enum": [
+            "left",
+            "center",
+            "right"
+          ]
+        },
+        "children": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "$ref": "#/$defs/richInline"
+          }
+        }
+      }
+    },
+    "richListItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "children"
+      ],
+      "properties": {
+        "type": {
+          "const": "listItem"
+        },
+        "children": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10000,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/paragraph"
+              },
+              {
+                "$ref": "#/$defs/richList"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "richList": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "items"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "bulletList",
+            "orderedList"
+          ]
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 10000,
+          "items": {
+            "$ref": "#/$defs/richListItem"
+          }
+        }
+      }
+    },
+    "richInline": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "text"
+          ],
+          "properties": {
+            "type": {
+              "const": "text"
+            },
+            "text": {
+              "type": "string",
+              "maxLength": 1000000
+            },
+            "marks": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "$ref": "#/$defs/richMark"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "hardBreak"
+            }
+          }
+        }
+      ]
+    },
+    "richMark": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "bold",
+                "italic",
+                "underline",
+                "strike",
+                "code"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "color"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "fontFamily"
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 512
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "fontSize"
+            },
+            "value": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1000
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "value"
+          ],
+          "properties": {
+            "type": {
+              "const": "textTransform"
+            },
+            "value": {
+              "enum": [
+                "none",
+                "uppercase",
+                "lowercase",
+                "capitalize"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "href"
+          ],
+          "properties": {
+            "type": {
+              "const": "link"
+            },
+            "href": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 16384
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          }
+        }
+      ]
+    },
+    "colorValue": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "const": "literal"
+            },
+            "value": {
+              "type": "string",
+              "pattern": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "token"
+          ],
+          "properties": {
+            "kind": {
+              "const": "token"
+            },
+            "token": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        }
+      ]
+    },
+    "structureId": {
+      "oneOf": [
+        {
+          "enum": [
+            "core:mind-map",
+            "core:logic-chart",
+            "core:org-chart",
+            "core:tree-chart",
+            "core:timeline",
+            "core:fishbone",
+            "core:matrix",
+            "core:brace-map",
+            "core:tree-table",
+            "core:grid"
+          ]
+        },
+        {
+          "type": "string",
+          "pattern": "^extension:[a-z0-9][a-z0-9._-]{0,127}$"
+        }
+      ]
+    },
+    "branchLayout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "structure",
+        "direction",
+        "mode"
+      ],
+      "properties": {
+        "structure": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/structureId"
+            },
+            {
+              "const": "inherit"
+            }
+          ]
+        },
+        "direction": {
+          "enum": [
+            "left-to-right",
+            "right-to-left",
+            "top-to-bottom",
+            "bottom-to-top",
+            "both",
+            "radial",
+            "clockwise",
+            "counterclockwise",
+            "inherit"
+          ]
+        },
+        "mode": {
+          "enum": [
+            "auto",
+            "hybrid",
+            "manual"
+          ]
+        },
+        "compact": {
+          "type": "boolean"
+        },
+        "balance": {
+          "enum": [
+            "none",
+            "automatic",
+            "locked"
+          ]
+        },
+        "freePositioning": {
+          "type": "boolean"
+        },
+        "justifyTopicAlignment": {
+          "type": "boolean"
+        },
+        "spacing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sibling",
+            "level"
+          ],
+          "properties": {
+            "sibling": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "level": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10000
+            }
+          }
+        },
+        "variantId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "options": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,127}$"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        }
+      }
+    },
+    "resolvedBranchLayout": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/branchLayout"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "structure": {
+              "not": {
+                "const": "inherit"
+              }
+            },
+            "direction": {
+              "not": {
+                "const": "inherit"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "advancedLayoutSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "flexibleFloatingTopics",
+        "allowTopicOverlap"
+      ],
+      "properties": {
+        "flexibleFloatingTopics": {
+          "type": "boolean"
+        },
+        "allowTopicOverlap": {
+          "type": "boolean"
+        }
+      }
+    },
+    "numberingSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "style",
+        "startAt"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "style": {
+          "enum": [
+            "decimal",
+            "roman-lower",
+            "roman-upper",
+            "alpha-lower",
+            "alpha-upper",
+            "chinese"
+          ]
+        },
+        "startAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000
+        },
+        "prefix": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "suffix": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "separator": {
+          "type": "string",
+          "maxLength": 32
+        }
+      }
+    },
+    "topicPlacement": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "const": "auto"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "dx",
+            "dy"
+          ],
+          "properties": {
+            "mode": {
+              "const": "offset"
+            },
+            "dx": {
+              "type": "number",
+              "minimum": -1000000,
+              "maximum": 1000000
+            },
+            "dy": {
+              "type": "number",
+              "minimum": -1000000,
+              "maximum": 1000000
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "x",
+            "y"
+          ],
+          "properties": {
+            "mode": {
+              "const": "absolute"
+            },
+            "x": {
+              "type": "number",
+              "minimum": -1000000,
+              "maximum": 1000000
+            },
+            "y": {
+              "type": "number",
+              "minimum": -1000000,
+              "maximum": 1000000
+            }
+          }
+        }
+      ]
+    },
+    "padding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "top",
+        "right",
+        "bottom",
+        "left"
+      ],
+      "properties": {
+        "top": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "right": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "bottom": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "left": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        }
+      }
+    },
+    "styleScope": {
+      "enum": [
+        "sheet",
+        "topic",
+        "tree-edge",
+        "relationship",
+        "boundary",
+        "summary",
+        "callout",
+        "zone",
+        "marker",
+        "presentation"
+      ]
+    },
+    "styleBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "styleId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "inheritance": {
+          "enum": [
+            "default",
+            "break"
+          ]
+        },
+        "overrides": {
+          "$ref": "#/$defs/styleProperties"
+        }
+      },
+      "minProperties": 1
+    },
+    "styleProperties": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "opacity": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "typography": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fontFamily": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "fontSize": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1000
+            },
+            "fontWeight": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "italic": {
+              "type": "boolean"
+            },
+            "underline": {
+              "type": "boolean"
+            },
+            "strike": {
+              "type": "boolean"
+            },
+            "lineHeight": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 20
+            },
+            "letterSpacing": {
+              "type": "number",
+              "minimum": -100,
+              "maximum": 100
+            },
+            "color": {
+              "$ref": "#/$defs/colorValue"
+            },
+            "align": {
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ]
+            }
+          }
+        },
+        "fill": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/colorValue"
+            },
+            "opacity": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          }
+        },
+        "border": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/colorValue"
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            "dash": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 10000
+              }
+            },
+            "radius": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10000
+            }
+          }
+        },
+        "shape": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "padding": {
+          "$ref": "#/$defs/padding"
+        },
+        "minSize": {
+          "$ref": "#/$defs/partialSize"
+        },
+        "maxSize": {
+          "$ref": "#/$defs/partialSize"
+        },
+        "shadow": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "color",
+            "blur",
+            "x",
+            "y"
+          ],
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/colorValue"
+            },
+            "blur": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "x": {
+              "type": "number",
+              "minimum": -10000,
+              "maximum": 10000
+            },
+            "y": {
+              "type": "number",
+              "minimum": -10000,
+              "maximum": 10000
+            }
+          }
+        },
+        "connector": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "color": {
+              "$ref": "#/$defs/colorValue"
+            },
+            "width": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            "dash": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 10000
+              }
+            },
+            "shape": {
+              "enum": [
+                "straight",
+                "curve",
+                "elbow",
+                "rounded-elbow"
+              ]
+            },
+            "startCap": {
+              "enum": [
+                "butt",
+                "round",
+                "square",
+                "arrow"
+              ]
+            },
+            "endCap": {
+              "enum": [
+                "butt",
+                "round",
+                "square",
+                "arrow"
+              ]
+            },
+            "taper": {
+              "enum": [
+                "none",
+                "start",
+                "end",
+                "both"
+              ]
+            },
+            "colorMode": {
+              "enum": [
+                "single",
+                "by-main-branch",
+                "palette"
+              ]
+            },
+            "palette": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "$ref": "#/$defs/colorValue"
+              }
+            }
+          }
+        }
+      }
+    },
+    "canvasSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "background"
+      ],
+      "properties": {
+        "background": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "color"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "solid"
+                },
+                "color": {
+                  "$ref": "#/$defs/colorValue"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "from",
+                "to",
+                "angle"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "gradient"
+                },
+                "from": {
+                  "$ref": "#/$defs/colorValue"
+                },
+                "to": {
+                  "$ref": "#/$defs/colorValue"
+                },
+                "angle": {
+                  "type": "number",
+                  "minimum": -360,
+                  "maximum": 360
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "assetId",
+                "fit"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "image"
+                },
+                "assetId": {
+                  "$ref": "#/$defs/uuidv7"
+                },
+                "fit": {
+                  "enum": [
+                    "cover",
+                    "contain",
+                    "tile"
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "grid": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "size",
+            "color"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "size": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 10000
+            },
+            "color": {
+              "$ref": "#/$defs/colorValue"
+            }
+          }
+        }
+      }
+    },
+    "topic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "role",
+        "title",
+        "placement",
+        "sizing",
+        "defaultCollapsed"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "role": {
+          "enum": [
+            "central",
+            "regular",
+            "floating-root",
+            "summary-result"
+          ]
+        },
+        "title": {
+          "$ref": "#/$defs/richText"
+        },
+        "branchLayout": {
+          "$ref": "#/$defs/branchLayout"
+        },
+        "childNumbering": {
+          "$ref": "#/$defs/numberingSpec"
+        },
+        "placement": {
+          "$ref": "#/$defs/topicPlacement"
+        },
+        "sizing": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "width"
+          ],
+          "properties": {
+            "width": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "mode"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "const": "fit"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "mode",
+                    "value"
+                  ],
+                  "properties": {
+                    "mode": {
+                      "const": "fixed"
+                    },
+                    "value": {
+                      "type": "number",
+                      "exclusiveMinimum": 0,
+                      "maximum": 1000000
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "defaultCollapsed": {
+          "type": "boolean"
+        },
+        "style": {
+          "$ref": "#/$defs/styleBinding"
+        },
+        "labels": {
+          "type": "array",
+          "maxItems": 1024,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "treeEdge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "parentTopicId",
+        "childTopicId",
+        "orderKey",
+        "side"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "parentTopicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "childTopicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "side": {
+          "enum": [
+            "left",
+            "right",
+            "top",
+            "bottom",
+            "center",
+            "inherit"
+          ]
+        },
+        "slot": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "style": {
+          "$ref": "#/$defs/styleBinding"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "relationshipEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "element",
+        "anchor"
+      ],
+      "properties": {
+        "element": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "topicId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "topic"
+                },
+                "topicId": {
+                  "$ref": "#/$defs/uuidv7"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "boundaryId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "boundary"
+                },
+                "boundaryId": {
+                  "$ref": "#/$defs/uuidv7"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "calloutId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "callout"
+                },
+                "calloutId": {
+                  "$ref": "#/$defs/uuidv7"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "zoneId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "zone"
+                },
+                "zoneId": {
+                  "$ref": "#/$defs/uuidv7"
+                }
+              }
+            }
+          ]
+        },
+        "anchor": {
+          "oneOf": [
+            {
+              "enum": [
+                "auto",
+                "left",
+                "right",
+                "top",
+                "bottom"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "xRatio",
+                "yRatio"
+              ],
+              "properties": {
+                "xRatio": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "yRatio": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "relationshipControlPoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "orderKey",
+        "x",
+        "y"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "x": {
+          "type": "number",
+          "minimum": -1000000,
+          "maximum": 1000000
+        },
+        "y": {
+          "type": "number",
+          "minimum": -1000000,
+          "maximum": 1000000
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "source",
+        "target",
+        "routing",
+        "startArrow",
+        "endArrow"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "source": {
+          "$ref": "#/$defs/relationshipEndpoint"
+        },
+        "target": {
+          "$ref": "#/$defs/relationshipEndpoint"
+        },
+        "title": {
+          "$ref": "#/$defs/richText"
+        },
+        "routing": {
+          "enum": [
+            "straight",
+            "curve",
+            "orthogonal",
+            "manual"
+          ]
+        },
+        "controlPoints": {
+          "$ref": "#/$defs/relationshipControlPointMap"
+        },
+        "startArrow": {
+          "$ref": "#/$defs/arrowHead"
+        },
+        "endArrow": {
+          "$ref": "#/$defs/arrowHead"
+        },
+        "style": {
+          "$ref": "#/$defs/styleBinding"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "arrowHead": {
+      "enum": [
+        "none",
+        "triangle",
+        "open-triangle",
+        "diamond",
+        "open-diamond",
+        "circle",
+        "open-circle",
+        "square",
+        "open-square",
+        "bar",
+        "double-bar"
+      ]
+    },
+    "topicScope": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "rootTopicId",
+            "depth"
+          ],
+          "properties": {
+            "kind": {
+              "const": "subtree"
+            },
+            "rootTopicId": {
+              "$ref": "#/$defs/uuidv7"
+            },
+            "depth": {
+              "oneOf": [
+                {
+                  "const": "all"
+                },
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
+                }
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "parentTopicId",
+            "firstEdgeId",
+            "lastEdgeId",
+            "includeDescendants"
+          ],
+          "properties": {
+            "kind": {
+              "const": "sibling-range"
+            },
+            "parentTopicId": {
+              "$ref": "#/$defs/uuidv7"
+            },
+            "firstEdgeId": {
+              "$ref": "#/$defs/uuidv7"
+            },
+            "lastEdgeId": {
+              "$ref": "#/$defs/uuidv7"
+            },
+            "includeDescendants": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "topicIds"
+          ],
+          "properties": {
+            "kind": {
+              "const": "explicit"
+            },
+            "topicIds": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100000,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/uuidv7"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "scope",
+        "padding"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "scope": {
+          "$ref": "#/$defs/topicScope"
+        },
+        "title": {
+          "$ref": "#/$defs/richText"
+        },
+        "padding": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "style": {
+          "$ref": "#/$defs/styleBinding"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "scope",
+        "resultTopicId",
+        "orientation"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "scope": {
+          "$ref": "#/$defs/topicScope"
+        },
+        "resultTopicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orientation": {
+          "enum": [
+            "left",
+            "right",
+            "top",
+            "bottom",
+            "auto"
+          ]
+        },
+        "style": {
+          "$ref": "#/$defs/styleBinding"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "calloutPlacement": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "const": "auto"
+            },
+            "preferredSide": {
+              "enum": [
+                "left",
+                "right",
+                "top",
+                "bottom",
+                "center",
+                "inherit"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "dx",
+            "dy"
+          ],
+          "properties": {
+            "mode": {
+              "const": "offset"
+            },
+            "dx": {
+              "type": "number",
+              "minimum": -1000000,
+              "maximum": 1000000
+            },
+            "dy": {
+              "type": "number",
+              "minimum": -1000000,
+              "maximum": 1000000
+            }
+          }
+        }
+      ]
+    },
+    "callout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "targetTopicId",
+        "content",
+        "placement",
+        "tail"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "targetTopicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "content": {
+          "$ref": "#/$defs/richText"
+        },
+        "placement": {
+          "$ref": "#/$defs/calloutPlacement"
+        },
+        "tail": {
+          "enum": [
+            "line",
+            "triangle",
+            "curve"
+          ]
+        },
+        "style": {
+          "$ref": "#/$defs/styleBinding"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "zone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "rootTopicIds",
+        "rect",
+        "autoResize",
+        "lockAspectRatio",
+        "collapsed",
+        "zOrderKey",
+        "padding"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "rootTopicIds": {
+          "type": "array",
+          "maxItems": 100000,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/uuidv7"
+          }
+        },
+        "title": {
+          "$ref": "#/$defs/richText"
+        },
+        "rect": {
+          "$ref": "#/$defs/zoneRect"
+        },
+        "autoResize": {
+          "type": "boolean"
+        },
+        "lockAspectRatio": {
+          "type": "boolean"
+        },
+        "collapsed": {
+          "type": "boolean"
+        },
+        "zOrderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "padding": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "style": {
+          "$ref": "#/$defs/styleBinding"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "styleDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "scope",
+        "properties"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "scope": {
+          "$ref": "#/$defs/styleScope"
+        },
+        "basedOnStyleId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "properties": {
+          "$ref": "#/$defs/styleProperties"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "themeRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "orderKey",
+        "selector",
+        "binding"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "selector": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "scope"
+          ],
+          "properties": {
+            "scope": {
+              "$ref": "#/$defs/styleScope"
+            },
+            "topicRole": {
+              "enum": [
+                "central",
+                "regular",
+                "floating-root",
+                "summary-result"
+              ]
+            },
+            "level": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000
+            },
+            "side": {
+              "enum": [
+                "left",
+                "right",
+                "top",
+                "bottom",
+                "center",
+                "inherit"
+              ]
+            },
+            "structure": {
+              "$ref": "#/$defs/structureId"
+            }
+          }
+        },
+        "binding": {
+          "$ref": "#/$defs/styleBinding"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "theme": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "tokens",
+        "defaultStyles",
+        "rules"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "tokens": {
+          "type": "object",
+          "propertyNames": {
+            "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,127}$"
+          },
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number"
+            ]
+          }
+        },
+        "defaultStyles": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/styleScope"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/styleBinding"
+          }
+        },
+        "rules": {
+          "$ref": "#/$defs/themeRuleMap"
+        },
+        "defaultBranchLayout": {
+          "$ref": "#/$defs/branchLayout"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "markerGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "orderKey",
+        "name",
+        "kind",
+        "exclusive"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "kind": {
+          "enum": [
+            "builtin",
+            "custom"
+          ]
+        },
+        "exclusive": {
+          "type": "boolean"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "markerDefinition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "groupId",
+        "orderKey",
+        "name",
+        "source"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "groupId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "key"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "builtin"
+                },
+                "key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "assetId"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "asset"
+                },
+                "assetId": {
+                  "$ref": "#/$defs/uuidv7"
+                }
+              }
+            }
+          ]
+        },
+        "semanticValue": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "markerInstance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "topicId",
+        "markerDefinitionId",
+        "orderKey"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "topicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "markerDefinitionId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "markerLegendSpec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "visible",
+        "position"
+      ],
+      "properties": {
+        "visible": {
+          "type": "boolean"
+        },
+        "position": {
+          "$ref": "#/$defs/point"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "itemOrder": {
+          "type": "array",
+          "maxItems": 10000,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/uuidv7"
+          }
+        },
+        "style": {
+          "$ref": "#/$defs/styleBinding"
+        }
+      }
+    },
+    "note": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "topicId",
+        "content"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "topicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "content": {
+          "$ref": "#/$defs/richText"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "topicLink": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "topicId",
+        "orderKey",
+        "kind",
+        "status"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "kind": {
+              "enum": [
+                "web",
+                "email",
+                "file",
+                "folder"
+              ]
+            }
+          },
+          "required": [
+            "href"
+          ],
+          "not": {
+            "anyOf": [
+              { "required": ["targetSheetId"] },
+              { "required": ["targetTopicId"] },
+              { "required": ["targetDocumentPage"] }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "sheet"
+            }
+          },
+          "required": [
+            "targetSheetId"
+          ],
+          "not": {
+            "anyOf": [
+              { "required": ["href"] },
+              { "required": ["targetTopicId"] },
+              { "required": ["targetDocumentPage"] }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "topic"
+            }
+          },
+          "required": [
+            "targetSheetId",
+            "targetTopicId"
+          ],
+          "not": {
+            "anyOf": [
+              { "required": ["href"] },
+              { "required": ["targetDocumentPage"] }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "document-page"
+            }
+          },
+          "required": [
+            "targetDocumentPage"
+          ],
+          "not": {
+            "anyOf": [
+              { "required": ["href"] },
+              { "required": ["targetSheetId"] },
+              { "required": ["targetTopicId"] }
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "topicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "href": {
+          "type": "string",
+          "maxLength": 16384
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "kind": {
+          "enum": [
+            "web",
+            "email",
+            "file",
+            "folder",
+            "sheet",
+            "topic",
+            "document-page"
+          ]
+        },
+        "status": {
+          "enum": [
+            "active",
+            "broken"
+          ]
+        },
+        "targetSheetId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "targetTopicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "targetDocumentPage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "documentId",
+            "pageId"
+          ],
+          "properties": {
+            "documentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "pageId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            }
+          }
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "asset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "fileName",
+        "mimeType",
+        "byteSize",
+        "sha256",
+        "source"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "fileName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "mimeType": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9!#$&^_.+-]+/[A-Za-z0-9!#$&^_.+-]+$",
+          "maxLength": 256
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1099511627776
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "source": {
+          "oneOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "relativePath"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "embedded"
+                },
+                "relativePath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "objectKey"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "managed"
+                },
+                "objectKey": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 4096
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "kind",
+                "url"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "remote"
+                },
+                "url": {
+                  "type": "string",
+                  "format": "uri",
+                  "maxLength": 16384
+                },
+                "etag": {
+                  "type": "string",
+                  "maxLength": 1024
+                }
+              }
+            }
+          ]
+        },
+        "intrinsicSize": {
+          "$ref": "#/$defs/size"
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 315576000000
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "topicId",
+        "assetId",
+        "orderKey"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "topicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "assetId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "topicImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "topicId",
+        "assetId",
+        "orderKey",
+        "role",
+        "placement"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "topicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "assetId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "role": {
+          "enum": [
+            "inline",
+            "thumbnail",
+            "background",
+            "sticker"
+          ]
+        },
+        "placement": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "side",
+            "align",
+            "offset"
+          ],
+          "properties": {
+            "side": {
+              "enum": [
+                "top",
+                "bottom",
+                "left",
+                "right",
+                "overlay"
+              ]
+            },
+            "align": {
+              "enum": [
+                "start",
+                "center",
+                "end"
+              ]
+            },
+            "offset": {
+              "$ref": "#/$defs/point"
+            }
+          }
+        },
+        "size": {
+          "$ref": "#/$defs/size"
+        },
+        "crop": {
+          "$ref": "#/$defs/rect"
+        },
+        "alt": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "equation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "topicId",
+        "orderKey",
+        "syntax",
+        "source",
+        "display",
+        "scale"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "topicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "syntax": {
+          "enum": [
+            "latex",
+            "mathml"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 1000000
+        },
+        "display": {
+          "enum": [
+            "inline",
+            "block"
+          ]
+        },
+        "scale": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 100
+        },
+        "alt": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "audioClip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "topicId",
+        "assetId",
+        "orderKey"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "topicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "assetId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "transcript": {
+          "$ref": "#/$defs/richText"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "topicTodo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "topicId",
+        "completed"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "topicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "completed": {
+          "type": "boolean"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "topicTask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "topicId",
+        "status",
+        "progress"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "done"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "progress": {
+                "const": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not-started"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "progress": {
+                "const": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "in-progress"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "progress": {
+                "exclusiveMinimum": 0,
+                "exclusiveMaximum": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "blocked",
+                  "cancelled"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "progress": {
+                "exclusiveMaximum": 1
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "topicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "status": {
+          "enum": [
+            "not-started",
+            "in-progress",
+            "blocked",
+            "done",
+            "cancelled"
+          ]
+        },
+        "progress": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "startDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "dueDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "durationMinutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 525960000
+        },
+        "milestone": {
+          "type": "boolean"
+        },
+        "assigneeIds": {
+          "type": "array",
+          "maxItems": 10000,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/uuidv7"
+          }
+        },
+        "displayFields": {
+          "type": "array",
+          "maxItems": 9,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "status",
+              "progress",
+              "priority",
+              "assignees",
+              "start-date",
+              "due-date",
+              "duration",
+              "dependencies",
+              "creator"
+            ]
+          }
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "taskDependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "predecessorTaskId",
+        "successorTaskId",
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "predecessorTaskId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "successorTaskId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "type": {
+          "enum": [
+            "finish-start",
+            "start-start",
+            "finish-finish",
+            "start-finish"
+          ]
+        },
+        "lagMinutes": {
+          "type": "integer",
+          "minimum": -525960000,
+          "maximum": 525960000
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "workCalendarException": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "orderKey",
+        "startDate",
+        "type",
+        "repeat"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 512
+        },
+        "startDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "endDate": {
+          "type": "string",
+          "format": "date"
+        },
+        "type": {
+          "enum": [
+            "working-day",
+            "day-off"
+          ]
+        },
+        "repeat": {
+          "enum": [
+            "none",
+            "daily",
+            "weekly",
+            "monthly",
+            "yearly"
+          ]
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "workCalendar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "timeZone",
+        "weekStartsOn",
+        "workingWeekdays",
+        "workdayMinutes",
+        "skipNonWorkingDays",
+        "exceptions"
+      ],
+      "properties": {
+        "timeZone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "weekStartsOn": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6
+        },
+        "workingWeekdays": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 7,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6
+          }
+        },
+        "workdayMinutes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1440
+        },
+        "skipNonWorkingDays": {
+          "type": "boolean"
+        },
+        "exceptions": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/uuidv7"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/workCalendarException"
+          }
+        }
+      }
+    },
+    "presentationTarget": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "sheetId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "sheet"
+            },
+            "sheetId": {
+              "$ref": "#/$defs/uuidv7"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "sheetId",
+            "topicId",
+            "includeDescendants"
+          ],
+          "properties": {
+            "kind": {
+              "const": "topic"
+            },
+            "sheetId": {
+              "$ref": "#/$defs/uuidv7"
+            },
+            "topicId": {
+              "$ref": "#/$defs/uuidv7"
+            },
+            "includeDescendants": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "sheetId",
+            "boundaryId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "boundary"
+            },
+            "sheetId": {
+              "$ref": "#/$defs/uuidv7"
+            },
+            "boundaryId": {
+              "$ref": "#/$defs/uuidv7"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "sheetId",
+            "zoneId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "zone"
+            },
+            "sheetId": {
+              "$ref": "#/$defs/uuidv7"
+            },
+            "zoneId": {
+              "$ref": "#/$defs/uuidv7"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "sheetId",
+            "rect"
+          ],
+          "properties": {
+            "kind": {
+              "const": "frame"
+            },
+            "sheetId": {
+              "$ref": "#/$defs/uuidv7"
+            },
+            "rect": {
+              "$ref": "#/$defs/rect"
+            }
+          }
+        }
+      ]
+    },
+    "presentationBuildTarget": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "topicId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "topic"
+            },
+            "topicId": {
+              "$ref": "#/$defs/uuidv7"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "relationshipId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "relationship"
+            },
+            "relationshipId": {
+              "$ref": "#/$defs/uuidv7"
+            }
+          }
+        }
+      ]
+    },
+    "presentationBuild": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "orderKey",
+        "target",
+        "animation"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "target": {
+          "$ref": "#/$defs/presentationBuildTarget"
+        },
+        "animation": {
+          "enum": [
+            "appear",
+            "fade",
+            "draw",
+            "emphasize"
+          ]
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "presentationSlide": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "orderKey",
+        "target",
+        "builds"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "target": {
+          "$ref": "#/$defs/presentationTarget"
+        },
+        "camera": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "padding"
+          ],
+          "properties": {
+            "padding": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "zoom": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 64
+            }
+          }
+        },
+        "transition": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "durationMs"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "none",
+                "fade",
+                "pan",
+                "zoom"
+              ]
+            },
+            "durationMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 600000
+            }
+          }
+        },
+        "speakerNotes": {
+          "$ref": "#/$defs/richText"
+        },
+        "narrationAudioId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "imageOverrides": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/uuidv7"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "position"
+            ],
+            "properties": {
+              "position": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "xRatio",
+                  "yRatio"
+                ],
+                "properties": {
+                  "xRatio": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "yRatio": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  }
+                }
+              },
+              "size": {
+                "$ref": "#/$defs/size"
+              },
+              "crop": {
+                "$ref": "#/$defs/rect"
+              }
+            }
+          }
+        },
+        "builds": {
+          "$ref": "#/$defs/presentationBuildMap"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "presentationDeck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "sheetId",
+        "name",
+        "aspectRatio",
+        "settings",
+        "slides"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "sheetId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "aspectRatio": {
+          "enum": [
+            "16:9",
+            "4:3",
+            "custom"
+          ]
+        },
+        "customSize": {
+          "$ref": "#/$defs/size"
+        },
+        "themeId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "settings": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "generationMode",
+            "delivery",
+            "layout",
+            "transition",
+            "animationsEnabled"
+          ],
+          "properties": {
+            "generationMode": {
+              "enum": [
+                "auto",
+                "manual"
+              ]
+            },
+            "delivery": {
+              "enum": [
+                "walk-through",
+                "drill-down",
+                "slide-show"
+              ]
+            },
+            "layout": {
+              "enum": [
+                "auto",
+                "map-focus",
+                "content-card"
+              ]
+            },
+            "transition": {
+              "enum": [
+                "none",
+                "fade",
+                "pan",
+                "zoom"
+              ]
+            },
+            "animationsEnabled": {
+              "type": "boolean"
+            },
+            "includedTopicIds": {
+              "type": "array",
+              "maxItems": 100000,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/uuidv7"
+              }
+            },
+            "excludedTopicIds": {
+              "type": "array",
+              "maxItems": 100000,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/uuidv7"
+              }
+            }
+          }
+        },
+        "slides": {
+          "$ref": "#/$defs/presentationSlideMap"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "elementRef": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "topic"
+            },
+            "id": {
+              "$ref": "#/$defs/uuidv7"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "relationship"
+            },
+            "id": {
+              "$ref": "#/$defs/uuidv7"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "boundary"
+            },
+            "id": {
+              "$ref": "#/$defs/uuidv7"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "summary"
+            },
+            "id": {
+              "$ref": "#/$defs/uuidv7"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "callout"
+            },
+            "id": {
+              "$ref": "#/$defs/uuidv7"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "id"
+          ],
+          "properties": {
+            "kind": {
+              "const": "zone"
+            },
+            "id": {
+              "$ref": "#/$defs/uuidv7"
+            }
+          }
+        }
+      ]
+    },
+    "filterExpression": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "op": {
+              "const": "predicate"
+            },
+            "kind": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "value": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "clauses"
+          ],
+          "properties": {
+            "op": {
+              "enum": [
+                "all",
+                "any"
+              ]
+            },
+            "clauses": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1024,
+              "items": {
+                "$ref": "#/$defs/filterExpression"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "clause"
+          ],
+          "properties": {
+            "op": {
+              "const": "not"
+            },
+            "clause": {
+              "$ref": "#/$defs/filterExpression"
+            }
+          }
+        }
+      ]
+    },
+    "savedView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "orderKey",
+        "name",
+        "sheetId",
+        "viewport"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "sheetId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "viewport": {
+          "$ref": "#/$defs/viewport"
+        },
+        "focusedBranchRootId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "foldOverrides": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/uuidv7"
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
+        "selection": {
+          "type": "array",
+          "maxItems": 100000,
+          "items": {
+            "$ref": "#/$defs/elementRef"
+          }
+        },
+        "filters": {
+          "$ref": "#/$defs/filterExpression"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "comment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "authorId",
+        "body"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "authorId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "body": {
+          "$ref": "#/$defs/richText"
+        },
+        "replyToId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "commentAnchor": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/elementRef"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "sheetId",
+            "point"
+          ],
+          "properties": {
+            "kind": {
+              "const": "canvas"
+            },
+            "sheetId": {
+              "$ref": "#/$defs/uuidv7"
+            },
+            "point": {
+              "$ref": "#/$defs/point"
+            }
+          }
+        }
+      ]
+    },
+    "commentThread": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "anchor",
+        "resolved",
+        "orphaned",
+        "comments"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "anchor": {
+          "$ref": "#/$defs/commentAnchor"
+        },
+        "resolved": {
+          "type": "boolean"
+        },
+        "orphaned": {
+          "type": "boolean"
+        },
+        "comments": {
+          "$ref": "#/$defs/commentMap"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "collaborationMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "single-user",
+            "server-revision",
+            "crdt"
+          ]
+        },
+        "remote": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "remoteDocumentId"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "remoteDocumentId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "serverRevision": {
+              "type": "string",
+              "maxLength": 4096
+            },
+            "baseSnapshotHash": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            }
+          }
+        },
+        "logicalClock": {
+          "type": "object",
+          "propertyNames": {
+            "$ref": "#/$defs/uuidv7"
+          },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "lastCommandId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "accessPolicyRef": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "commentThreads": {
+          "$ref": "#/$defs/commentThreadMap"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "sheet": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "orderKey",
+        "title",
+        "rootTopicId",
+        "themeId",
+        "defaultBranchLayout",
+        "advancedLayout",
+        "canvas",
+        "workCalendar",
+        "markerLegend",
+        "topics",
+        "treeEdges",
+        "relationships",
+        "boundaries",
+        "summaries",
+        "callouts",
+        "zones",
+        "markerInstances",
+        "notes",
+        "links",
+        "attachments",
+        "images",
+        "equations",
+        "audioClips",
+        "todos",
+        "tasks",
+        "taskDependencies"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "orderKey": {
+          "$ref": "#/$defs/orderKey"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "rootTopicId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "themeId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "defaultSavedViewId": {
+          "$ref": "#/$defs/uuidv7"
+        },
+        "defaultBranchLayout": {
+          "$ref": "#/$defs/resolvedBranchLayout"
+        },
+        "advancedLayout": {
+          "$ref": "#/$defs/advancedLayoutSpec"
+        },
+        "canvas": {
+          "$ref": "#/$defs/canvasSpec"
+        },
+        "workCalendar": {
+          "$ref": "#/$defs/workCalendar"
+        },
+        "markerLegend": {
+          "$ref": "#/$defs/markerLegendSpec"
+        },
+        "topics": {
+          "$ref": "#/$defs/topicMap"
+        },
+        "treeEdges": {
+          "$ref": "#/$defs/treeEdgeMap"
+        },
+        "relationships": {
+          "$ref": "#/$defs/relationshipMap"
+        },
+        "boundaries": {
+          "$ref": "#/$defs/boundaryMap"
+        },
+        "summaries": {
+          "$ref": "#/$defs/summaryMap"
+        },
+        "callouts": {
+          "$ref": "#/$defs/calloutMap"
+        },
+        "zones": {
+          "$ref": "#/$defs/zoneMap"
+        },
+        "markerInstances": {
+          "$ref": "#/$defs/markerInstanceMap"
+        },
+        "notes": {
+          "$ref": "#/$defs/noteMap"
+        },
+        "links": {
+          "$ref": "#/$defs/topicLinkMap"
+        },
+        "attachments": {
+          "$ref": "#/$defs/attachmentMap"
+        },
+        "images": {
+          "$ref": "#/$defs/topicImageMap"
+        },
+        "equations": {
+          "$ref": "#/$defs/equationMap"
+        },
+        "audioClips": {
+          "$ref": "#/$defs/audioClipMap"
+        },
+        "todos": {
+          "$ref": "#/$defs/topicTodoMap"
+        },
+        "tasks": {
+          "$ref": "#/$defs/topicTaskMap"
+        },
+        "taskDependencies": {
+          "$ref": "#/$defs/taskDependencyMap"
+        },
+        "audit": {
+          "$ref": "#/$defs/entityAudit"
+        },
+        "extensions": {
+          "$ref": "#/$defs/extensions"
+        }
+      }
+    },
+    "actorMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/actorSnapshot"
+      }
+    },
+    "sheetMap": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/sheet"
+      }
+    },
+    "topicMap": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/topic"
+      }
+    },
+    "treeEdgeMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/treeEdge"
+      }
+    },
+    "relationshipMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/relationship"
+      }
+    },
+    "relationshipControlPointMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/relationshipControlPoint"
+      }
+    },
+    "boundaryMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/boundary"
+      }
+    },
+    "summaryMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/summary"
+      }
+    },
+    "calloutMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/callout"
+      }
+    },
+    "zoneMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/zone"
+      }
+    },
+    "styleDefinitionMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/styleDefinition"
+      }
+    },
+    "themeRuleMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/themeRule"
+      }
+    },
+    "themeMap": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/theme"
+      }
+    },
+    "markerGroupMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/markerGroup"
+      }
+    },
+    "markerDefinitionMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/markerDefinition"
+      }
+    },
+    "markerInstanceMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/markerInstance"
+      }
+    },
+    "noteMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/note"
+      }
+    },
+    "topicLinkMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/topicLink"
+      }
+    },
+    "assetMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/asset"
+      }
+    },
+    "attachmentMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/attachment"
+      }
+    },
+    "topicImageMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/topicImage"
+      }
+    },
+    "equationMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/equation"
+      }
+    },
+    "audioClipMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/audioClip"
+      }
+    },
+    "topicTodoMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/topicTodo"
+      }
+    },
+    "topicTaskMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/topicTask"
+      }
+    },
+    "taskDependencyMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/taskDependency"
+      }
+    },
+    "presentationBuildMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/presentationBuild"
+      }
+    },
+    "presentationSlideMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/presentationSlide"
+      }
+    },
+    "presentationDeckMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/presentationDeck"
+      }
+    },
+    "savedViewMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/savedView"
+      }
+    },
+    "commentMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/comment"
+      }
+    },
+    "commentThreadMap": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/uuidv7"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/commentThread"
+      }
+    }
+  }
+}

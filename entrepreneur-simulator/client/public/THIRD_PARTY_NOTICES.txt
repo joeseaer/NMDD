@@ -1,0 +1,37 @@
+NMDD third-party notices
+
+Noto Sans SC variable font
+- npm package: @fontsource-variable/noto-sans-sc@5.3.0
+- upstream family/version: Noto Sans SC v40
+- attribution: Google Inc.
+- license: SIL Open Font License 1.1
+- bundled license: licenses/noto-sans-sc-OFL-1.1.txt
+
+Noto Sans Mono variable font
+- npm package: @fontsource-variable/noto-sans-mono@5.3.0
+- upstream family/version: Noto Sans Mono v37
+- attribution: Copyright 2022 The Noto Project Authors
+- license: SIL Open Font License 1.1
+- bundled license: licenses/noto-sans-mono-OFL-1.1.txt
+
+Noto Emoji variable font
+- npm package: @fontsource-variable/noto-emoji@5.3.0
+- upstream family/version: Noto Emoji v62
+- attribution: Copyright 2013 Google LLC
+- license: SIL Open Font License 1.1
+- bundled license: licenses/noto-emoji-OFL-1.1.txt
+
+The original WOFF2 shards are redistributed without modifying their font bytes.
+Private CSS family aliases used by the application do not rename the font data.
+
+Lucide icon artwork
+- npm package: lucide-react@0.358.0
+- upstream: Lucide
+- attribution: Lucide Contributors 2022; portions copyright Cole Bemis 2013–2022
+- license: ISC
+- bundled license: licenses/lucide-ISC.txt
+- usage: selected path geometry is rendered into the bundled NMDD mind-map sticker and illustration catalog with project-owned colors and composition
+
+The generated sticker PNG files are served from the same origin. The catalog
+manifest records the source version, license, byte size, dimensions and SHA-256
+for every approved asset.

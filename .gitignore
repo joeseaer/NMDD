@@ -18,12 +18,17 @@ coverage/
 playwright-report/
 test-results/
 
+# Relationship & opportunity local-first data (contains personal information)
+entrepreneur-simulator/server/data/relationship-system.local.json
+entrepreneur-simulator/server/data/relationship-system.local.json.*
+
 # Misc
 .DS_Store
 .vscode/
 .idea/
 .trae/
 *.log
+entrepreneur-simulator/tmp/
 
 # Local notes
 2.txt

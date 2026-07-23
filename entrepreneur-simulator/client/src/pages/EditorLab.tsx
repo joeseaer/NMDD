@@ -1,9 +1,13 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { JSONContent } from '@tiptap/react';
 import {
   SmartDocumentEditor,
   type SmartDocumentValue,
 } from '../components/SmartDocumentEditor';
+import {
+  createMindMapFixtureTiptapDocument,
+  isMindMapFixtureName,
+} from '../features/mindmap/testing/fixtures';
 
 type EditorMode = 'edit' | 'read';
 type EditorTheme = 'light' | 'dark' | 'system';
@@ -231,7 +235,13 @@ const diagnosticsStyle = {
 const EditorLab = () => {
   const fixtureName = new URLSearchParams(window.location.search).get('fixture');
   const shouldRecoverInvalidJson = fixtureName === 'invalid-json';
-  const selectedFixture = fixtureName === 'mermaid' ? EDITOR_LAB_MERMAID_FIXTURE : EDITOR_LAB_FIXTURE;
+  const selectedFixture = useMemo(() => {
+    if (fixtureName === 'mermaid') return EDITOR_LAB_MERMAID_FIXTURE;
+    if (isMindMapFixtureName(fixtureName)) {
+      return createMindMapFixtureTiptapDocument(fixtureName);
+    }
+    return EDITOR_LAB_FIXTURE;
+  }, [fixtureName]);
   const [mode, setMode] = useState<EditorMode>('edit');
   const [theme, setTheme] = useState<EditorTheme>('light');
   const [fixtureVersion, setFixtureVersion] = useState(0);

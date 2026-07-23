@@ -36,6 +36,7 @@ import {
 import { serializeToMarkdown } from '../features/document-editor/serialization/toMarkdown';
 import { serializeToPlainText } from '../features/document-editor/serialization/toPlainText';
 import { decodeLegacyEncodedFormula } from '../features/document-editor/serialization/serializationUtils';
+import { installMindMapMarkdownFence } from '../features/document-editor/serialization/mindMapMarkdownFence';
 import type { DocumentNodeJson } from '../features/document-editor/schema/documentSchema';
 import {
     EditorCompactToolbar,
@@ -70,6 +71,7 @@ import {
 // --- Parsers ---
 
 const mdParser = new MarkdownIt({ html: true });
+installMindMapMarkdownFence(mdParser);
 
 const BLOCK_ID_TYPES = [
     'paragraph',
@@ -1100,18 +1102,6 @@ const deleteSourceForMove = (editor: any, tr: any, source: { node: ProseMirrorNo
     tr.delete(pos, pos + node.nodeSize);
 };
 
-const defaultFence = mdParser.renderer.rules.fence;
-mdParser.renderer.rules.fence = (tokens, idx, options, env, self) => {
-    const token = tokens[idx];
-    const info = (token.info || '').trim();
-    if (info === 'mindmap' || info.startsWith('mindmap ')) {
-        const jsonStr = (token.content || '').trim();
-        const encoded = encodeURIComponent(jsonStr);
-        return `<div data-type="mind-map" data-mindmap="${encoded}"></div>`;
-    }
-    if (defaultFence) return defaultFence(tokens, idx, options, env, self);
-    return self.renderToken(tokens, idx, options);
-};
 const turndownService = new TurndownService({ 
     headingStyle: 'atx',
     codeBlockStyle: 'fenced'

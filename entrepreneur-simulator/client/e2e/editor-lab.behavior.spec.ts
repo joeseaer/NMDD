@@ -91,6 +91,15 @@ test.describe('Editor Lab interaction and layout', () => {
     await expect(table.locator('tr')).toHaveCount(2);
     await expect(table.locator('th, td')).toHaveCount(4);
     await expect(table).toContainText('Codex / ChatGPT');
+    const tableLayout = await table.evaluate((element) => {
+      const wrapper = element.closest<HTMLElement>('.tableWrapper');
+      const editorElement = element.closest<HTMLElement>('.ProseMirror');
+      return {
+        wrapperWidth: wrapper?.getBoundingClientRect().width || 0,
+        editorWidth: editorElement?.getBoundingClientRect().width || 0,
+      };
+    });
+    expect(Math.abs(tableLayout.wrapperWidth - tableLayout.editorWidth)).toBeLessThanOrEqual(2);
 
     const preview = page.getByTestId('mermaid-preview');
     await expect(preview).toBeVisible({ timeout: 15_000 });

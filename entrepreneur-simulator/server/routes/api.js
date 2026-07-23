@@ -27,6 +27,535 @@ const sha256 = (obj) => {
   return crypto.createHash('sha256').update(JSON.stringify(normalized)).digest('hex');
 };
 
+const IMAGE_MIME_ALIASES = new Map([
+  ['image/jpeg', 'image/jpeg'],
+  ['image/jpg', 'image/jpeg'],
+  ['image/png', 'image/png'],
+  ['image/gif', 'image/gif'],
+  ['image/webp', 'image/webp'],
+]);
+
+const IMAGE_EXTENSION_BY_MIME = new Map([
+  ['image/gif', 'gif'],
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/webp', 'webp'],
+]);
+
+const IMAGE_MIME_BY_EXTENSION = new Map(
+  [...IMAGE_EXTENSION_BY_MIME.entries()].map(([mimeType, extension]) => [extension, mimeType]),
+);
+
+const MANAGED_IMAGE_OBJECT_PREFIX = 'mindmap-images/sha256/';
+const MANAGED_IMAGE_RESOURCE_NAME = /^([a-f0-9]{64})\.(gif|jpg|png|webp)$/;
+const MANAGED_IMAGE_MAX_BYTES = 15 * 1024 * 1024;
+const MANAGED_IMAGE_MAX_DIMENSION = 32_768;
+const MANAGED_IMAGE_MAX_PIXELS = 40_000_000;
+
+const normalizeMimeType = (value) => {
+  const mimeType = String(value || '').split(';', 1)[0].trim().toLowerCase();
+  return mimeType || 'application/octet-stream';
+};
+
+const sanitizeUploadFileName = (value) => {
+  const pathless = String(value || '')
+    .normalize('NFKC')
+    .replace(/\\/g, '/')
+    .split('/')
+    .pop() || '';
+  const sanitized = pathless
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/[<>:"/\\|?*]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^\.+/, '')
+    .replace(/[. ]+$/g, '')
+    .slice(0, 180);
+  return sanitized || 'file';
+};
+
+const hasPrefix = (buffer, bytes) => (
+  buffer.length >= bytes.length && bytes.every((byte, index) => buffer[index] === byte)
+);
+
+const validRasterSize = (width, height) => (
+  Number.isSafeInteger(width)
+  && Number.isSafeInteger(height)
+  && width > 0
+  && height > 0
+  && width <= MANAGED_IMAGE_MAX_DIMENSION
+  && height <= MANAGED_IMAGE_MAX_DIMENSION
+  && width * height <= MANAGED_IMAGE_MAX_PIXELS
+);
+
+const PNG_CRC_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value & 1) ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1);
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+})();
+
+const pngCrc32 = (buffer, start, end) => {
+  let crc = 0xffffffff;
+  for (let index = start; index < end; index += 1) {
+    crc = PNG_CRC_TABLE[(crc ^ buffer[index]) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+};
+
+const pngHasValidStructure = (buffer) => {
+  if (
+    buffer.length < 45
+    || !hasPrefix(buffer, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+  ) return false;
+
+  let offset = 8;
+  let sawHeader = false;
+  let sawPalette = false;
+  let sawImageData = false;
+  let imageDataEnded = false;
+  let imageDataBytes = 0;
+  let colorType;
+  let canvasWidth;
+  let canvasHeight;
+  let declaredAnimationFrames = null;
+  let animationFrameCount = 0;
+  let animationFramePixels = 0;
+  let nextAnimationSequence = 0;
+  let currentAnimationFrameHasData = false;
+
+  while (offset < buffer.length) {
+    if (offset + 12 > buffer.length) return false;
+    const chunkLength = buffer.readUInt32BE(offset);
+    const typeStart = offset + 4;
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + chunkLength;
+    const chunkEnd = dataEnd + 4;
+    if (chunkEnd > buffer.length) return false;
+
+    const chunkType = buffer.subarray(typeStart, dataStart).toString('ascii');
+    if (!/^[A-Za-z]{4}$/.test(chunkType)) return false;
+    if (pngCrc32(buffer, typeStart, dataEnd) !== buffer.readUInt32BE(dataEnd)) return false;
+
+    if (!sawHeader && chunkType !== 'IHDR') return false;
+    if (sawImageData && chunkType !== 'IDAT') imageDataEnded = true;
+
+    if (chunkType === 'IHDR') {
+      if (sawHeader || offset !== 8 || chunkLength !== 13) return false;
+      const width = buffer.readUInt32BE(dataStart);
+      const height = buffer.readUInt32BE(dataStart + 4);
+      const bitDepth = buffer[dataStart + 8];
+      colorType = buffer[dataStart + 9];
+      const allowedBitDepths = {
+        0: [1, 2, 4, 8, 16],
+        2: [8, 16],
+        3: [1, 2, 4, 8],
+        4: [8, 16],
+        6: [8, 16],
+      };
+      if (
+        !validRasterSize(width, height)
+        || !allowedBitDepths[colorType]?.includes(bitDepth)
+        || buffer[dataStart + 10] !== 0
+        || buffer[dataStart + 11] !== 0
+        || ![0, 1].includes(buffer[dataStart + 12])
+      ) return false;
+      canvasWidth = width;
+      canvasHeight = height;
+      sawHeader = true;
+    } else if (chunkType === 'PLTE') {
+      if (
+        !sawHeader
+        || sawPalette
+        || sawImageData
+        || [0, 4].includes(colorType)
+        || chunkLength === 0
+        || chunkLength > 768
+        || chunkLength % 3 !== 0
+      ) return false;
+      sawPalette = true;
+    } else if (chunkType === 'acTL') {
+      if (declaredAnimationFrames !== null || sawImageData || chunkLength !== 8) return false;
+      declaredAnimationFrames = buffer.readUInt32BE(dataStart);
+      if (declaredAnimationFrames === 0) return false;
+    } else if (chunkType === 'fcTL') {
+      if (
+        declaredAnimationFrames === null
+        || chunkLength !== 26
+        || buffer.readUInt32BE(dataStart) !== nextAnimationSequence
+        || (animationFrameCount > 0 && !currentAnimationFrameHasData)
+      ) return false;
+      const frameWidth = buffer.readUInt32BE(dataStart + 4);
+      const frameHeight = buffer.readUInt32BE(dataStart + 8);
+      const frameX = buffer.readUInt32BE(dataStart + 12);
+      const frameY = buffer.readUInt32BE(dataStart + 16);
+      if (
+        !validRasterSize(frameWidth, frameHeight)
+        || frameX + frameWidth > canvasWidth
+        || frameY + frameHeight > canvasHeight
+        || buffer[dataStart + 24] > 2
+        || buffer[dataStart + 25] > 1
+      ) return false;
+      animationFramePixels += frameWidth * frameHeight;
+      if (animationFramePixels > MANAGED_IMAGE_MAX_PIXELS) return false;
+      animationFrameCount += 1;
+      nextAnimationSequence += 1;
+      currentAnimationFrameHasData = false;
+    } else if (chunkType === 'fdAT') {
+      if (
+        declaredAnimationFrames === null
+        || !sawImageData
+        || animationFrameCount === 0
+        || chunkLength <= 4
+        || buffer.readUInt32BE(dataStart) !== nextAnimationSequence
+      ) return false;
+      nextAnimationSequence += 1;
+      currentAnimationFrameHasData = true;
+    } else if (chunkType === 'IDAT') {
+      if (!sawHeader || imageDataEnded || (colorType === 3 && !sawPalette)) return false;
+      sawImageData = true;
+      imageDataBytes += chunkLength;
+      if (animationFrameCount > 0) currentAnimationFrameHasData = true;
+    } else if (chunkType === 'IEND') {
+      return (
+        sawHeader
+        && sawImageData
+        && imageDataBytes > 0
+        && chunkLength === 0
+        && chunkEnd === buffer.length
+        && (
+          declaredAnimationFrames === null
+          || (
+            animationFrameCount === declaredAnimationFrames
+            && currentAnimationFrameHasData
+          )
+        )
+      );
+    } else if (chunkType[0] === chunkType[0].toUpperCase()) {
+      // PNG reserves uppercase-leading chunk types for critical chunks. There
+      // are no other critical chunk types in the current specification.
+      return false;
+    }
+
+    offset = chunkEnd;
+  }
+  return false;
+};
+
+const JPEG_START_OF_FRAME_MARKERS = new Set([
+  0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7,
+  0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf,
+]);
+
+const jpegHasValidStructure = (buffer) => {
+  if (buffer.length < 14 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return false;
+  let offset = 2;
+  let sawFrame = false;
+  let sawScan = false;
+
+  while (offset < buffer.length) {
+    if (buffer[offset] !== 0xff) return false;
+    while (offset < buffer.length && buffer[offset] === 0xff) offset += 1;
+    if (offset >= buffer.length) return false;
+    const marker = buffer[offset];
+    offset += 1;
+
+    if (marker === 0xd9) return sawFrame && sawScan && offset === buffer.length;
+    if (marker === 0x00 || marker === 0xd8 || marker === 0x01) return false;
+    if (marker >= 0xd0 && marker <= 0xd7) return false;
+    if (offset + 2 > buffer.length) return false;
+
+    const segmentLength = buffer.readUInt16BE(offset);
+    if (segmentLength < 2 || offset + segmentLength > buffer.length) return false;
+
+    if (JPEG_START_OF_FRAME_MARKERS.has(marker)) {
+      if (segmentLength < 11) return false;
+      const componentCount = buffer[offset + 7];
+      if (
+        componentCount === 0
+        || segmentLength !== 8 + (3 * componentCount)
+        || !validRasterSize(
+          buffer.readUInt16BE(offset + 5),
+          buffer.readUInt16BE(offset + 3),
+        )
+      ) return false;
+      sawFrame = true;
+    }
+
+    if (marker !== 0xda) {
+      offset += segmentLength;
+      continue;
+    }
+
+    const scanComponentCount = buffer[offset + 2];
+    if (!sawFrame || scanComponentCount === 0 || segmentLength !== 6 + (2 * scanComponentCount)) {
+      return false;
+    }
+    sawScan = true;
+    offset += segmentLength;
+
+    // Entropy-coded scan data uses 0xff00 byte stuffing and permits restart
+    // markers. Any other marker resumes the outer segment parser.
+    let foundNextMarker = false;
+    while (offset < buffer.length) {
+      if (buffer[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const markerStart = offset;
+      while (offset < buffer.length && buffer[offset] === 0xff) offset += 1;
+      if (offset >= buffer.length) return false;
+      const entropyMarker = buffer[offset];
+      if (entropyMarker === 0x00 || (entropyMarker >= 0xd0 && entropyMarker <= 0xd7)) {
+        offset += 1;
+        continue;
+      }
+      offset = markerStart;
+      foundNextMarker = true;
+      break;
+    }
+    if (!foundNextMarker) return false;
+  }
+  return false;
+};
+
+const skipGifSubBlocks = (buffer, initialOffset) => {
+  let offset = initialOffset;
+  let dataBytes = 0;
+  while (offset < buffer.length) {
+    const blockLength = buffer[offset];
+    offset += 1;
+    if (blockLength === 0) return { offset, dataBytes };
+    if (offset + blockLength > buffer.length) return null;
+    dataBytes += blockLength;
+    offset += blockLength;
+  }
+  return null;
+};
+
+const gifHasValidStructure = (buffer) => {
+  if (buffer.length < 14) return false;
+  const header = buffer.subarray(0, 6).toString('ascii');
+  if (header !== 'GIF87a' && header !== 'GIF89a') return false;
+  const canvasWidth = buffer.readUInt16LE(6);
+  const canvasHeight = buffer.readUInt16LE(8);
+  if (!validRasterSize(canvasWidth, canvasHeight)) return false;
+
+  const logicalScreenPacked = buffer[10];
+  let offset = 13;
+  if ((logicalScreenPacked & 0x80) !== 0) {
+    offset += 3 * (2 ** ((logicalScreenPacked & 0x07) + 1));
+    if (offset > buffer.length) return false;
+  }
+
+  let imageCount = 0;
+  let totalFramePixels = 0;
+  while (offset < buffer.length) {
+    const marker = buffer[offset];
+    offset += 1;
+    if (marker === 0x3b) return imageCount > 0 && offset === buffer.length;
+
+    if (marker === 0x21) {
+      if (offset >= buffer.length) return false;
+      offset += 1; // Extension label.
+      const extension = skipGifSubBlocks(buffer, offset);
+      if (!extension) return false;
+      offset = extension.offset;
+      continue;
+    }
+
+    if (marker !== 0x2c || offset + 9 > buffer.length) return false;
+    const left = buffer.readUInt16LE(offset);
+    const top = buffer.readUInt16LE(offset + 2);
+    const width = buffer.readUInt16LE(offset + 4);
+    const height = buffer.readUInt16LE(offset + 6);
+    const imagePacked = buffer[offset + 8];
+    offset += 9;
+    if (
+      !validRasterSize(width, height)
+      || left + width > canvasWidth
+      || top + height > canvasHeight
+    ) return false;
+
+    totalFramePixels += width * height;
+    if (totalFramePixels > MANAGED_IMAGE_MAX_PIXELS) return false;
+    if ((imagePacked & 0x80) !== 0) {
+      offset += 3 * (2 ** ((imagePacked & 0x07) + 1));
+      if (offset > buffer.length) return false;
+    }
+    if (offset >= buffer.length || buffer[offset] < 2 || buffer[offset] > 8) return false;
+    offset += 1; // LZW minimum code size.
+    const imageData = skipGifSubBlocks(buffer, offset);
+    if (!imageData || imageData.dataBytes === 0) return false;
+    offset = imageData.offset;
+    imageCount += 1;
+  }
+  return false;
+};
+
+const parseWebPBitstream = (buffer, fourCC, dataStart, chunkLength) => {
+  if (fourCC === 'VP8L') {
+    if (chunkLength < 5 || buffer[dataStart] !== 0x2f || (buffer[dataStart + 4] & 0xe0) !== 0) {
+      return null;
+    }
+    return {
+      width: 1 + buffer[dataStart + 1] + ((buffer[dataStart + 2] & 0x3f) << 8),
+      height: 1 + (buffer[dataStart + 2] >> 6)
+        + (buffer[dataStart + 3] << 2)
+        + ((buffer[dataStart + 4] & 0x0f) << 10),
+    };
+  }
+  if (
+    fourCC === 'VP8 '
+    && chunkLength >= 10
+    && (buffer[dataStart] & 0x01) === 0
+    && buffer[dataStart + 3] === 0x9d
+    && buffer[dataStart + 4] === 0x01
+    && buffer[dataStart + 5] === 0x2a
+  ) {
+    return {
+      width: buffer.readUInt16LE(dataStart + 6) & 0x3fff,
+      height: buffer.readUInt16LE(dataStart + 8) & 0x3fff,
+    };
+  }
+  return null;
+};
+
+const parseWebPChunkRange = (buffer, start, end) => {
+  let offset = start;
+  const chunks = [];
+  while (offset < end) {
+    if (offset + 8 > end) return null;
+    const fourCC = buffer.subarray(offset, offset + 4).toString('ascii');
+    const chunkLength = buffer.readUInt32LE(offset + 4);
+    const dataStart = offset + 8;
+    const dataEnd = dataStart + chunkLength;
+    const chunkEnd = dataEnd + (chunkLength & 1);
+    if (!/^[\x20-\x7e]{4}$/.test(fourCC) || chunkEnd > end) return null;
+    chunks.push({ fourCC, chunkLength, dataStart, dataEnd });
+    offset = chunkEnd;
+  }
+  return offset === end ? chunks : null;
+};
+
+const webpHasValidStructure = (buffer) => {
+  if (
+    buffer.length < 20
+    || buffer.subarray(0, 4).toString('ascii') !== 'RIFF'
+    || buffer.readUInt32LE(4) !== buffer.length - 8
+    || buffer.subarray(8, 12).toString('ascii') !== 'WEBP'
+  ) return false;
+
+  const chunks = parseWebPChunkRange(buffer, 12, buffer.length);
+  if (!chunks || chunks.length === 0) return false;
+  let canvas = null;
+  let extendedFlags = 0;
+  let topLevelBitstream = null;
+  let animationFrames = 0;
+  let totalFramePixels = 0;
+
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index];
+    if (chunk.fourCC === 'VP8X') {
+      if (canvas || index !== 0 || chunk.chunkLength !== 10) return false;
+      extendedFlags = buffer[chunk.dataStart];
+      if (
+        (extendedFlags & 0xc1) !== 0
+        || buffer[chunk.dataStart + 1] !== 0
+        || buffer[chunk.dataStart + 2] !== 0
+        || buffer[chunk.dataStart + 3] !== 0
+      ) return false;
+      canvas = {
+        width: buffer.readUIntLE(chunk.dataStart + 4, 3) + 1,
+        height: buffer.readUIntLE(chunk.dataStart + 7, 3) + 1,
+      };
+      if (!validRasterSize(canvas.width, canvas.height)) return false;
+      continue;
+    }
+
+    const dimensions = parseWebPBitstream(
+      buffer,
+      chunk.fourCC,
+      chunk.dataStart,
+      chunk.chunkLength,
+    );
+    if (dimensions) {
+      if (topLevelBitstream || !validRasterSize(dimensions.width, dimensions.height)) return false;
+      topLevelBitstream = dimensions;
+      continue;
+    }
+
+    if (chunk.fourCC !== 'ANMF') continue;
+    if (!canvas || chunk.chunkLength < 24) return false;
+    const frameX = 2 * buffer.readUIntLE(chunk.dataStart, 3);
+    const frameY = 2 * buffer.readUIntLE(chunk.dataStart + 3, 3);
+    const frameWidth = buffer.readUIntLE(chunk.dataStart + 6, 3) + 1;
+    const frameHeight = buffer.readUIntLE(chunk.dataStart + 9, 3) + 1;
+    if (
+      !validRasterSize(frameWidth, frameHeight)
+      || frameX + frameWidth > canvas.width
+      || frameY + frameHeight > canvas.height
+    ) return false;
+
+    const frameChunks = parseWebPChunkRange(buffer, chunk.dataStart + 16, chunk.dataEnd);
+    if (!frameChunks) return false;
+    const frameBitstreams = frameChunks
+      .map((frameChunk) => parseWebPBitstream(
+        buffer,
+        frameChunk.fourCC,
+        frameChunk.dataStart,
+        frameChunk.chunkLength,
+      ))
+      .filter(Boolean);
+    if (
+      frameBitstreams.length !== 1
+      || frameBitstreams[0].width !== frameWidth
+      || frameBitstreams[0].height !== frameHeight
+    ) return false;
+    totalFramePixels += frameWidth * frameHeight;
+    if (totalFramePixels > MANAGED_IMAGE_MAX_PIXELS) return false;
+    animationFrames += 1;
+  }
+
+  if (canvas) {
+    const animated = (extendedFlags & 0x02) !== 0;
+    if (animated) return animationFrames > 0 && !topLevelBitstream;
+    return (
+      animationFrames === 0
+      && Boolean(topLevelBitstream)
+      && topLevelBitstream.width === canvas.width
+      && topLevelBitstream.height === canvas.height
+    );
+  }
+  return Boolean(topLevelBitstream) && animationFrames === 0;
+};
+
+const detectRasterMimeType = (buffer) => {
+  if (pngHasValidStructure(buffer)) return 'image/png';
+  if (jpegHasValidStructure(buffer)) return 'image/jpeg';
+  if (gifHasValidStructure(buffer)) return 'image/gif';
+  if (
+    buffer.length >= 12
+    && buffer.subarray(0, 4).toString('ascii') === 'RIFF'
+    && webpHasValidStructure(buffer)
+  ) {
+    return 'image/webp';
+  }
+  return null;
+};
+
+const MULTIPART_LIMIT_ERROR_CODES = new Set([
+  'FST_REQ_FILE_TOO_LARGE',
+  'FST_FILES_LIMIT',
+  'FST_FIELDS_LIMIT',
+  'FST_PARTS_LIMIT',
+]);
+
 const expectedRevisionFromRequest = (request) => {
   const body = request.body || {};
   if (Object.prototype.hasOwnProperty.call(body, 'expected_revision')) return body.expected_revision;
@@ -1937,22 +2466,141 @@ ${String(text).trim()}
 
   // File Upload
   fastify.post('/upload', async (request, reply) => {
+    const kind = String((request.query || {}).kind || '').trim().toLowerCase();
+    if (kind && kind !== 'image') {
+      return reply.code(400).send({ error: 'Invalid upload kind' });
+    }
+
     try {
       const data = await request.file();
       if (!data) {
-        return reply.code(400).send({ error: "No file uploaded" });
+        return reply.code(400).send({ error: 'No file uploaded' });
       }
-      
-      const buffer = await data.toBuffer();
-      const filename = `${Date.now()}-${data.filename}`;
-      const mimeType = data.mimetype;
 
-      const url = await dbService.uploadFile(buffer, filename, mimeType);
-      
-      return { url };
+      const buffer = await data.toBuffer();
+      if (buffer.length === 0) {
+        return reply.code(400).send({ error: 'Uploaded file is empty' });
+      }
+
+      const fileName = sanitizeUploadFileName(data.filename);
+      const declaredMimeType = normalizeMimeType(data.mimetype);
+      let mimeType = declaredMimeType;
+
+      if (kind === 'image') {
+        if (buffer.length > MANAGED_IMAGE_MAX_BYTES) {
+          return reply.code(413).send({ error: 'File exceeds upload size limit' });
+        }
+        const allowedMimeType = IMAGE_MIME_ALIASES.get(declaredMimeType);
+        if (!allowedMimeType) {
+          return reply.code(415).send({ error: 'Unsupported image type' });
+        }
+        const detectedMimeType = detectRasterMimeType(buffer);
+        if (!detectedMimeType || detectedMimeType !== allowedMimeType) {
+          return reply.code(415).send({ error: 'Image content does not match its declared MIME type' });
+        }
+        mimeType = detectedMimeType;
+      }
+
+      const byteSize = buffer.length;
+      const contentSha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+      let objectKey;
+      let url;
+      if (kind === 'image') {
+        const extension = IMAGE_EXTENSION_BY_MIME.get(mimeType);
+        if (!extension) {
+          return reply.code(415).send({ error: 'Unsupported image type' });
+        }
+        // Raster resources are immutable and content-addressed. Re-importing
+        // the same bytes therefore reuses the same object instead of creating
+        // one object per cancelled or retried import.
+        objectKey = `${MANAGED_IMAGE_OBJECT_PREFIX}${contentSha256}.${extension}`;
+        await dbService.putMindMapImage(buffer, objectKey, mimeType);
+        // Never return a storage-provider URL for managed assets. This
+        // same-origin route remains behind the application's /api auth guard.
+        url = `/api/mindmap/image-assets/${contentSha256}.${extension}`;
+      } else {
+        // Generic uploads retain the legacy collision-safe random-key contract.
+        const storageKey = crypto.randomUUID();
+        url = await dbService.uploadFile(buffer, storageKey, mimeType);
+      }
+
+      return {
+        url,
+        ...(objectKey === undefined ? {} : { objectKey }),
+        fileName,
+        mimeType,
+        byteSize,
+        sha256: contentSha256,
+      };
     } catch (err) {
-      request.log.error(err);
-      reply.code(500).send({ error: err.message || 'Upload failed' });
+      if (MULTIPART_LIMIT_ERROR_CODES.has(err?.code)) {
+        return reply.code(413).send({ error: 'File exceeds upload size limit' });
+      }
+      if (err?.code === 'FST_INVALID_MULTIPART_CONTENT_TYPE') {
+        return reply.code(400).send({ error: 'No file uploaded' });
+      }
+
+      // Do not log exception messages here: storage errors can contain local
+      // paths, object keys, or signed query parameters. This fixed event is
+      // enough to correlate a server failure without leaking those values.
+      request.log.error({ event: 'upload_failed', kind: kind || 'file' }, 'Upload failed');
+      return reply.code(500).send({ error: 'Upload failed' });
+    }
+  });
+
+  fastify.get('/mindmap/image-assets/:resourceName', async (request, reply) => {
+    const resourceName = String(request.params?.resourceName || '');
+    const match = MANAGED_IMAGE_RESOURCE_NAME.exec(resourceName);
+    if (!match) {
+      return reply.code(400).send({ error: 'Invalid image resource name' });
+    }
+
+    const [, expectedSha256, extension] = match;
+    const expectedMimeType = IMAGE_MIME_BY_EXTENSION.get(extension);
+    const objectKey = `${MANAGED_IMAGE_OBJECT_PREFIX}${resourceName}`;
+    try {
+      const stored = await dbService.getMindMapImage(objectKey);
+      if (!stored) return reply.code(404).send({ error: 'Image asset not found' });
+
+      const buffer = Buffer.isBuffer(stored.buffer)
+        ? stored.buffer
+        : Buffer.from(stored.buffer || []);
+      if (buffer.length === 0 || buffer.length > MANAGED_IMAGE_MAX_BYTES) {
+        request.log.error(
+          { event: 'managed_image_integrity_failed' },
+          'Managed image failed integrity validation',
+        );
+        return reply.code(500).send({ error: 'Image asset unavailable' });
+      }
+      const detectedMimeType = detectRasterMimeType(buffer);
+      const actualSha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+      if (
+        !expectedMimeType
+        || detectedMimeType !== expectedMimeType
+        || actualSha256 !== expectedSha256
+      ) {
+        request.log.error(
+          { event: 'managed_image_integrity_failed' },
+          'Managed image failed integrity validation',
+        );
+        return reply.code(500).send({ error: 'Image asset unavailable' });
+      }
+
+      return reply
+        .header('Content-Type', detectedMimeType)
+        .header('Content-Length', String(buffer.length))
+        .header('ETag', `"${actualSha256}"`)
+        .header('Cache-Control', 'private, no-store')
+        .header('X-Content-Type-Options', 'nosniff')
+        .send(buffer);
+    } catch (_error) {
+      // Storage exceptions may contain bucket paths, object keys, or signed
+      // credentials. Log only a fixed event and return a stable response.
+      request.log.error(
+        { event: 'managed_image_read_failed' },
+        'Managed image read failed',
+      );
+      return reply.code(500).send({ error: 'Image asset unavailable' });
     }
   });
 

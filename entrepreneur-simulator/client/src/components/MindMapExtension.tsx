@@ -17,6 +17,8 @@ import 'reactflow/dist/style.css';
 import dagre from 'dagre';
 import { NodeViewWrapper } from '@tiptap/react';
 import { Layout, Maximize2, Minimize2, Bold, Link2, Square, FileText } from 'lucide-react';
+import { isMindMapV2Enabled } from '../features/mindmap/featureFlags';
+import { MindMapV2NodeView } from '../features/mindmap/ui/MindMapV2NodeView';
 
 const nodeWidth = 150;
 const nodeHeight = 50;
@@ -2031,7 +2033,7 @@ const MindMapInner = ({ initialData, updateAttributes }: any) => {
   );
 };
 
-export const MindMapComponent = (props: any) => {
+const LegacyMindMapComponent = (props: any) => {
     const { node, updateAttributes } = props;
 
     const fallbackData = {
@@ -2086,3 +2088,9 @@ export const MindMapComponent = (props: any) => {
         </NodeViewWrapper>
     );
 };
+
+export const MindMapComponent = (props: any) => (
+    isMindMapV2Enabled()
+        ? <MindMapV2NodeView {...props} />
+        : <LegacyMindMapComponent {...props} />
+);

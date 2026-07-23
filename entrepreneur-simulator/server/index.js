@@ -2,8 +2,24 @@ const fastify = require('fastify')({ logger: true });
 const path = require('path');
 require('dotenv').config();
 
+const LOCAL_ORIGIN_PATTERN = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+const configuredOrigins = new Set(
+  String(process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean),
+);
+
+function allowLocalOrigin(origin, callback) {
+  if (!origin || LOCAL_ORIGIN_PATTERN.test(origin) || configuredOrigins.has(origin)) {
+    callback(null, true);
+    return;
+  }
+  callback(new Error('Origin is not allowed by this local-only server.'), false);
+}
+
 // Plugins
-fastify.register(require('@fastify/cors'), { origin: true });
+fastify.register(require('@fastify/cors'), { origin: allowLocalOrigin });
 fastify.register(require('@fastify/websocket'));
 fastify.register(require('@fastify/multipart'), {
   limits: {
@@ -51,13 +67,15 @@ fastify.register(async function (fastify) {
 // REST API Routes
 fastify.register(require('./routes/auth'), { prefix: '/api/auth' });
 fastify.register(require('./routes/api'), { prefix: '/api' });
+fastify.register(require('./routes/relationshipSystem'), { prefix: '/api/relationship-system' });
 
 const start = async () => {
   try {
     await dbService.initDB();
-    const port = process.env.PORT || 3000;
-    await fastify.listen({ port, host: '0.0.0.0' });
-    console.log(`🚀 Server running on http://0.0.0.0:${port} (WebSocket enabled)`);
+    const port = Number(process.env.PORT || 3000);
+    const host = process.env.HOST || '127.0.0.1';
+    await fastify.listen({ port, host });
+    console.log(`Server running on http://${host}:${port} (WebSocket enabled)`);
   } catch (err) {
     fastify.log.error(err);
     process.exit(1);

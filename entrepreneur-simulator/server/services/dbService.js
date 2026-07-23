@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { ChromaClient } = require('chromadb');
 const { DEFAULT_USER_ID } = require('../config/currentUser');
+const crypto = require('crypto');
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
@@ -16,6 +17,14 @@ const chromaClient = new ChromaClient({
 
 let scenesCollection = null;
 let sopCollection = null;
+
+const MANAGED_IMAGE_BUCKET = 'mindmap-images';
+const MANAGED_IMAGE_BUCKET_OPTIONS = Object.freeze({
+  public: false,
+  fileSizeLimit: 15 * 1024 * 1024,
+  allowedMimeTypes: ['image/gif', 'image/jpeg', 'image/png', 'image/webp'],
+});
+let managedImageStorageReady = false;
 
 const SMART_DOC_JSON_PREFIX = '<!-- smart-document-json:';
 const SMART_DOC_JSON_SUFFIX = '-->';
@@ -326,29 +335,59 @@ function summarizeMindMapContent(content) {
 }
 
 const initDB = async () => {
+  managedImageStorageReady = false;
   if (supabase) {
     console.log('✅ Connected to Supabase');
   } else {
     console.warn('⚠️ Supabase credentials missing. Data will NOT be persisted.');
   }
 
-  try {
-    if (process.env.CHROMA_URL) {
+  if (process.env.CHROMA_URL) {
+    try {
       scenesCollection = await chromaClient.getOrCreateCollection({ name: "scene_embeddings" });
       sopCollection = await chromaClient.getOrCreateCollection({ name: "sop_embeddings" });
       console.log('✅ Connected to ChromaDB Collections');
+    } catch (err) {
+      scenesCollection = null;
+      sopCollection = null;
+      console.warn('⚠️ ChromaDB Init Warning:', err.message);
     }
+  }
 
-    // Init Storage Bucket
+  // Managed image storage is independent from optional ChromaDB embeddings.
+  // A vector-store outage must not disable local image uploads.
+  try {
     if (supabase) {
-        const { data: buckets } = await supabase.storage.listBuckets();
+        const { data: buckets, error: listBucketsError } = await supabase.storage.listBuckets();
+        if (listBucketsError) throw listBucketsError;
         if (buckets && !buckets.find(b => b.name === 'sop-images')) {
             await supabase.storage.createBucket('sop-images', { public: true });
             console.log('✅ Created "sop-images" storage bucket');
         }
+        const managedImageBucket = buckets?.find((bucket) => bucket.name === MANAGED_IMAGE_BUCKET);
+        if (!managedImageBucket) {
+            const { error: createManagedBucketError } = await supabase.storage.createBucket(
+              MANAGED_IMAGE_BUCKET,
+              MANAGED_IMAGE_BUCKET_OPTIONS,
+            );
+            if (createManagedBucketError) throw createManagedBucketError;
+            console.log('Created private "mindmap-images" storage bucket');
+        } else if (managedImageBucket.public !== false) {
+            // Fail closed if a pre-existing managed bucket was accidentally
+            // made public. Generic uploads intentionally retain their legacy
+            // public bucket and are not affected by this change.
+            const { error: updateManagedBucketError } = await supabase.storage.updateBucket(
+              MANAGED_IMAGE_BUCKET,
+              MANAGED_IMAGE_BUCKET_OPTIONS,
+            );
+            if (updateManagedBucketError) throw updateManagedBucketError;
+            console.log('Updated "mindmap-images" storage bucket to private');
+        }
+        managedImageStorageReady = true;
     }
   } catch (err) {
-    console.warn('⚠️ Init DB Warning:', err.message);
+    managedImageStorageReady = false;
+    console.warn('⚠️ Storage Init Warning:', err.message);
   }
 };
 
@@ -1812,10 +1851,95 @@ const uploadFile = async (fileBuffer, fileName, mimeType) => {
     return publicData.publicUrl;
 };
 
+const MANAGED_IMAGE_OBJECT_KEY = (
+  /^mindmap-images\/sha256\/([a-f0-9]{64})\.(gif|jpg|png|webp)$/
+);
+
+const MANAGED_IMAGE_MIME_BY_EXTENSION = {
+  gif: 'image/gif',
+  jpg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+};
+
+const assertManagedImageObjectKey = (objectKey) => {
+  const match = typeof objectKey === 'string'
+    ? MANAGED_IMAGE_OBJECT_KEY.exec(objectKey)
+    : null;
+  if (!match) {
+    throw new Error('Invalid managed image object key');
+  }
+  return { sha256: match[1], extension: match[2] };
+};
+
+/**
+ * Stores an immutable, server-addressed mind-map raster in a private bucket.
+ * The route computes the SHA-256 key; upsert makes retries idempotent without
+ * changing generic upload behaviour. No storage-provider URL is exposed.
+ */
+const putMindMapImage = async (fileBuffer, objectKey, mimeType) => {
+  if (!supabase) throw new Error('Database connection not established');
+  if (!managedImageStorageReady) throw new Error('Managed image storage is not ready');
+  const expected = assertManagedImageObjectKey(objectKey);
+  const actualSha256 = crypto.createHash('sha256').update(fileBuffer).digest('hex');
+  if (
+    actualSha256 !== expected.sha256
+    || MANAGED_IMAGE_MIME_BY_EXTENSION[expected.extension] !== mimeType
+  ) {
+    throw new Error('Managed image metadata does not match its object key');
+  }
+
+  const bucket = supabase.storage.from(MANAGED_IMAGE_BUCKET);
+  const { error } = await bucket.upload(objectKey, fileBuffer, {
+    cacheControl: '0',
+    contentType: mimeType,
+    upsert: true,
+  });
+  if (error) throw error;
+};
+
+const isStorageNotFound = (error) => {
+  const status = Number(error?.statusCode ?? error?.status);
+  return status === 404;
+};
+
+const storagePayloadToBuffer = async (data) => {
+  if (Buffer.isBuffer(data)) return Buffer.from(data);
+  if (data instanceof ArrayBuffer) return Buffer.from(data);
+  if (ArrayBuffer.isView(data)) {
+    return Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  }
+  if (data && typeof data.arrayBuffer === 'function') {
+    return Buffer.from(await data.arrayBuffer());
+  }
+  throw new Error('Managed image storage returned an unsupported payload');
+};
+
+/** Returns null only for a definite storage 404; all other failures bubble. */
+const getMindMapImage = async (objectKey) => {
+  if (!supabase) throw new Error('Database connection not established');
+  if (!managedImageStorageReady) throw new Error('Managed image storage is not ready');
+  assertManagedImageObjectKey(objectKey);
+
+  const { data, error } = await supabase.storage
+    .from(MANAGED_IMAGE_BUCKET)
+    .download(objectKey);
+  if (error) {
+    if (isStorageNotFound(error)) return null;
+    throw error;
+  }
+  if (!data) return null;
+  return {
+    buffer: await storagePayloadToBuffer(data),
+    mimeType: typeof data.type === 'string' ? data.type : undefined,
+  };
+};
+
 // Narrow dependency seam for node:test. Production code never calls this; it
 // lets persistence tests exercise the real saveSOP flow without a live project.
 const __setSupabaseClientForTests = (client) => {
   supabase = client;
+  managedImageStorageReady = false;
 };
 
 module.exports = { 
@@ -1825,6 +1949,7 @@ module.exports = {
   getPlannerLists, ensurePlannerInbox, createPlannerList, updatePlannerList, deletePlannerList,
   createPlannerItem, updatePlannerItem, deletePlannerItem, listPlannerItems,
   saveNPCRelation, getNPCRelations, updateNPCRelation, getAllUserData, uploadFile,
+  putMindMapImage, getMindMapImage,
   SopRevisionConflictError,
   __setSupabaseClientForTests,
   __test: {

@@ -21,6 +21,9 @@ import {
   Database, Plus, Trash2, Table as TableIcon
 } from 'lucide-react';
 import { MindMapComponent } from './MindMapExtension';
+import { createMindMapBlockDocument } from '../features/mindmap/domain/createDocument';
+import { isMindMapV2Enabled } from '../features/mindmap/featureFlags';
+import { createMindMapStaticSvgPreview } from '../features/mindmap/export/staticSvg';
 import { createSmartDocumentExtensions } from '../features/document-editor/createEditorExtensions';
 import { SmartClipboardExtension } from '../features/document-editor/SmartClipboardExtension';
 import { decodeLegacyEncodedFormula } from '../features/document-editor/serialization/serializationUtils';
@@ -315,8 +318,13 @@ export const MindMap = Node.create({
     ]
   },
 
-  renderHTML({ HTMLAttributes }) {
-    return ['div', mergeAttributes(HTMLAttributes, { 'data-type': 'mind-map' })]
+  renderHTML({ node, HTMLAttributes }) {
+    const preview = createMindMapStaticSvgPreview(node.attrs.data);
+    return [
+      'div',
+      mergeAttributes(HTMLAttributes, { 'data-type': 'mind-map' }),
+      preview.spec,
+    ]
   },
 
   addNodeView() {
@@ -5154,10 +5162,12 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
             editor.chain().focus().deleteRange(range).insertContent({
                 type: 'mindMap',
                 attrs: {
-                    data: { 
-                        nodes: [{ id: 'root', type: 'mindMap', data: { label: '中心主题' }, position: { x: 0, y: 0 } }], 
-                        edges: [] 
-                    }
+                    data: isMindMapV2Enabled()
+                        ? createMindMapBlockDocument({ rootTitle: '中心主题' })
+                        : {
+                            nodes: [{ id: 'root', type: 'mindMap', data: { label: '中心主题' }, position: { x: 0, y: 0 } }],
+                            edges: [],
+                        }
                 }
             }).run();
         },

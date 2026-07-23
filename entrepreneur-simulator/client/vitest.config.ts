@@ -9,11 +9,15 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     clearMocks: true,
     restoreMocks: true,
+    maxWorkers: 4,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'lcov'],
       reportsDirectory: './coverage',
-      include: ['src/features/document-editor/**/*.{ts,tsx}'],
+      include: [
+        'src/features/document-editor/**/*.{ts,tsx}',
+        'src/features/mindmap/**/*.{ts,tsx}',
+      ],
     },
   },
 });

@@ -2,9 +2,9 @@
  * in the main editor and in nested database-row editors. */
 
 /* Wide-rail nodes are centered against the 720px reading track and may grow to
- * 1040px without creating page-level horizontal scrolling. */
+ * 1040px without creating page-level horizontal scrolling. Tables intentionally
+ * stay on the reading track so they do not dominate or escape the document. */
 :is(.smart-document-content, .smart-document-shell .ProseMirror) :is(
-  .tableWrapper,
   .smart-doc-database,
   .smart-doc-column-list,
   .smart-doc-mermaid,
@@ -19,7 +19,6 @@
 
 @supports (width: 100cqw) {
   :is(.smart-document-content, .smart-document-shell .ProseMirror) :is(
-    .tableWrapper,
     .smart-doc-database,
     .smart-doc-column-list,
     .smart-doc-mermaid,
@@ -28,6 +27,16 @@
     width: min(var(--smart-doc-node-track), 100cqw);
     max-width: 100cqw;
   }
+}
+
+/* An embedded mind map belongs to the document's reading rhythm. Keep its
+ * outer card on the same track as surrounding prose; fullscreen remains the
+ * dedicated place for the wider editing workspace. */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-type="mind-map"][data-mindmap-version="2"] {
+  width: 100%;
+  max-width: 100%;
+  margin-left: 0 !important;
+  transform: none;
 }
 
 /* Tables */
@@ -515,6 +524,16 @@
   border: 1px solid var(--smart-doc-border);
   border-radius: var(--smart-doc-radius-lg);
   background: var(--smart-doc-surface-muted);
+}
+
+/* V2 owns its visible card chrome. Keep the ProseMirror wrapper as a clean
+ * sizing/selection rail so borders and corner radii are not doubled. */
+:is(.smart-document-content, .smart-document-shell .ProseMirror) [data-type="mind-map"][data-mindmap-version="2"] {
+  min-height: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 /* Block identities, comments, and user-applied colors */
