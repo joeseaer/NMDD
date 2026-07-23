@@ -76,10 +76,13 @@ const start = async () => {
   try {
     await dbService.initDB();
     const port = Number(process.env.PORT || 3000);
-    // Railway and other container platforms can only route traffic to a
-    // process listening on every interface. Local-only setups can still opt
-    // into 127.0.0.1 explicitly through HOST.
-    const host = process.env.HOST || '0.0.0.0';
+    // Railway can only route traffic to a process listening on every
+    // interface. Force the required binding there even if a stale HOST value
+    // was copied from a local .env; local setups can still opt into 127.0.0.1.
+    const isRailway = Boolean(
+      process.env.RAILWAY_ENVIRONMENT_ID || process.env.RAILWAY_DEPLOYMENT_ID
+    );
+    const host = isRailway ? '0.0.0.0' : (process.env.HOST || '0.0.0.0');
     await fastify.listen({ port, host });
     console.log(`Server running on http://${host}:${port} (WebSocket enabled)`);
   } catch (err) {
