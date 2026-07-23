@@ -15,7 +15,10 @@ function allowLocalOrigin(origin, callback) {
     callback(null, true);
     return;
   }
-  callback(new Error('Origin is not allowed by this local-only server.'), false);
+  // CORS is a browser policy, not an authentication boundary. Returning false
+  // keeps direct cross-origin browser calls blocked without rejecting trusted
+  // reverse-proxy requests (for example, Vercel forwarding /api to Railway).
+  callback(null, false);
 }
 
 // Plugins
@@ -73,7 +76,10 @@ const start = async () => {
   try {
     await dbService.initDB();
     const port = Number(process.env.PORT || 3000);
-    const host = process.env.HOST || '127.0.0.1';
+    // Railway and other container platforms can only route traffic to a
+    // process listening on every interface. Local-only setups can still opt
+    // into 127.0.0.1 explicitly through HOST.
+    const host = process.env.HOST || '0.0.0.0';
     await fastify.listen({ port, host });
     console.log(`Server running on http://${host}:${port} (WebSocket enabled)`);
   } catch (err) {
