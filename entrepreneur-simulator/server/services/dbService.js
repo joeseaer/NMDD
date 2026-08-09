@@ -75,6 +75,7 @@ const packSmartDocumentContent = (content, contentJson) => {
 
 const DEFAULT_DOCUMENT_SCHEMA_VERSION = 1;
 const DOCUMENT_RELIABILITY_FIELDS = ['content_schema_version', 'content_revision'];
+const SOP_HIERARCHY_FIELDS = ['parent_id', 'sort_order', 'structure_updated_at'];
 
 const getDatabaseErrorText = (error) => (
   [error?.message, error?.details, error?.hint].filter(Boolean).join(' ')
@@ -110,9 +111,19 @@ const isMissingDocumentReliabilityColumn = (error) => (
   DOCUMENT_RELIABILITY_FIELDS.some((field) => errorMentionsColumn(error, field))
 );
 
+const isMissingSopHierarchyColumn = (error) => (
+  SOP_HIERARCHY_FIELDS.some((field) => errorMentionsColumn(error, field))
+);
+
 const stripDocumentReliabilityFields = (payload) => {
   const next = { ...(payload || {}) };
   DOCUMENT_RELIABILITY_FIELDS.forEach((field) => delete next[field]);
+  return next;
+};
+
+const stripSopHierarchyFields = (payload) => {
+  const next = { ...(payload || {}) };
+  SOP_HIERARCHY_FIELDS.forEach((field) => delete next[field]);
   return next;
 };
 
@@ -162,6 +173,16 @@ class SopNotFoundError extends Error {
     this.code = 'SOP_NOT_FOUND';
     this.statusCode = 404;
     this.sopId = id;
+  }
+}
+
+class SopHierarchyError extends Error {
+  constructor(message, { code = 'INVALID_SOP_HIERARCHY', statusCode = 400, sopId } = {}) {
+    super(message);
+    this.name = 'SopHierarchyError';
+    this.code = code;
+    this.statusCode = statusCode;
+    this.sopId = sopId;
   }
 }
 
@@ -262,6 +283,28 @@ const normalizeNullableUuid = (value) => {
   return raw.length > 10 ? raw : null;
 };
 
+const normalizeParentId = (value, { field = 'parent_id' } = {}) => {
+  if (value === undefined || value === null || value === '') return null;
+  const normalized = normalizeNullableUuid(value);
+  if (!normalized) {
+    throw new SopHierarchyError(`${field} must be a valid page ID`, {
+      code: 'INVALID_PARENT_ID',
+    });
+  }
+  return normalized;
+};
+
+const normalizeSopSortOrder = (value, fallback = Date.now()) => {
+  if (value === undefined || value === null || value === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new SopHierarchyError('sort_order must be a non-negative safe integer', {
+      code: 'INVALID_SORT_ORDER',
+    });
+  }
+  return parsed;
+};
+
 const buildSopMetadataPayload = (sopData = {}) => {
   const domain = normalizeSopDomain(sopData.domain);
   const researchType = normalizeResearchType(sopData.research_type, domain);
@@ -282,10 +325,12 @@ const runSopMutationWithFallback = async (mutate, payload, fallbackContent, opti
     : payload;
   let strippedContentJson = false;
   let strippedMetadata = false;
+  let strippedHierarchy = false;
   let documentReliabilitySupported = options.documentReliability !== false;
+  let hierarchySupported = options.hierarchy !== false;
 
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    const state = { documentReliabilitySupported };
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const state = { documentReliabilitySupported, hierarchySupported };
     const result = await mutate(currentPayload, state);
     if (!result.error) return { ...result, ...state };
 
@@ -310,10 +355,18 @@ const runSopMutationWithFallback = async (mutate, payload, fallbackContent, opti
       continue;
     }
 
+    if (isMissingSopHierarchyColumn(result.error) && hierarchySupported && !strippedHierarchy) {
+      if (options.requireHierarchy) return { ...result, ...state };
+      currentPayload = stripSopHierarchyFields(currentPayload);
+      hierarchySupported = false;
+      strippedHierarchy = true;
+      continue;
+    }
+
     return result;
   }
 
-  const state = { documentReliabilitySupported };
+  const state = { documentReliabilitySupported, hierarchySupported };
   const result = await mutate(currentPayload, state);
   return { ...result, ...state };
 };
@@ -437,6 +490,65 @@ const getRecentScenes = async (userId, limit = 5) => {
 
 // --- SOPs ---
 
+const getSopHierarchySnapshot = async (userId) => {
+  const { data, error } = await supabase
+    .from('sops')
+    .select('*')
+    .eq('user_id', userId);
+  if (error) throw error;
+  return Array.isArray(data) ? data : [];
+};
+
+const validateSopParent = ({ pages, pageId = null, parentId, userId, domain }) => {
+  if (!parentId) return null;
+  if (pageId && parentId === pageId) {
+    throw new SopHierarchyError('A page cannot be its own parent', {
+      code: 'SOP_PARENT_SELF',
+      sopId: pageId,
+    });
+  }
+
+  const parent = pages.find((page) => String(page.id) === String(parentId));
+  if (!parent || String(parent.user_id) !== String(userId)) {
+    throw new SopHierarchyError('Parent page was not found', {
+      code: 'SOP_PARENT_NOT_FOUND',
+      statusCode: 404,
+      sopId: pageId || parentId,
+    });
+  }
+  if (normalizeSopDomain(parent.domain) !== normalizeSopDomain(domain)) {
+    throw new SopHierarchyError('Parent and child pages must belong to the same document workspace', {
+      code: 'SOP_PARENT_DOMAIN_MISMATCH',
+      sopId: pageId || parentId,
+    });
+  }
+
+  if (pageId) {
+    const pagesById = new Map(pages.map((page) => [String(page.id), page]));
+    const visited = new Set();
+    let cursor = parent;
+    while (cursor) {
+      const cursorId = String(cursor.id);
+      if (cursorId === String(pageId)) {
+        throw new SopHierarchyError('A page cannot be moved inside one of its descendants', {
+          code: 'SOP_PARENT_CYCLE',
+          sopId: pageId,
+        });
+      }
+      if (visited.has(cursorId)) {
+        throw new SopHierarchyError('The target page hierarchy already contains a cycle', {
+          code: 'SOP_HIERARCHY_CYCLE',
+          sopId: pageId,
+        });
+      }
+      visited.add(cursorId);
+      cursor = cursor.parent_id ? pagesById.get(String(cursor.parent_id)) : null;
+    }
+  }
+
+  return parent;
+};
+
 const saveSOP = async (sopData, options = {}) => {
   if (!supabase) throw new Error("Database connection not established. Check environment variables.");
 
@@ -454,6 +566,8 @@ const saveSOP = async (sopData, options = {}) => {
   const contentJson = normalizeContentJson(sopData.content_json) || unpackedContent.contentJson;
   const content = unpackedContent.content;
   const fallbackContent = packSmartDocumentContent(content, contentJson);
+  const requestedParentId = normalizeParentId(sopData.parent_id);
+  const requestedSortOrder = normalizeSopSortOrder(sopData.sort_order);
 
   if (!isUpdate && expectedRevision !== null) {
     const error = new Error('expected_revision can only be used when updating an existing SOP');
@@ -538,8 +652,18 @@ const saveSOP = async (sopData, options = {}) => {
       // If ID is missing or short (temp ID), treat as insert
       // Remove temp ID from payload so Postgres generates new UUID
       const { id, ...insertData } = sopData;
+      const insertUserId = insertData.user_id || DEFAULT_USER_ID;
+      const hierarchyPages = requestedParentId
+        ? await getSopHierarchySnapshot(insertUserId)
+        : [];
+      validateSopParent({
+        pages: hierarchyPages,
+        parentId: requestedParentId,
+        userId: insertUserId,
+        domain: insertData.domain,
+      });
       const payload = {
-          user_id: insertData.user_id || DEFAULT_USER_ID,
+          user_id: insertUserId,
           title: insertData.title,
           category: insertData.category,
           tags: insertData.tags,
@@ -549,6 +673,9 @@ const saveSOP = async (sopData, options = {}) => {
           content_schema_version: contentSchemaVersion,
           content_revision: 1,
           ...buildSopMetadataPayload(insertData),
+          parent_id: requestedParentId,
+          sort_order: requestedSortOrder,
+          structure_updated_at: new Date(),
           // related_scenes is legacy, we use relational tables now
       };
       
@@ -561,7 +688,8 @@ const saveSOP = async (sopData, options = {}) => {
             : 'id')
           .single(),
         payload,
-        fallbackContent
+        fallbackContent,
+        { requireHierarchy: !!requestedParentId }
       );
 
       if (mutationResult.error) throw mutationResult.error;
@@ -575,6 +703,9 @@ const saveSOP = async (sopData, options = {}) => {
           ? normalizePositiveInteger(mutationResult.data.content_revision, 1)
           : null,
         revision_supported: !!mutationResult.documentReliabilitySupported,
+        parent_id: mutationResult.hierarchySupported ? requestedParentId : null,
+        sort_order: mutationResult.hierarchySupported ? requestedSortOrder : 0,
+        hierarchy_supported: !!mutationResult.hierarchySupported,
       };
   }
 
@@ -821,6 +952,9 @@ const getSOPs = async (userId, filters = {}) => {
       promoted_to_life: !!sop.promoted_to_life || getSopTagValue(rawTags, 'promoted_to_life:') === 'true',
       promoted_at: sop.promoted_at || null,
       promoted_from_sop_id: sop.promoted_from_sop_id || getSopTagValue(rawTags, 'promoted_from:') || null,
+      parent_id: normalizeNullableUuid(sop.parent_id),
+      sort_order: normalizeSopSortOrder(sop.sort_order, 0),
+      structure_updated_at: sop.structure_updated_at || null,
       tags: stripSopSystemTags(rawTags),
       version: sop.version,
       created_at: new Date(sop.created_at).toLocaleDateString(),
@@ -847,6 +981,54 @@ const getSOPs = async (userId, filters = {}) => {
   });
 
   return applySopFilters(mapped, filters);
+};
+
+const updateSOPLocation = async ({ id, userId, parentId, sortOrder }) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+  const normalizedParentId = normalizeParentId(parentId);
+  const normalizedSortOrder = normalizeSopSortOrder(sortOrder);
+  const pages = await getSopHierarchySnapshot(userId);
+  const page = pages.find((candidate) => String(candidate.id) === String(id));
+  if (!page) throw new SopNotFoundError(id);
+
+  validateSopParent({
+    pages,
+    pageId: id,
+    parentId: normalizedParentId,
+    userId,
+    domain: page.domain,
+  });
+
+  const structureUpdatedAt = new Date();
+  const { data, error } = await supabase
+    .from('sops')
+    .update({
+      parent_id: normalizedParentId,
+      sort_order: normalizedSortOrder,
+      structure_updated_at: structureUpdatedAt,
+    })
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('id, parent_id, sort_order, structure_updated_at')
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingSopHierarchyColumn(error)) {
+      throw new SopHierarchyError('Document hierarchy migration has not been applied', {
+        code: 'SOP_HIERARCHY_UNAVAILABLE',
+        statusCode: 503,
+        sopId: id,
+      });
+    }
+    throw error;
+  }
+  if (!data) throw new SopNotFoundError(id);
+  return {
+    id: data.id,
+    parent_id: normalizeNullableUuid(data.parent_id),
+    sort_order: normalizeSopSortOrder(data.sort_order, normalizedSortOrder),
+    structure_updated_at: data.structure_updated_at || structureUpdatedAt.toISOString(),
+  };
 };
 
 const updateSOPMeta = async ({ id, userId, patch }) => {
@@ -982,8 +1164,49 @@ const promoteSOPToLife = async ({ id, userId, title, summary }) => {
 };
 
 const deleteSOP = async (sopId) => {
-    if (!supabase) return;
-    await supabase.from('sops').delete().eq('id', sopId);
+  if (!supabase) return { id: sopId, parent_id: null, promoted_child_ids: [] };
+
+  const { data: page, error: pageError } = await supabase
+    .from('sops')
+    .select('*')
+    .eq('id', sopId)
+    .maybeSingle();
+  if (pageError) throw pageError;
+  if (!page) throw new SopNotFoundError(sopId);
+
+  const parentId = normalizeNullableUuid(page.parent_id);
+  let promotedChildIds = [];
+  const childResult = await supabase
+    .from('sops')
+    .select('id')
+    .eq('parent_id', sopId);
+
+  if (childResult.error && !isMissingSopHierarchyColumn(childResult.error)) {
+    throw childResult.error;
+  }
+
+  if (!childResult.error) {
+    promotedChildIds = (childResult.data || []).map((child) => child.id).filter(Boolean);
+    if (promotedChildIds.length) {
+      const { error: promoteError } = await supabase
+        .from('sops')
+        .update({
+          parent_id: parentId,
+          structure_updated_at: new Date(),
+        })
+        .eq('parent_id', sopId);
+      if (promoteError) throw promoteError;
+    }
+  }
+
+  const { error: deleteError } = await supabase.from('sops').delete().eq('id', sopId);
+  if (deleteError) throw deleteError;
+  return {
+    id: sopId,
+    parent_id: parentId,
+    promoted_child_ids: promotedChildIds,
+    hierarchy_supported: !childResult.error,
+  };
 }
 
 const deleteSOPsByTitle = async (title) => {
@@ -1943,7 +2166,7 @@ const __setSupabaseClientForTests = (client) => {
 };
 
 module.exports = { 
-  initDB, saveScene, getRecentScenes, saveSOP, getSOPs, updateSOPMeta, promoteSOPToLife, deleteSOP, deleteSOPsByTitle,
+  initDB, saveScene, getRecentScenes, saveSOP, getSOPs, updateSOPLocation, updateSOPMeta, promoteSOPToLife, deleteSOP, deleteSOPsByTitle,
   savePersonProfile, updatePersonPrivateInfo, updatePersonTriggersPleasers, updatePersonReactionLibrary, updatePersonAIFollowUp, deletePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog, deleteInteractionLog,
   saveReviewSession, getReviewSessions, getReviewSession, getUserStats,
   getPlannerLists, ensurePlannerInbox, createPlannerList, updatePlannerList, deletePlannerList,
@@ -1951,11 +2174,14 @@ module.exports = {
   saveNPCRelation, getNPCRelations, updateNPCRelation, getAllUserData, uploadFile,
   putMindMapImage, getMindMapImage,
   SopRevisionConflictError,
+  SopHierarchyError,
   __setSupabaseClientForTests,
   __test: {
     errorMentionsColumn,
     normalizeExpectedRevision,
     normalizeDocumentSchemaVersion,
     isMissingDocumentReliabilityColumn,
+    isMissingSopHierarchyColumn,
+    validateSopParent,
   },
 };

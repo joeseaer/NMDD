@@ -27,6 +27,13 @@ import { withoutRelationsForDocumentAutosave } from '../features/document-editor
 import { DocumentExportMenu } from '../features/document-editor/ui/DocumentExportMenu';
 import { GuardedLink, useDocumentNavigationGuard } from '../features/document-editor/navigation/DocumentNavigationGuard';
 import { documentLinksToPage } from '../features/document-editor/pageLinks/pageLinkIndex';
+import { DocumentPageTree } from '../features/document-tree/DocumentPageTree';
+import {
+  formatDocumentPath,
+  getDocumentAncestors,
+  getDocumentChildren,
+  getDocumentDescendantIds,
+} from '../features/document-tree/documentTree';
 
 // --- Types ---
 interface SOPEntity {
@@ -39,6 +46,9 @@ interface SOPEntity {
   promoted_to_life?: boolean;
   promoted_at?: string | null;
   promoted_from_sop_id?: string | null;
+  parent_id?: string | null;
+  sort_order?: number;
+  structure_updated_at?: string | null;
   tags: string[];
   version: string;
   created_at: string;
@@ -81,6 +91,9 @@ const normalizeSopEntity = (raw: any): SOPEntity => {
     promoted_to_life: !!raw?.promoted_to_life,
     promoted_at: raw?.promoted_at || null,
     promoted_from_sop_id: raw?.promoted_from_sop_id || null,
+    parent_id: raw?.parent_id ? String(raw.parent_id) : null,
+    sort_order: Number.isSafeInteger(Number(raw?.sort_order)) ? Number(raw.sort_order) : 0,
+    structure_updated_at: raw?.structure_updated_at || null,
     tags: Array.isArray(raw?.tags) ? raw.tags.map((t: any) => String(t)).filter(Boolean) : [],
     version: String(raw?.version || 'V1.0'),
     created_at: String(raw?.created_at || ''),
@@ -121,8 +134,8 @@ export default function NoteManager() {
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [libraryCollapsed, setLibraryCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
-    const stored = window.localStorage.getItem('nmdd.notes.library-collapsed');
-    return stored === null ? window.innerWidth < 1440 : stored === 'true';
+    const stored = window.localStorage.getItem('nmdd.notes.library-collapsed.v2');
+    return stored === 'true';
   });
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -153,7 +166,7 @@ export default function NoteManager() {
   const desktopLibraryHidden = Boolean(selectedNoteId && libraryCollapsed);
 
   useEffect(() => {
-    window.localStorage.setItem('nmdd.notes.library-collapsed', String(libraryCollapsed));
+    window.localStorage.setItem('nmdd.notes.library-collapsed.v2', String(libraryCollapsed));
   }, [libraryCollapsed]);
 
   const documentPages = useMemo<SmartDocumentPageLink[]>(() => (
@@ -303,6 +316,19 @@ export default function NoteManager() {
                           (note.tags || []).some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()));
     return matchesSearch;
   });
+  const pageTreeItems = visibleItems(items);
+  const matchingPageIds = searchTerm.trim()
+    ? new Set(filteredNotes.map((note) => note.id))
+    : undefined;
+  const selectedAncestors = selectedNote ? getDocumentAncestors(items, selectedNote.id) : [];
+  const selectedChildren = selectedNote ? getDocumentChildren(items, selectedNote.id) : [];
+  const moveTargets = selectedNote
+    ? (() => {
+        const excluded = getDocumentDescendantIds(items, selectedNote.id);
+        excluded.add(selectedNote.id);
+        return pageTreeItems.filter((item) => !excluded.has(item.id));
+      })()
+    : [];
 
   const handleOpenDetail = async (id: string) => {
     if (!await flushBeforeNavigation()) return;
@@ -351,10 +377,14 @@ export default function NoteManager() {
   }, [saveQueue]);
 
   const handleDeleteNote = async (id: string) => {
-    if (confirm('确定要删除这篇文档吗？此操作无法撤销。')) {
+    if (confirm('确定要删除这篇文档吗？子页面会保留并提升一级，此操作无法撤销。')) {
         try {
-            await api.deleteSOP(id);
-            setItems(prev => prev.filter(n => n.id !== id));
+            const result = await api.deleteSOP(id);
+            setItems(prev => prev
+              .filter(n => n.id !== id)
+              .map((item) => item.parent_id === id
+                ? { ...item, parent_id: result.parent_id || null }
+                : item));
             if (selectedNoteId === id) {
                 urlSyncTargetRef.current = '__document_list__';
                 setSelectedNoteId(null);
@@ -367,7 +397,7 @@ export default function NoteManager() {
     }
   };
   
-  const handleCreateNote = async () => {
+  const handleCreateNote = async (parentId: string | null = null) => {
       if (!await flushBeforeNavigation()) return;
       setLoading(true);
       const newNote: Partial<SOPEntity> = {
@@ -377,6 +407,8 @@ export default function NoteManager() {
           research_type: null,
           research_status: null,
           promoted_to_life: false,
+          parent_id: parentId,
+          sort_order: Date.now(),
           tags: [],
           version: 'V1.0',
           content: '',
@@ -415,6 +447,28 @@ export default function NoteManager() {
           setLoading(false);
       }
   }
+
+  const handleMoveNote = async (id: string, parentId: string | null) => {
+    if (!await flushBeforeNavigation()) return;
+    try {
+      const result = await api.updateSOPLocation(id, {
+        parent_id: parentId,
+        sort_order: Date.now(),
+        userId: CURRENT_USER_ID,
+      });
+      setItems((current) => current.map((item) => item.id === id
+        ? {
+            ...item,
+            parent_id: result.parent_id,
+            sort_order: result.sort_order,
+            structure_updated_at: result.structure_updated_at || null,
+          }
+        : item));
+    } catch (error) {
+      console.error('Failed to move document page', error);
+      alert(error instanceof Error ? error.message : '移动页面失败，请重试');
+    }
+  };
 
   return (
     <div className="flex h-full bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden relative">
@@ -479,7 +533,7 @@ export default function NoteManager() {
                 />
             </div>
             <button 
-                onClick={handleCreateNote}
+                onClick={() => void handleCreateNote()}
                 className="w-full flex items-center justify-center px-4 py-2 border border-transparent text-sm font-medium rounded-lg shadow-sm text-white bg-primary hover:bg-primary/90 focus:outline-none transition-colors"
             >
                 <Plus className="h-4 w-4 mr-2" />
@@ -502,36 +556,20 @@ export default function NoteManager() {
                     </button>
                 </div>
             ) : (
-                filteredNotes.length > 0 ? (
-                    filteredNotes.map(note => (
-                        <div 
-                            key={note.id}
-                            onClick={() => void handleOpenDetail(note.id)}
-                            className={`p-3 rounded-lg cursor-pointer transition-colors group ${
-                                selectedNoteId === note.id 
-                                ? 'bg-primary/5 border-l-2 border-primary' 
-                                : 'hover:bg-gray-50 border-l-2 border-transparent'
-                            }`}
-                        >
-                            <h3 className={`text-sm font-medium mb-1 truncate ${selectedNoteId === note.id ? 'text-primary' : 'text-gray-900'}`}>
-                                {note.title}
-                            </h3>
-                            <div className="flex items-center justify-between text-xs text-gray-400">
-                                <span>{note.updated_at}</span>
-                                {note.tags.length > 0 && (
-                                    <span className="flex items-center">
-                                        <Tag className="w-3 h-3 mr-1" />
-                                        {note.tags[0]}
-                                    </span>
-                                )}
-                            </div>
-                        </div>
-                    ))
-                ) : (
-                    <div className="text-center py-8 text-gray-400 text-sm">
-                        {view === 'sop' ? '暂无 SOP' : '暂无文档'}
-                    </div>
-                )
+                <DocumentPageTree
+                  items={pageTreeItems}
+                  selectedId={selectedNoteId}
+                  matchingIds={matchingPageIds}
+                  storageKey={`nmdd.notes.page-tree.expanded.${view}`}
+                  emptyMessage={view === 'sop' ? '暂无 SOP' : '暂无文档'}
+                  onSelect={(note) => void handleOpenDetail(note.id)}
+                  onCreateChild={(note) => void handleCreateNote(note.id)}
+                  renderTrailing={(note) => note.tags.length ? (
+                    <span className="max-w-16 truncate rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-normal text-gray-400">
+                      {note.tags[0]}
+                    </span>
+                  ) : null}
+                />
             )}
         </div>
       </div>
@@ -562,6 +600,11 @@ export default function NoteManager() {
                 }}
                 pages={documentPages}
                 backlinks={backlinks}
+                ancestors={selectedAncestors}
+                childPages={selectedChildren}
+                moveTargets={moveTargets}
+                onCreateChild={() => handleCreateNote(selectedNote.id)}
+                onMove={(parentId) => handleMoveNote(selectedNote.id, parentId)}
                 libraryCollapsed={desktopLibraryHidden}
                 onOpenLibrary={() => setLibraryCollapsed(false)}
             />
@@ -580,7 +623,7 @@ export default function NoteManager() {
             <DocumentMissingState
                 documentId={missingDocumentId || ''}
                 onBack={handleBack}
-                onCreate={handleCreateNote}
+                onCreate={() => void handleCreateNote()}
             />
         ) : (
             <div className="flex-1 flex flex-col items-center justify-center h-full text-gray-400 bg-gray-50/30">
@@ -658,6 +701,11 @@ function NoteDetailView({
   onUnpublish,
   pages,
   backlinks,
+  ancestors,
+  childPages,
+  moveTargets,
+  onCreateChild,
+  onMove,
   libraryCollapsed,
   onOpenLibrary,
 }: {
@@ -673,6 +721,11 @@ function NoteDetailView({
   onUnpublish: () => void;
   pages: SmartDocumentPageLink[];
   backlinks: SmartDocumentPageLink[];
+  ancestors: SOPEntity[];
+  childPages: SOPEntity[];
+  moveTargets: SOPEntity[];
+  onCreateChild: () => Promise<void>;
+  onMove: (parentId: string | null) => Promise<void>;
   libraryCollapsed: boolean;
   onOpenLibrary: () => void;
 }) {
@@ -777,6 +830,17 @@ function NoteDetailView({
                 <span>记录中心</span>
                 <ChevronRight aria-hidden="true" />
                 <span>{note.category === 'note' ? '文档' : 'SOP'}</span>
+                {ancestors.map((page) => (
+                  <React.Fragment key={page.id}>
+                    <ChevronRight aria-hidden="true" />
+                    <GuardedLink
+                      to={`/notes?view=${getDocumentView(page)}&doc=${encodeURIComponent(page.id)}`}
+                      className="smart-document-breadcrumb-link"
+                    >
+                      {page.title || '未命名文档'}
+                    </GuardedLink>
+                  </React.Fragment>
+                ))}
                 <ChevronRight aria-hidden="true" />
                 <strong>{note.title || '未命名文档'}</strong>
               </span>
@@ -884,7 +948,19 @@ function NoteDetailView({
             readOnly={mode === 'read'}
             titlePlaceholder="文档标题"
             icon={<FileText />}
-            eyebrow={note.category === 'note' ? 'DOCUMENT' : 'STANDARD OPERATING PROCEDURE'}
+            eyebrow={(
+              <span className="smart-document-page-path">
+                <span>{note.category === 'note' ? 'DOCUMENT' : 'STANDARD OPERATING PROCEDURE'}</span>
+                {ancestors.map((page) => (
+                  <React.Fragment key={page.id}>
+                    <ChevronRight aria-hidden="true" />
+                    <GuardedLink to={`/notes?view=${getDocumentView(page)}&doc=${encodeURIComponent(page.id)}`}>
+                      {page.title || '未命名文档'}
+                    </GuardedLink>
+                  </React.Fragment>
+                ))}
+              </span>
+            )}
             meta={(
               <>
                 <span>{note.version || 'V1.0'}</span>
@@ -905,6 +981,38 @@ function NoteDetailView({
                 placeholder="添加标签，用逗号分隔"
                 aria-label="文档标签"
               />
+            </DocumentProperty>
+            <DocumentProperty label="上级页面" icon={<ChevronRight />}>
+              <select
+                value={note.parent_id || ''}
+                onChange={(event) => void onMove(event.target.value || null)}
+                disabled={mode === 'read'}
+                aria-label="上级页面"
+              >
+                <option value="">顶层页面</option>
+                {moveTargets.map((page) => (
+                  <option key={page.id} value={page.id}>{formatDocumentPath(moveTargets, page)}</option>
+                ))}
+              </select>
+            </DocumentProperty>
+            <DocumentProperty label={`子页面${childPages.length ? ` ${childPages.length}` : ''}`} icon={<FileText />}>
+              {childPages.map((page) => (
+                <GuardedLink
+                  key={page.id}
+                  to={`/notes?view=${getDocumentView(page)}&doc=${encodeURIComponent(page.id)}`}
+                  className="smart-document-backlink"
+                >
+                  <FileText aria-hidden="true" />
+                  <span>{page.title || '未命名文档'}</span>
+                </GuardedLink>
+              ))}
+              {mode === 'edit' ? (
+                <button type="button" onClick={() => void onCreateChild()} className="smart-document-add-child">
+                  <Plus aria-hidden="true" />
+                  新建子页面
+                </button>
+              ) : null}
+              {!childPages.length && mode === 'read' ? <span className="smart-document-property-empty">暂无子页面</span> : null}
             </DocumentProperty>
             <DocumentProperty label="反向链接" icon={<Link2 />}>
               {backlinks.length ? backlinks.map((page) => (

@@ -938,6 +938,28 @@ async function routes(fastify, options) {
     }
   });
 
+  fastify.patch('/sop/:id/location', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const userId = request.body?.userId || request.body?.user_id || request.query?.userId || DEFAULT_USER_ID;
+      const result = await dbService.updateSOPLocation({
+        id,
+        userId,
+        parentId: request.body?.parent_id ?? request.body?.parentId ?? null,
+        sortOrder: request.body?.sort_order ?? request.body?.sortOrder,
+      });
+      return result;
+    } catch (err) {
+      request.log.error(err);
+      const statusCode = Number(err?.statusCode) || 500;
+      return reply.code(statusCode).send({
+        error: err?.message || 'Failed to move document page',
+        code: err?.code || 'SOP_HIERARCHY_ERROR',
+        id: err?.sopId || request.params.id,
+      });
+    }
+  });
+
   fastify.post('/sop/:id/promote-to-life', async (request, reply) => {
     try {
       const { id } = request.params;
@@ -958,11 +980,15 @@ async function routes(fastify, options) {
   fastify.delete('/sop/:id', async (request, reply) => {
     try {
         const { id } = request.params;
-        await dbService.deleteSOP(id);
-        return { message: "SOP Deleted Successfully" };
+        const result = await dbService.deleteSOP(id);
+        return { ...result, message: "SOP Deleted Successfully" };
     } catch (err) {
         request.log.error(err);
-        reply.code(500).send({ error: 'Failed to delete SOP' });
+        reply.code(Number(err?.statusCode) || 500).send({
+          error: err?.message || 'Failed to delete SOP',
+          code: err?.code || 'SOP_DELETE_ERROR',
+          id: err?.sopId || request.params.id,
+        });
     }
   });
 

@@ -170,12 +170,24 @@ const createFakeSupabase = ({
 
       const matchingRows = Array.from(state.rows.values()).filter((row) => this.matches(row));
       if (this.operation === 'update') {
-        const row = matchingRows[0];
-        if (!row) return { data: null, error: null };
-        const previousRevision = row.content_revision;
-        Object.assign(row, clone(this.payload));
-        if (state.supportsReliability) row.content_revision = previousRevision + 1;
-        return { data: this.project(row), error: null };
+        const contentFields = new Set([
+          'title', 'category', 'tags', 'version', 'content', 'content_json',
+          'content_schema_version', 'domain', 'research_type', 'research_status',
+          'promoted_to_life', 'promoted_at', 'promoted_from_sop_id',
+        ]);
+        const changesContent = Object.keys(this.payload || {}).some((field) => contentFields.has(field));
+        matchingRows.forEach((row) => {
+          const previousRevision = row.content_revision;
+          Object.assign(row, clone(this.payload));
+          if (state.supportsReliability && changesContent) row.content_revision = previousRevision + 1;
+        });
+        const projected = matchingRows.map((row) => this.project(row));
+        return { data: single ? (projected[0] || null) : projected, error: null };
+      }
+
+      if (this.operation === 'delete') {
+        matchingRows.forEach((row) => state.rows.delete(row.id));
+        return { data: null, error: null };
       }
 
       const projected = matchingRows.map((row) => this.project(row));
@@ -194,4 +206,3 @@ const createFakeSupabase = ({
 };
 
 module.exports = { createFakeSupabase };
-

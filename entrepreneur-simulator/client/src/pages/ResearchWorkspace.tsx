@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
-  CheckCircle2,
   ChevronRight,
   FileText,
   Lightbulb,
@@ -38,11 +37,16 @@ import {
 import { DocumentViewControls } from '../features/document-editor/ui/DocumentViewControls';
 import { useDocumentViewPreferences } from '../features/document-editor/useDocumentViewPreferences';
 import { withoutRelationsForDocumentAutosave } from '../features/document-editor/savePayload';
-import { serializeToPlainText } from '../features/document-editor/serialization/toPlainText';
-import { truncateGraphemes } from '../features/document-editor/text/graphemes';
 import { DocumentExportMenu } from '../features/document-editor/ui/DocumentExportMenu';
 import { GuardedLink, useDocumentNavigationGuard } from '../features/document-editor/navigation/DocumentNavigationGuard';
 import { documentLinksToPage } from '../features/document-editor/pageLinks/pageLinkIndex';
+import { DocumentPageTree } from '../features/document-tree/DocumentPageTree';
+import {
+  formatDocumentPath,
+  getDocumentAncestors,
+  getDocumentChildren,
+  getDocumentDescendantIds,
+} from '../features/document-tree/documentTree';
 
 type ResearchType = 'document' | 'idea' | 'meeting';
 type ResearchStatus = 'seed' | 'to_verify' | 'absorbed' | 'paused';
@@ -63,6 +67,9 @@ type ResearchItem = {
   research_status?: ResearchStatus | null;
   promoted_to_life?: boolean;
   promoted_at?: string | null;
+  parent_id?: string | null;
+  sort_order?: number;
+  structure_updated_at?: string | null;
   tags: string[];
   version: string;
   created_at: string;
@@ -143,6 +150,9 @@ const normalizeResearchItem = (raw: any): ResearchItem => {
     research_status: researchType === 'idea' ? (isResearchStatus(raw?.research_status) ? raw.research_status : 'seed') : null,
     promoted_to_life: !!raw?.promoted_to_life,
     promoted_at: raw?.promoted_at || null,
+    parent_id: raw?.parent_id ? String(raw.parent_id) : null,
+    sort_order: Number.isSafeInteger(Number(raw?.sort_order)) ? Number(raw.sort_order) : 0,
+    structure_updated_at: raw?.structure_updated_at || null,
     tags: Array.isArray(raw?.tags) ? raw.tags.map((tag: any) => String(tag)).filter(Boolean) : [],
     version: String(raw?.version || 'V1.0'),
     created_at: String(raw?.created_at || ''),
@@ -220,22 +230,6 @@ const cleanTitleCandidate = (value: string) => value
   .replace(/\s+/g, ' ')
   .trim();
 
-const decodeLegacyHtmlEntities = (value: string) => {
-  if (!value.includes('&')) return value;
-  if (typeof document !== 'undefined') {
-    const textarea = document.createElement('textarea');
-    textarea.innerHTML = value;
-    return textarea.value;
-  }
-  return value
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'");
-};
-
 export const inferResearchDocumentTitle = (value: SmartDocumentValue): string | null => {
   const topLevelNodes = Array.isArray(value.json?.content) ? value.json.content : [];
   const proseNodes = topLevelNodes.filter((node: any) => (
@@ -278,8 +272,8 @@ export default function ResearchWorkspace() {
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [libraryCollapsed, setLibraryCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false;
-    const stored = window.localStorage.getItem('nmdd.research.library-collapsed');
-    return stored === null ? window.innerWidth < 1440 : stored === 'true';
+    const stored = window.localStorage.getItem('nmdd.research.library-collapsed.v2');
+    return stored === 'true';
   });
   const activeEditorFlushRef = React.useRef<(() => Promise<void>) | null>(null);
   const urlSyncTargetRef = React.useRef<string | undefined>(undefined);
@@ -295,7 +289,7 @@ export default function ResearchWorkspace() {
   const desktopLibraryHidden = Boolean(selectedItemId && libraryCollapsed);
 
   useEffect(() => {
-    window.localStorage.setItem('nmdd.research.library-collapsed', String(libraryCollapsed));
+    window.localStorage.setItem('nmdd.research.library-collapsed.v2', String(libraryCollapsed));
   }, [libraryCollapsed]);
 
   const pages = useMemo<SmartDocumentPageLink[]>(() => (
@@ -443,9 +437,8 @@ export default function ResearchWorkspace() {
     })();
   }, [activeType, docParam, items, selectedItemId, setSearchParams]);
 
-  const visibleItems = items
-    .filter((item) => item.research_type === activeType)
-    .filter((item) => {
+  const pageTreeItems = items.filter((item) => item.research_type === activeType);
+  const matchingItems = pageTreeItems.filter((item) => {
       const query = searchTerm.trim().toLowerCase();
       if (!query) return true;
       return (
@@ -454,6 +447,18 @@ export default function ResearchWorkspace() {
         item.tags.some((tag) => tag.toLowerCase().includes(query))
       );
     });
+  const matchingPageIds = searchTerm.trim()
+    ? new Set(matchingItems.map((item) => item.id))
+    : undefined;
+  const selectedAncestors = selectedItem ? getDocumentAncestors(items, selectedItem.id) : [];
+  const selectedChildren = selectedItem ? getDocumentChildren(items, selectedItem.id) : [];
+  const moveTargets = selectedItem
+    ? (() => {
+        const excluded = getDocumentDescendantIds(items, selectedItem.id);
+        excluded.add(selectedItem.id);
+        return items.filter((item) => item.research_type === selectedItem.research_type && !excluded.has(item.id));
+      })()
+    : [];
 
   const handleUpdateItem = useCallback((updatedItem: ResearchItem, options: ResearchUpdateOptions = {}) => {
     if (options.persistRelations) {
@@ -464,7 +469,7 @@ export default function ResearchWorkspace() {
     if (options.flush) void saveQueue.flush();
   }, [saveQueue]);
 
-  const handleCreateItem = async () => {
+  const handleCreateItem = async (parentId: string | null = null) => {
     if (!await flushBeforeNavigation()) return;
     setLoading(true);
     const content = makeTemplate(activeType);
@@ -475,6 +480,8 @@ export default function ResearchWorkspace() {
       research_type: activeType,
       research_status: activeType === 'idea' ? 'seed' : null,
       promoted_to_life: false,
+      parent_id: parentId,
+      sort_order: Date.now(),
       tags: [],
       version: 'V1.0',
       content,
@@ -509,10 +516,14 @@ export default function ResearchWorkspace() {
   };
 
   const handleDeleteItem = async (id: string) => {
-    if (!confirm('确定删除这条科研记录吗？此操作无法撤销。')) return;
+    if (!confirm('确定删除这条科研记录吗？子页面会保留并提升一级，此操作无法撤销。')) return;
     try {
-      await api.deleteSOP(id);
-      setItems((prev) => prev.filter((item) => item.id !== id));
+      const result = await api.deleteSOP(id);
+      setItems((prev) => prev
+        .filter((item) => item.id !== id)
+        .map((item) => item.parent_id === id
+          ? { ...item, parent_id: result.parent_id || null }
+          : item));
       if (selectedItemId === id) {
         urlSyncTargetRef.current = '__research_list__';
         setSelectedItemId(null);
@@ -521,6 +532,28 @@ export default function ResearchWorkspace() {
     } catch (error) {
       console.error('Failed to delete research item', error);
       alert('删除失败，请重试');
+    }
+  };
+
+  const handleMoveItem = async (id: string, parentId: string | null) => {
+    if (!await flushBeforeNavigation()) return;
+    try {
+      const result = await api.updateSOPLocation(id, {
+        parent_id: parentId,
+        sort_order: Date.now(),
+        userId: CURRENT_USER_ID,
+      });
+      setItems((current) => current.map((item) => item.id === id
+        ? {
+            ...item,
+            parent_id: result.parent_id,
+            sort_order: result.sort_order,
+            structure_updated_at: result.structure_updated_at || null,
+          }
+        : item));
+    } catch (error) {
+      console.error('Failed to move research page', error);
+      alert(error instanceof Error ? error.message : '移动页面失败，请重试');
     }
   };
 
@@ -650,7 +683,7 @@ export default function ResearchWorkspace() {
           </div>
           <button
             type="button"
-            onClick={handleCreateItem}
+            onClick={() => void handleCreateItem()}
             className="flex w-full items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-primary/90"
           >
             <Plus className="mr-2 h-4 w-4" />
@@ -676,19 +709,29 @@ export default function ResearchWorkspace() {
                 重新加载
               </button>
             </div>
-          ) : visibleItems.length > 0 ? (
-            <div className="space-y-1">
-              {visibleItems.map((item) => (
-                <ResearchListItem
-                  key={item.id}
-                  item={item}
-                  active={selectedItemId === item.id}
-                  onClick={() => void handleOpenItem(item)}
-                />
-              ))}
-            </div>
           ) : (
-            <div className="py-10 text-center text-sm text-gray-400">暂无记录</div>
+            <DocumentPageTree
+              items={pageTreeItems}
+              selectedId={selectedItemId}
+              matchingIds={matchingPageIds}
+              storageKey={`nmdd.research.page-tree.expanded.${activeType}`}
+              emptyMessage="暂无记录"
+              onSelect={(item) => void handleOpenItem(item)}
+              onCreateChild={(item) => void handleCreateItem(item.id)}
+              renderIcon={(item, active) => {
+                const Icon = item.research_type === 'idea'
+                  ? Lightbulb
+                  : item.research_type === 'meeting'
+                    ? MessageSquare
+                    : FileText;
+                return <Icon className={`h-3.5 w-3.5 ${active ? 'text-primary' : ''}`} aria-hidden="true" />;
+              }}
+              renderTrailing={(item) => item.research_type === 'idea' && item.research_status ? (
+                <span className={`rounded-full border px-1.5 py-0.5 text-[10px] font-normal ${STATUS_STYLES[item.research_status]}`}>
+                  {STATUS_LABELS[item.research_status]}
+                </span>
+              ) : null}
+            />
           )}
         </div>
       </aside>
@@ -700,6 +743,11 @@ export default function ResearchWorkspace() {
             people={people}
             pages={pages}
             backlinks={backlinks}
+            ancestors={selectedAncestors}
+            childPages={selectedChildren}
+            moveTargets={moveTargets}
+            onCreateChild={() => handleCreateItem(selectedItem.id)}
+            onMove={(parentId) => handleMoveItem(selectedItem.id, parentId)}
             libraryCollapsed={desktopLibraryHidden}
             onOpenLibrary={() => setLibraryCollapsed(false)}
             saveStatus={selectedSaveStatus}
@@ -739,73 +787,16 @@ export default function ResearchWorkspace() {
   );
 }
 
-function ResearchListItem({
-  item,
-  active,
-  onClick,
-}: {
-  item: ResearchItem;
-  active: boolean;
-  onClick: () => void;
-}) {
-  let source = '';
-  if (item.content_json?.type === 'doc') {
-    try {
-      source = serializeToPlainText(item.content_json);
-    } catch {
-      source = '';
-    }
-  }
-  if (!source) {
-    source = decodeLegacyHtmlEntities(item.content
-      .replace(/```mindmap[\s\S]*?```/gi, ' 脑图 ')
-      .replace(/```[\s\S]*?```/g, ' 代码块 ')
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1'));
-  }
-  const snippet = truncateGraphemes(
-    source.replace(/[#>*_`[\]()~-]+/g, ' ').replace(/\s+/g, ' ').trim(),
-    80,
-  );
-  const Icon = item.research_type === 'idea' ? Lightbulb : item.research_type === 'meeting' ? MessageSquare : FileText;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group w-full rounded-lg border-l-2 p-3 text-left transition-colors ${
-        active ? 'border-primary bg-primary/5' : 'border-transparent hover:bg-gray-50'
-      }`}
-    >
-      <div className="mb-1 flex items-start gap-2">
-        <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${active ? 'text-primary' : 'text-gray-400 group-hover:text-gray-500'}`} />
-        <div className="min-w-0 flex-1">
-          <div className={`truncate text-sm font-medium ${active ? 'text-primary' : 'text-gray-900'}`}>
-            {item.title || makeDefaultTitle(item.research_type)}
-          </div>
-          {snippet && <div className="mt-1 line-clamp-2 text-xs leading-5 text-gray-500">{snippet}</div>}
-        </div>
-      </div>
-      <div className="mt-2 flex items-center justify-between gap-2 text-xs text-gray-400">
-        <span>{item.updated_at}</span>
-        <div className="flex items-center gap-1">
-          {item.promoted_to_life && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />}
-          {item.research_type === 'idea' && item.research_status && (
-            <span className={`rounded-full border px-2 py-0.5 ${STATUS_STYLES[item.research_status]}`}>
-              {STATUS_LABELS[item.research_status]}
-            </span>
-          )}
-        </div>
-      </div>
-    </button>
-  );
-}
-
 function ResearchDetail({
   item,
   people,
   pages,
   backlinks,
+  ancestors,
+  childPages,
+  moveTargets,
+  onCreateChild,
+  onMove,
   libraryCollapsed,
   onOpenLibrary,
   saveStatus,
@@ -822,6 +813,11 @@ function ResearchDetail({
   people: RelatedPerson[];
   pages: SmartDocumentPageLink[];
   backlinks: SmartDocumentPageLink[];
+  ancestors: ResearchItem[];
+  childPages: ResearchItem[];
+  moveTargets: ResearchItem[];
+  onCreateChild: () => Promise<void>;
+  onMove: (parentId: string | null) => Promise<void>;
   libraryCollapsed: boolean;
   onOpenLibrary: () => void;
   saveStatus: DocumentSaveStatus;
@@ -986,6 +982,17 @@ function ResearchDetail({
                 <span>科研工作台</span>
                 <ChevronRight aria-hidden="true" />
                 <span>{RESEARCH_TYPES.find(type => type.key === item.research_type)?.label || '科研记录'}</span>
+                {ancestors.map((page) => (
+                  <React.Fragment key={page.id}>
+                    <ChevronRight aria-hidden="true" />
+                    <GuardedLink
+                      to={`/research?type=${page.research_type}&doc=${encodeURIComponent(page.id)}`}
+                      className="smart-document-breadcrumb-link"
+                    >
+                      {page.title || makeDefaultTitle(page.research_type)}
+                    </GuardedLink>
+                  </React.Fragment>
+                ))}
                 <ChevronRight aria-hidden="true" />
                 <strong>{item.title || makeDefaultTitle(item.research_type)}</strong>
               </span>
@@ -1037,7 +1044,19 @@ function ResearchDetail({
             readOnly={mode === 'read'}
             titlePlaceholder="科研记录标题"
             icon={item.research_type === 'idea' ? <Lightbulb /> : item.research_type === 'meeting' ? <MessageSquare /> : <FileText />}
-            eyebrow="RESEARCH WORKSPACE"
+            eyebrow={(
+              <span className="smart-document-page-path">
+                <span>RESEARCH WORKSPACE</span>
+                {ancestors.map((page) => (
+                  <React.Fragment key={page.id}>
+                    <ChevronRight aria-hidden="true" />
+                    <GuardedLink to={`/research?type=${page.research_type}&doc=${encodeURIComponent(page.id)}`}>
+                      {page.title || makeDefaultTitle(page.research_type)}
+                    </GuardedLink>
+                  </React.Fragment>
+                ))}
+              </span>
+            )}
             description={RESEARCH_TYPES.find(type => type.key === item.research_type)?.label}
             meta={(
               <>
@@ -1060,6 +1079,40 @@ function ResearchDetail({
                 placeholder="添加标签，用逗号分隔"
                 aria-label="科研记录标签"
               />
+            </DocumentProperty>
+
+            <DocumentProperty label="上级页面" icon={<ChevronRight />}>
+              <select
+                value={item.parent_id || ''}
+                onChange={(event) => void onMove(event.target.value || null)}
+                disabled={mode === 'read'}
+                aria-label="上级页面"
+              >
+                <option value="">顶层页面</option>
+                {moveTargets.map((page) => (
+                  <option key={page.id} value={page.id}>{formatDocumentPath(moveTargets, page)}</option>
+                ))}
+              </select>
+            </DocumentProperty>
+
+            <DocumentProperty label={`子页面${childPages.length ? ` ${childPages.length}` : ''}`} icon={<FileText />}>
+              {childPages.map((page) => (
+                <GuardedLink
+                  key={page.id}
+                  to={`/research?type=${page.research_type}&doc=${encodeURIComponent(page.id)}`}
+                  className="smart-document-backlink"
+                >
+                  <FileText aria-hidden="true" />
+                  <span>{page.title || makeDefaultTitle(page.research_type)}</span>
+                </GuardedLink>
+              ))}
+              {mode === 'edit' ? (
+                <button type="button" onClick={() => void onCreateChild()} className="smart-document-add-child">
+                  <Plus aria-hidden="true" />
+                  新建子页面
+                </button>
+              ) : null}
+              {!childPages.length && mode === 'read' ? <span className="smart-document-property-empty">暂无子页面</span> : null}
             </DocumentProperty>
 
             {item.research_type === 'idea' ? (

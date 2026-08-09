@@ -51,6 +51,24 @@ export type SOPSaveResult = {
     content_schema_version?: number;
     content_revision?: number | null;
     revision_supported?: boolean;
+    parent_id?: string | null;
+    sort_order?: number;
+    hierarchy_supported?: boolean;
+    message?: string;
+};
+
+export type SOPLocationResult = {
+    id: string;
+    parent_id: string | null;
+    sort_order: number;
+    structure_updated_at?: string | null;
+};
+
+export type SOPDeleteResult = {
+    id: string;
+    parent_id: string | null;
+    promoted_child_ids: string[];
+    hierarchy_supported?: boolean;
     message?: string;
 };
 
@@ -209,7 +227,27 @@ export const api = {
         }
     },
 
-    deleteSOP: async (id: string) => {
+    updateSOPLocation: async (
+        id: string,
+        payload: { parent_id: string | null; sort_order?: number; userId?: string },
+    ): Promise<SOPLocationResult> => {
+        const response = await fetch(`${API_BASE_URL}/sop/${id}/location`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                userId: payload.userId || CURRENT_USER_ID,
+                parent_id: payload.parent_id,
+                ...(payload.sort_order === undefined ? {} : { sort_order: payload.sort_order }),
+            }),
+        });
+        const text = await response.text();
+        if (!response.ok) {
+            throw new Error(parseApiErrorMessage(text, 'Failed to move document page'));
+        }
+        return JSON.parse(text);
+    },
+
+    deleteSOP: async (id: string): Promise<SOPDeleteResult> => {
         const response = await fetch(`${API_BASE_URL}/sop/${id}`, {
             method: 'DELETE'
         });
