@@ -54,6 +54,34 @@ test('moves a page without changing its content revision', async () => {
   assert.equal(fake.state.rows.get(CHILD_ID).content_revision, 4);
 });
 
+test('creates a child under a legacy research parent encoded with system tags', async () => {
+  const fake = createFakeSupabase({
+    rows: [page({
+      domain: undefined,
+      research_type: undefined,
+      tags: ['domain:research', 'research_type:document'],
+    })],
+  });
+  dbService.__setSupabaseClientForTests(fake.client);
+
+  const result = await dbService.saveSOP({
+    user_id: 'user-1',
+    title: 'Research child',
+    category: 'note',
+    tags: [],
+    version: 'V1.0',
+    content: '',
+    content_json: null,
+    domain: 'research',
+    research_type: 'document',
+    parent_id: ROOT_ID,
+    sort_order: 200,
+  }, { returnResult: true });
+
+  assert.equal(result.parent_id, ROOT_ID);
+  assert.equal(fake.state.rows.get(result.id).parent_id, ROOT_ID);
+});
+
 test('rejects cycles, foreign-user parents and cross-workspace parents', async () => {
   const fake = createFakeSupabase({
     rows: [
@@ -62,6 +90,13 @@ test('rejects cycles, foreign-user parents and cross-workspace parents', async (
       page({ id: GRANDCHILD_ID, title: 'Grandchild', parent_id: CHILD_ID }),
       page({ id: OTHER_USER_ID, user_id: 'user-2', title: 'Foreign' }),
       page({ id: '55555555-5555-4555-8555-555555555555', title: 'Research', domain: 'research', research_type: 'document' }),
+      page({
+        id: '66666666-6666-4666-8666-666666666666',
+        title: 'Legacy research',
+        domain: undefined,
+        research_type: undefined,
+        tags: ['domain:research', 'research_type:document'],
+      }),
     ],
   });
   dbService.__setSupabaseClientForTests(fake.client);
@@ -79,6 +114,14 @@ test('rejects cycles, foreign-user parents and cross-workspace parents', async (
       id: ROOT_ID,
       userId: 'user-1',
       parentId: '55555555-5555-4555-8555-555555555555',
+    }),
+    (error) => error.code === 'SOP_PARENT_DOMAIN_MISMATCH',
+  );
+  await assert.rejects(
+    dbService.updateSOPLocation({
+      id: ROOT_ID,
+      userId: 'user-1',
+      parentId: '66666666-6666-4666-8666-666666666666',
     }),
     (error) => error.code === 'SOP_PARENT_DOMAIN_MISMATCH',
   );

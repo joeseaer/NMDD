@@ -496,7 +496,18 @@ const getSopHierarchySnapshot = async (userId) => {
     .select('*')
     .eq('user_id', userId);
   if (error) throw error;
-  return Array.isArray(data) ? data : [];
+  return (Array.isArray(data) ? data : []).map((page) => {
+    const rawTags = normalizeSopTags(page.tags);
+    const taggedDomain = getSopTagValue(rawTags, 'domain:');
+    const domain = normalizeSopDomain(page.domain || taggedDomain);
+    const taggedResearchType = getSopTagValue(rawTags, 'research_type:');
+
+    return {
+      ...page,
+      domain,
+      research_type: normalizeResearchType(page.research_type || taggedResearchType, domain),
+    };
+  });
 };
 
 const validateSopParent = ({ pages, pageId = null, parentId, userId, domain }) => {
