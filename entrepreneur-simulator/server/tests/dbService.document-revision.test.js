@@ -459,6 +459,8 @@ test('getSOPs maps document and history schema/revision metadata', async () => {
   assert.equal(document.content_schema_version, 2);
   assert.equal(document.content_revision, 9);
   assert.equal(document.revision_supported, true);
+  assert.equal(document.created_at, '2026-07-01T00:00:00.000Z');
+  assert.equal(document.updated_at, '2026-07-01T00:00:00.000Z');
   assert.equal(document.history[0].content_schema_version, 1);
   assert.equal(document.history[0].content_revision, 4);
 });

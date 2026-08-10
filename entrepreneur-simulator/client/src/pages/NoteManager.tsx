@@ -29,6 +29,7 @@ import { GuardedLink, useDocumentNavigationGuard } from '../features/document-ed
 import { documentLinksToPage } from '../features/document-editor/pageLinks/pageLinkIndex';
 import { DocumentPageTree } from '../features/document-tree/DocumentPageTree';
 import {
+  formatDocumentDate,
   formatDocumentPath,
   getDocumentAncestors,
   getDocumentChildren,
@@ -426,13 +427,13 @@ export default function NoteManager() {
               throw new Error('Server response missing ID');
           }
           
-           const createdNote = {
-               ...newNote,
-               id: result.id,
-               content_schema_version: Number(result.content_schema_version || 1),
-               content_revision: normalizeDocumentRevision(result.content_revision),
-               created_at: new Date().toISOString().split('T')[0],
-              updated_at: new Date().toISOString().split('T')[0],
+          const createdNote = {
+              ...newNote,
+              id: result.id,
+              content_schema_version: Number(result.content_schema_version || 1),
+              content_revision: normalizeDocumentRevision(result.content_revision),
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
           } as SOPEntity;
 
           setItems(prev => [createdNote, ...prev]);
@@ -588,13 +589,13 @@ export default function NoteManager() {
                 onDelete={() => handleDeleteNote(selectedNote.id)}
                 onPublish={(cat) => {
                   if (!selectedNote) return;
-                  const next: SOPEntity = { ...selectedNote, category: cat, updated_at: new Date().toISOString().split('T')[0] };
+                  const next: SOPEntity = { ...selectedNote, category: cat, updated_at: new Date().toISOString() };
                   handleSaveNote(next);
                   setSearchParams({ view: 'sop', doc: selectedNote.id });
                 }}
                 onUnpublish={() => {
                   if (!selectedNote) return;
-                  const next: SOPEntity = { ...selectedNote, category: 'note', updated_at: new Date().toISOString().split('T')[0] };
+                  const next: SOPEntity = { ...selectedNote, category: 'note', updated_at: new Date().toISOString() };
                   handleSaveNote(next);
                   setSearchParams({ view: 'notes', doc: selectedNote.id });
                 }}
@@ -763,13 +764,13 @@ function NoteDetailView({
       onUpdate({ 
           ...note, 
           title: newTitle, 
-          updated_at: new Date().toISOString().split('T')[0] 
+          updated_at: new Date().toISOString(),
       });
   };
 
   const handleTagsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const tags = e.target.value.split(',').map(t => t.trim()).filter(Boolean);
-      onUpdate({ ...note, tags, updated_at: new Date().toISOString().split('T')[0] });
+      onUpdate({ ...note, tags, updated_at: new Date().toISOString() });
   };
 
   const handleContentUpdate = (value: SmartDocumentValue) => {
@@ -789,7 +790,7 @@ function NoteDetailView({
           ...note, 
           content: value.markdown,
           content_json: value.json,
-          updated_at: new Date().toISOString().split('T')[0] 
+          updated_at: new Date().toISOString(),
       };
 
       if (newTitle !== note.title) {
@@ -964,8 +965,8 @@ function NoteDetailView({
             meta={(
               <>
                 <span>{note.version || 'V1.0'}</span>
-                <span>创建于 {note.created_at || '-'}</span>
-                <span>更新于 {note.updated_at || '-'}</span>
+                <span>创建于 {formatDocumentDate(note.created_at)}</span>
+                <span>更新于 {formatDocumentDate(note.updated_at)}</span>
               </>
             )}
           />

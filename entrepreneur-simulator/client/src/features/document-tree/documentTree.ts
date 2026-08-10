@@ -3,6 +3,7 @@ export type DocumentTreeItem = {
   title: string;
   parent_id?: string | null;
   sort_order?: number | null;
+  created_at?: string | null;
   updated_at?: string | null;
 };
 
@@ -13,15 +14,35 @@ export type DocumentTreeNode<T extends DocumentTreeItem> = {
 
 const normalizedOrder = (item: DocumentTreeItem) => {
   const value = Number(item.sort_order);
-  return Number.isSafeInteger(value) && value >= 0 ? value : Number.MAX_SAFE_INTEGER;
+  return Number.isSafeInteger(value) && value >= 0 ? value : -1;
 };
 
+const normalizedTimestamp = (value: string | null | undefined) => {
+  const timestamp = Date.parse(String(value || ''));
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const documentActivityTimestamp = (item: DocumentTreeItem) => Math.max(
+  normalizedTimestamp(item.updated_at),
+  normalizedTimestamp(item.created_at),
+);
+
 export const compareDocumentTreeItems = <T extends DocumentTreeItem>(left: T, right: T) => {
-  const orderDifference = normalizedOrder(left) - normalizedOrder(right);
+  const activityDifference = documentActivityTimestamp(right) - documentActivityTimestamp(left);
+  if (activityDifference) return activityDifference;
+
+  // sort_order is a millisecond timestamp for current and migrated pages. It
+  // also gives legacy pages a deterministic newest-first order when their old
+  // API timestamps only had day-level precision.
+  const orderDifference = normalizedOrder(right) - normalizedOrder(left);
   if (orderDifference) return orderDifference;
-  const updatedDifference = String(right.updated_at || '').localeCompare(String(left.updated_at || ''));
-  if (updatedDifference) return updatedDifference;
   return (left.title || '').localeCompare(right.title || '', 'zh-CN') || left.id.localeCompare(right.id);
+};
+
+export const formatDocumentDate = (value: string | null | undefined) => {
+  if (!value) return '-';
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toLocaleDateString('zh-CN') : value;
 };
 
 export const buildDocumentTree = <T extends DocumentTreeItem>(items: T[]): DocumentTreeNode<T>[] => {

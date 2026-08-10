@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDocumentTree,
+  compareDocumentTreeItems,
   getDocumentAncestors,
   getDocumentDescendantIds,
   includeMatchingPagesAndAncestors,
@@ -17,9 +18,37 @@ const pages = [
 describe('document page tree', () => {
   it('builds a stable sibling-ordered tree', () => {
     const tree = buildDocumentTree(pages);
-    expect(tree.map((node) => node.item.id)).toEqual(['root', 'second']);
-    expect(tree[0].children.map((node) => node.item.id)).toEqual(['child-a', 'child-b']);
-    expect(tree[0].children[0].children[0].item.id).toBe('grandchild');
+    expect(tree.map((node) => node.item.id)).toEqual(['second', 'root']);
+    expect(tree[1].children.map((node) => node.item.id)).toEqual(['child-b', 'child-a']);
+    expect(tree[1].children[1].children[0].item.id).toBe('grandchild');
+  });
+
+  it('sorts siblings by their latest creation or modification time', () => {
+    const sorted = [
+      {
+        id: 'newest-created',
+        title: 'Newest created',
+        created_at: '2026-08-10T10:00:00.000Z',
+        updated_at: '2026-08-10T10:00:00.000Z',
+        sort_order: 10,
+      },
+      {
+        id: 'recently-edited',
+        title: 'Recently edited',
+        created_at: '2026-08-01T10:00:00.000Z',
+        updated_at: '2026-08-10T11:00:00.000Z',
+        sort_order: 1,
+      },
+      {
+        id: 'oldest',
+        title: 'Oldest',
+        created_at: '2026-07-01T10:00:00.000Z',
+        updated_at: '2026-07-02T10:00:00.000Z',
+        sort_order: 100,
+      },
+    ].sort(compareDocumentTreeItems);
+
+    expect(sorted.map((page) => page.id)).toEqual(['recently-edited', 'newest-created', 'oldest']);
   });
 
   it('returns root-to-parent ancestors and all descendants', () => {

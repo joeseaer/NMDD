@@ -42,6 +42,7 @@ import { GuardedLink, useDocumentNavigationGuard } from '../features/document-ed
 import { documentLinksToPage } from '../features/document-editor/pageLinks/pageLinkIndex';
 import { DocumentPageTree } from '../features/document-tree/DocumentPageTree';
 import {
+  formatDocumentDate,
   formatDocumentPath,
   getDocumentAncestors,
   getDocumentChildren,
@@ -500,8 +501,8 @@ export default function ResearchWorkspace() {
         id: result.id,
         content_schema_version: Number(result.content_schema_version || 1),
         content_revision: normalizeDocumentRevision(result.content_revision),
-        created_at: new Date().toISOString().split('T')[0],
-        updated_at: new Date().toISOString().split('T')[0],
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
       } as ResearchItem;
       setItems((prev) => [createdItem, ...prev]);
       urlSyncTargetRef.current = result.id;
@@ -892,12 +893,12 @@ function ResearchDetail({
   }, [handleFullscreenChange, isFullscreen]);
 
   const handleTitleChange = (title: string) => {
-    onUpdate({ ...item, title, updated_at: new Date().toISOString().split('T')[0] });
+    onUpdate({ ...item, title, updated_at: new Date().toISOString() });
   };
 
   const handleTagsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const tags = event.target.value.split(',').map((tag) => tag.trim()).filter(Boolean);
-    onUpdate({ ...item, tags, updated_at: new Date().toISOString().split('T')[0] });
+    onUpdate({ ...item, tags, updated_at: new Date().toISOString() });
   };
 
   const handleContentUpdate = (value: SmartDocumentValue) => {
@@ -911,7 +912,7 @@ function ResearchDetail({
       title: nextTitle,
       content: value.markdown,
       content_json: value.json,
-      updated_at: new Date().toISOString().split('T')[0],
+      updated_at: new Date().toISOString(),
     });
   };
 
@@ -927,7 +928,7 @@ function ResearchDetail({
         ...item.related,
         people: [...currentPeople, { id: person.id, name: person.name, role: person.identity || person.role || '' }],
       },
-      updated_at: new Date().toISOString().split('T')[0],
+      updated_at: new Date().toISOString(),
     }, { persistRelations: true, flush: true });
   };
 
@@ -938,12 +939,12 @@ function ResearchDetail({
         ...item.related,
         people: (item.related.people || []).filter((person) => person.id !== personId),
       },
-      updated_at: new Date().toISOString().split('T')[0],
+      updated_at: new Date().toISOString(),
     }, { persistRelations: true, flush: true });
   };
 
   const updateStatus = (status: ResearchStatus) => {
-    onUpdate({ ...item, research_status: status, updated_at: new Date().toISOString().split('T')[0] });
+    onUpdate({ ...item, research_status: status, updated_at: new Date().toISOString() });
   };
 
   return (
@@ -1061,8 +1062,8 @@ function ResearchDetail({
             meta={(
               <>
                 <span>{item.version || 'V1.0'}</span>
-                <span>创建于 {item.created_at || '-'}</span>
-                <span>更新于 {item.updated_at || '-'}</span>
+                <span>创建于 {formatDocumentDate(item.created_at)}</span>
+                <span>更新于 {formatDocumentDate(item.updated_at)}</span>
                 {item.promoted_to_life ? <span className="text-emerald-600">已上浮到人生主线</span> : null}
               </>
             )}
