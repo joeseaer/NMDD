@@ -938,6 +938,44 @@ async function routes(fastify, options) {
     }
   });
 
+  fastify.post('/sop/:id/repair-content', async (request, reply) => {
+    try {
+      const { id } = request.params;
+      const body = request.body || {};
+      const expectedRevision = expectedRevisionFromRequest(request);
+      const result = await dbService.repairSOPContent({
+        id,
+        userId: body.userId || body.user_id || request.query?.userId || DEFAULT_USER_ID,
+        content: body.content,
+        content_json: body.content_json,
+        content_schema_version: body.content_schema_version,
+        ...(expectedRevision === undefined ? {} : { expected_revision: expectedRevision }),
+      });
+      if (Number.isSafeInteger(result.content_revision)) {
+        reply.header('ETag', `"${result.content_revision}"`);
+      }
+      return { ...result, message: 'Document content repaired safely' };
+    } catch (err) {
+      if (err?.code === 'SOP_REVISION_CONFLICT') {
+        return reply.code(409).send({
+          error: 'Document changed in another editor. Reload before repairing it.',
+          code: err.code,
+          id: err.sopId,
+          expected_revision: err.expectedRevision,
+          current_revision: err.currentRevision,
+          content_schema_version: err.contentSchemaVersion,
+        });
+      }
+      request.log.error(err);
+      const statusCode = Number(err?.statusCode) || 500;
+      return reply.code(statusCode).send({
+        error: err?.message || 'Failed to repair document content',
+        code: err?.code || 'DOCUMENT_REPAIR_ERROR',
+        id: err?.sopId || request.params?.id,
+      });
+    }
+  });
+
   fastify.patch('/sop/:id/location', async (request, reply) => {
     try {
       const { id } = request.params;

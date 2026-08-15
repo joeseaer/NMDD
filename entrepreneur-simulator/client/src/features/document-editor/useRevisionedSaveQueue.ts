@@ -301,6 +301,28 @@ export const useRevisionedSaveQueue = <T extends RevisionedDocument>({
     setStatus(document.id, { phase: 'saved' });
   }, [setStatus]);
 
+  const acceptExternalSave = useCallback((document: T, result: SOPSaveResult) => {
+    const nextRevision = normalizeDocumentRevision(result.content_revision);
+    const confirmedDocument = {
+      ...document,
+      content_revision: nextRevision ?? document.content_revision,
+      content_schema_version: Number(
+        result.content_schema_version
+        || document.content_schema_version
+        || SMART_DOCUMENT_SCHEMA_VERSION,
+      ),
+    } as T;
+    pendingRef.current.delete(document.id);
+    failedRef.current.delete(document.id);
+    blockedRef.current.delete(document.id);
+    confirmedRevisionRef.current.set(document.id, nextRevision);
+    clearLocalDocumentDraft(document.id);
+    onOptimisticUpdate?.(confirmedDocument);
+    onConfirmed?.(document.id, result);
+    setStatus(document.id, { phase: 'saved' });
+    return confirmedDocument;
+  }, [onConfirmed, onOptimisticUpdate, setStatus]);
+
   const getStatus = useCallback((id: string | null | undefined): DocumentSaveStatus => {
     if (!id) return { phase: 'saved' };
     return statuses[id] || { phase: 'saved' };
@@ -332,6 +354,7 @@ export const useRevisionedSaveQueue = <T extends RevisionedDocument>({
     flush,
     retry,
     resetRevision,
+    acceptExternalSave,
     getStatus,
   };
 };

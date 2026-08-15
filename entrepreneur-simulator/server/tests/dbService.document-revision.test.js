@@ -272,6 +272,89 @@ test('saveSOP rejects a stale expected revision without modifying the document',
   assert.equal(fake.state.rows.get(baseRow().id).content, 'old');
 });
 
+test('repairSOPContent snapshots the original pair before revision-guarded replacement', async () => {
+  const originalJson = {
+    type: 'doc',
+    content: [{ type: 'legacyWidget', attrs: { raw: 'keep-me' } }],
+  };
+  const row = baseRow({ content: '# Original backup', content_json: originalJson });
+  const fake = createFakeSupabase({ rows: [row] });
+  dbService.__setSupabaseClientForTests(fake.client);
+
+  const repairedJson = {
+    type: 'doc',
+    content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Original backup' }] }],
+  };
+  const result = await dbService.repairSOPContent({
+    id: row.id,
+    userId: row.user_id,
+    content: '# Original backup',
+    content_json: repairedJson,
+    content_schema_version: 2,
+    expected_revision: 4,
+  });
+
+  const backupCall = fake.state.calls.find((call) => (
+    call.table === 'sop_versions' && call.operation === 'insert'
+  ));
+  const updateCall = fake.state.calls.find((call) => (
+    call.table === 'sops' && call.operation === 'update'
+  ));
+  assert.ok(backupCall);
+  assert.ok(updateCall);
+  assert.ok(fake.state.calls.indexOf(backupCall) < fake.state.calls.indexOf(updateCall));
+  assert.equal(backupCall.payload.content, '# Original backup');
+  assert.deepEqual(backupCall.payload.content_json, originalJson);
+  assert.match(backupCall.payload.version_note, /修复前自动备份/);
+  assert.ok(updateCall.filters.some(([field, value]) => field === 'content_revision' && value === 4));
+  assert.deepEqual(fake.state.rows.get(row.id).content_json, repairedJson);
+  assert.equal(result.content_revision, 5);
+  assert.equal(result.recovery_backup.content_revision, 4);
+});
+
+test('repairSOPContent aborts without overwriting when the mandatory backup fails', async () => {
+  const row = baseRow();
+  const fake = createFakeSupabase({ rows: [row], failVersionInsert: true });
+  dbService.__setSupabaseClientForTests(fake.client);
+
+  await assert.rejects(
+    dbService.repairSOPContent({
+      id: row.id,
+      userId: row.user_id,
+      content: 'repaired',
+      content_json: { type: 'doc', content: [] },
+      content_schema_version: 2,
+      expected_revision: 4,
+    }),
+    /simulated version history failure/,
+  );
+
+  assert.equal(fake.state.rows.get(row.id).content, 'old');
+  assert.equal(fake.state.calls.some((call) => (
+    call.table === 'sops' && call.operation === 'update'
+  )), false);
+});
+
+test('repairSOPContent rejects a stale revision before creating a backup', async () => {
+  const row = baseRow({ content_revision: 7 });
+  const fake = createFakeSupabase({ rows: [row] });
+  dbService.__setSupabaseClientForTests(fake.client);
+
+  await assert.rejects(
+    dbService.repairSOPContent({
+      id: row.id,
+      userId: row.user_id,
+      content: 'stale repair',
+      content_json: { type: 'doc', content: [] },
+      expected_revision: 4,
+    }),
+    (error) => error.code === 'SOP_REVISION_CONFLICT' && error.currentRevision === 7,
+  );
+
+  assert.equal(fake.state.calls.some((call) => call.table === 'sop_versions'), false);
+  assert.equal(fake.state.rows.get(row.id).content, 'old');
+});
+
 test('an older client that omits content_schema_version does not downgrade the stored schema', async () => {
   const row = baseRow({ content_schema_version: 2, content_revision: 6 });
   const fake = createFakeSupabase({ rows: [row] });

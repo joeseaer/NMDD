@@ -66,6 +66,108 @@
   color: var(--smart-doc-warning);
 }
 
+.smart-document-recovery-warning__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.smart-document-recovery-warning__body > strong {
+  display: block;
+  color: var(--smart-doc-text);
+  font-size: 0.875rem;
+}
+
+.smart-document-recovery-warning__body > p {
+  margin: 0.2rem 0 0;
+}
+
+.smart-document-recovery-warning__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+
+.smart-document-recovery-warning__actions button {
+  min-height: 2rem;
+  padding: 0.35rem 0.7rem;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: var(--smart-doc-radius-sm);
+  background: var(--smart-doc-surface);
+  color: var(--smart-doc-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.smart-document-recovery-warning__actions button:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--smart-doc-warning) 55%, var(--smart-doc-border));
+  color: var(--smart-doc-text);
+}
+
+.smart-document-recovery-warning__actions button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.smart-document-recovery-warning__actions .smart-document-recovery-warning__primary {
+  border-color: var(--smart-doc-warning);
+  background: var(--smart-doc-warning);
+  color: #fff;
+}
+
+.smart-document-recovery-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+  margin-top: 0.7rem;
+}
+
+.smart-document-recovery-preview section {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: var(--smart-doc-radius-sm);
+  background: var(--smart-doc-surface);
+}
+
+.smart-document-recovery-preview h4 {
+  margin: 0;
+  padding: 0.45rem 0.6rem;
+  border-bottom: 1px solid var(--smart-doc-border);
+  color: var(--smart-doc-text-secondary);
+  font-size: 0.7rem;
+}
+
+.smart-document-recovery-preview pre {
+  max-height: 12rem;
+  margin: 0;
+  overflow: auto;
+  padding: 0.55rem 0.6rem;
+  color: var(--smart-doc-text-muted);
+  font-family: var(--smart-doc-font-mono);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.smart-document-recovery-warning__body .smart-document-recovery-warning__error {
+  margin-top: 0.55rem;
+  color: var(--smart-doc-danger);
+  font-weight: 600;
+}
+
+.smart-document[data-recovery-blocked='true'] .smart-document-content {
+  cursor: default;
+}
+
+@media (max-width: 720px) {
+  .smart-document-recovery-preview {
+    grid-template-columns: 1fr;
+  }
+}
+
 .smart-document-find-panel {
   position: absolute;
   z-index: 65;
@@ -1208,19 +1310,23 @@
   background: var(--smart-doc-border);
 }
 
-.smart-document-block-select-label {
+.smart-document-block-picker {
   display: inline-flex;
   flex: none;
   align-items: center;
 }
 
-.smart-document-block-select {
+.smart-document-block-picker__trigger {
+  display: inline-flex;
   min-width: 6.5rem;
   height: 2.25rem;
-  padding: 0 1.75rem 0 0.625rem;
+  align-items: center;
+  justify-content: space-between !important;
+  gap: 0.5rem;
+  padding: 0 0.5rem 0 0.625rem !important;
   border: 1px solid transparent;
   border-radius: var(--smart-doc-radius-sm);
-  background-color: transparent;
+  background: transparent;
   color: var(--smart-doc-text-secondary);
   font-family: inherit;
   font-size: 0.8125rem;
@@ -1228,14 +1334,77 @@
   outline: none;
 }
 
-.smart-document-block-select:hover {
+.smart-document-block-picker__trigger:hover,
+.smart-document-block-picker__trigger[aria-expanded="true"] {
   background-color: var(--smart-doc-surface-hover);
   color: var(--smart-doc-text);
 }
 
-.smart-document-block-select:focus-visible {
+.smart-document-block-picker__trigger:focus-visible {
   border-color: var(--smart-doc-accent);
   box-shadow: 0 0 0 3px var(--smart-doc-accent-ring);
+}
+
+.smart-document-block-picker__trigger svg {
+  width: 0.875rem !important;
+  height: 0.875rem !important;
+  transition: transform var(--smart-doc-motion-fast) var(--smart-doc-ease);
+}
+
+.smart-document-block-picker__trigger[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.smart-document-block-menu {
+  position: fixed;
+  z-index: 120;
+  display: grid;
+  width: 20rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.125rem;
+  padding: 0.35rem;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: var(--smart-doc-radius-md);
+  background: color-mix(in srgb, var(--smart-doc-surface-raised) 98%, transparent);
+  box-shadow: var(--smart-doc-shadow-menu);
+  color: var(--smart-doc-text);
+  font-family: var(--smart-doc-font-sans);
+  backdrop-filter: blur(12px);
+}
+
+.smart-document-block-menu > button {
+  display: grid;
+  min-height: 2.25rem;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border: 0;
+  border-radius: var(--smart-doc-radius-sm);
+  background: transparent;
+  color: var(--smart-doc-text-secondary);
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+}
+
+.smart-document-block-menu > button:hover,
+.smart-document-block-menu > button:focus-visible,
+.smart-document-block-menu > button[data-active="true"] {
+  background: var(--smart-doc-surface-hover);
+  color: var(--smart-doc-text);
+  outline: none;
+}
+
+.smart-document-block-menu > button[data-active="true"] {
+  color: var(--smart-doc-accent);
+}
+
+.smart-document-block-menu__shortcut {
+  color: var(--smart-doc-text-muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+  text-align: center;
 }
 
 .smart-document-toolbar::-webkit-scrollbar,
@@ -1647,6 +1816,21 @@
 
   .smart-document-toolbar-spacer {
     display: none;
+  }
+
+  .smart-document-block-menu {
+    width: min(20rem, calc(100vw - 1rem));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .smart-document-block-menu > button {
+    min-width: 0;
+    min-height: 3rem;
+    grid-template-columns: 1fr;
+    gap: 0.125rem;
+    justify-items: center;
+    padding: 0.35rem 0.25rem;
+    text-align: center;
   }
 
   .smart-document-context-toolbar-row {

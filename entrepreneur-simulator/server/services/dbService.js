@@ -810,6 +810,143 @@ const saveSOP = async (sopData, options = {}) => {
   return options.returnResult ? saveResult : sopId;
 };
 
+/**
+ * Replaces a document's incompatible structured content only after its exact
+ * current Markdown/JSON pair has been copied to sop_versions. The snapshot is
+ * deliberately mandatory: if it cannot be written, the repair is aborted.
+ * The final update is revision-guarded so a concurrent edit can never be
+ * overwritten by a recovery attempt based on stale content.
+ */
+const repairSOPContent = async ({
+  id,
+  userId,
+  user_id: legacyUserId,
+  content,
+  content_json: contentJsonInput,
+  content_schema_version: contentSchemaVersionInput,
+  expected_revision: expectedRevisionInput,
+  expectedRevision: legacyExpectedRevision,
+} = {}) => {
+  if (!supabase) throw new Error("Database connection not established. Check environment variables.");
+  if (!id) {
+    const error = new Error('Document id is required for content repair');
+    error.code = 'INVALID_DOCUMENT_REPAIR';
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const contentJson = normalizeContentJson(contentJsonInput);
+  if (!contentJson) {
+    const error = new Error('Repaired content_json must be a valid document root');
+    error.code = 'INVALID_DOCUMENT_REPAIR';
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const requestedRevision = normalizeExpectedRevision({
+    expected_revision: expectedRevisionInput ?? legacyExpectedRevision,
+  });
+  const ownerId = userId || legacyUserId || DEFAULT_USER_ID;
+  const { data: current, error: currentError } = await supabase
+    .from('sops')
+    .select('id, user_id, version, content, content_json, content_schema_version, content_revision')
+    .eq('id', id)
+    .eq('user_id', ownerId)
+    .maybeSingle();
+
+  if (currentError) throw currentError;
+  if (!current) throw new SopNotFoundError(id);
+
+  const currentRevision = normalizePositiveInteger(current.content_revision, null);
+  const currentSchemaVersion = normalizeDocumentSchemaVersion(current.content_schema_version);
+  if (requestedRevision !== null && currentRevision !== requestedRevision) {
+    throw new SopRevisionConflictError({
+      id,
+      expectedRevision: requestedRevision,
+      currentRevision,
+      contentSchemaVersion: currentSchemaVersion,
+    });
+  }
+
+  const repairRevision = currentRevision ?? requestedRevision ?? 1;
+  const backupVersion = `recovery-backup-r${repairRevision}-${Date.now()}`;
+  const backupPayload = {
+    sop_id: id,
+    version: backupVersion,
+    content: typeof current.content === 'string' ? current.content : '',
+    content_json: current.content_json ?? null,
+    content_schema_version: currentSchemaVersion,
+    content_revision: repairRevision,
+    version_note: '结构化内容修复前自动备份（保留原始 JSON 与 Markdown）',
+  };
+  const backupFallbackContent = packSmartDocumentContent(
+    backupPayload.content,
+    backupPayload.content_json,
+  );
+  const backupResult = await runSopMutationWithFallback(
+    (nextPayload) => supabase.from('sop_versions').insert(nextPayload),
+    backupPayload,
+    backupFallbackContent,
+  );
+  if (backupResult.error) {
+    const backupError = new Error(
+      backupResult.error.message || 'Could not create the mandatory pre-repair backup',
+    );
+    Object.assign(backupError, backupResult.error);
+    throw backupError;
+  }
+
+  const nextSchemaVersion = Math.max(
+    currentSchemaVersion,
+    normalizeDocumentSchemaVersion(contentSchemaVersionInput),
+  );
+  let updateQuery = supabase
+    .from('sops')
+    .update({
+      content: typeof content === 'string' ? content : '',
+      content_json: contentJson,
+      content_schema_version: nextSchemaVersion,
+      updated_at: new Date(),
+    })
+    .eq('id', id)
+    .eq('user_id', ownerId);
+  if (currentRevision !== null) {
+    updateQuery = updateQuery.eq('content_revision', currentRevision);
+  }
+  const { data: updated, error: updateError } = await updateQuery
+    .select('id, content_schema_version, content_revision')
+    .maybeSingle();
+
+  if (updateError) throw updateError;
+  if (!updated) {
+    const { data: latest, error: latestError } = await supabase
+      .from('sops')
+      .select('id, content_schema_version, content_revision')
+      .eq('id', id)
+      .eq('user_id', ownerId)
+      .maybeSingle();
+    if (latestError) throw latestError;
+    if (!latest) throw new SopNotFoundError(id);
+    throw new SopRevisionConflictError({
+      id,
+      expectedRevision: currentRevision,
+      currentRevision: normalizePositiveInteger(latest.content_revision, null),
+      contentSchemaVersion: normalizeDocumentSchemaVersion(latest.content_schema_version),
+    });
+  }
+
+  return {
+    id: updated.id,
+    content_schema_version: normalizeDocumentSchemaVersion(updated.content_schema_version),
+    content_revision: normalizePositiveInteger(updated.content_revision, null),
+    revision_supported: normalizePositiveInteger(updated.content_revision, null) !== null,
+    recovery_backup: {
+      version: backupVersion,
+      content_revision: repairRevision,
+    },
+  };
+};
+
 const applySopFilters = (items, filters = {}) => {
   const domain = filters.domain && VALID_SOP_DOMAINS.has(String(filters.domain)) ? String(filters.domain) : null;
   const researchType = filters.researchType && VALID_RESEARCH_TYPES.has(String(filters.researchType)) ? String(filters.researchType) : null;
@@ -2177,7 +2314,7 @@ const __setSupabaseClientForTests = (client) => {
 };
 
 module.exports = { 
-  initDB, saveScene, getRecentScenes, saveSOP, getSOPs, updateSOPLocation, updateSOPMeta, promoteSOPToLife, deleteSOP, deleteSOPsByTitle,
+  initDB, saveScene, getRecentScenes, saveSOP, repairSOPContent, getSOPs, updateSOPLocation, updateSOPMeta, promoteSOPToLife, deleteSOP, deleteSOPsByTitle,
   savePersonProfile, updatePersonPrivateInfo, updatePersonTriggersPleasers, updatePersonReactionLibrary, updatePersonAIFollowUp, deletePersonProfile, getPeopleProfiles, saveInteractionLog, getInteractionLogs, updateInteractionLog, deleteInteractionLog,
   saveReviewSession, getReviewSessions, getReviewSession, getUserStats,
   getPlannerLists, ensurePlannerInbox, createPlannerList, updatePlannerList, deletePlannerList,

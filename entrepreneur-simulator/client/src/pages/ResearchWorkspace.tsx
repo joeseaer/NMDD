@@ -18,7 +18,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
-import { api, CURRENT_USER_ID } from '../services/api';
+import { api, CURRENT_USER_ID, type SOPContentRepairResult } from '../services/api';
 import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue, type SmartDocumentValueGetter } from '../components/SmartDocumentEditor';
 import {
   normalizeDocumentRevision,
@@ -470,6 +470,23 @@ export default function ResearchWorkspace() {
     if (options.flush) void saveQueue.flush();
   }, [saveQueue]);
 
+  const handleRecoveredItem = useCallback((
+    id: string,
+    value: SmartDocumentValue,
+    result: SOPContentRepairResult,
+  ) => {
+    const current = items.find((item) => item.id === id);
+    if (!current) return;
+    saveQueue.acceptExternalSave(withoutRelationsForDocumentAutosave({
+      ...current,
+      content: value.markdown,
+      content_json: value.json,
+      content_schema_version: result.content_schema_version || current.content_schema_version,
+      content_revision: normalizeDocumentRevision(result.content_revision) ?? current.content_revision,
+      updated_at: new Date().toISOString(),
+    }), result);
+  }, [items, saveQueue]);
+
   const handleCreateItem = async (parentId: string | null = null) => {
     if (!await flushBeforeNavigation()) return;
     setLoading(true);
@@ -755,6 +772,7 @@ export default function ResearchWorkspace() {
             onRetrySave={() => saveQueue.retry(selectedItem.id)}
             onReloadAfterConflict={() => window.location.reload()}
             serializationFlushRef={activeEditorFlushRef}
+            onRecoveryRepaired={(value, result) => handleRecoveredItem(selectedItem.id, value, result)}
             isPromoting={promotingId === selectedItem.id}
             onBack={async () => {
               if (!await flushBeforeNavigation()) return;
@@ -804,6 +822,7 @@ function ResearchDetail({
   onRetrySave,
   onReloadAfterConflict,
   serializationFlushRef,
+  onRecoveryRepaired,
   isPromoting,
   onBack,
   onUpdate,
@@ -825,6 +844,7 @@ function ResearchDetail({
   onRetrySave: () => void;
   onReloadAfterConflict: () => void;
   serializationFlushRef: React.MutableRefObject<(() => Promise<void>) | null>;
+  onRecoveryRepaired: (value: SmartDocumentValue, result: SOPContentRepairResult) => void;
   isPromoting: boolean;
   onBack: () => void | Promise<void>;
   onUpdate: (item: ResearchItem, options?: ResearchUpdateOptions) => void;
@@ -1176,10 +1196,12 @@ function ResearchDetail({
           contentJson={item.content_json || null}
           pages={pages}
           currentDocumentId={item.id}
+          contentRevision={item.content_revision}
           mode={mode}
           theme={theme}
           serializationFlushRef={serializationFlushRef}
           exportValueRef={exportValueRef}
+          onRecoveryRepaired={onRecoveryRepaired}
           onChange={handleContentUpdate}
         />
       </DocumentWorkspaceShell>

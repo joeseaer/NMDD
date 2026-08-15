@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/core';
 import { useEditorState } from '@tiptap/react';
 import { BubbleMenu, FloatingMenu } from '@tiptap/react/menus';
@@ -8,6 +9,7 @@ import {
   AlignRight,
   Bold,
   CheckSquare,
+  ChevronDown,
   Code,
   Columns3,
   ExternalLink,
@@ -33,6 +35,7 @@ import {
   Undo2,
 } from 'lucide-react';
 import { openSafeDocumentUrl } from '../DocumentLinkInteractionExtension';
+import { calculateAnchoredMenuPosition, type AnchoredMenuPosition } from './anchoredMenuPosition';
 
 type MenuButtonProps = {
   label: string;
@@ -58,6 +61,156 @@ const MenuButton = ({ label, onClick, active = false, disabled = false, classNam
     {children}
   </button>
 );
+
+const BLOCK_TYPES = [
+  { value: 'paragraph', label: '正文', shortLabel: '正文' },
+  { value: 'h1', label: '一级标题', shortLabel: 'H1' },
+  { value: 'h2', label: '二级标题', shortLabel: 'H2' },
+  { value: 'h3', label: '三级标题', shortLabel: 'H3' },
+  { value: 'quote', label: '引用', shortLabel: '引用' },
+  { value: 'code', label: '代码块', shortLabel: '代码' },
+] as const;
+
+type BlockTypeValue = typeof BLOCK_TYPES[number]['value'];
+
+const PORTAL_STYLE_VARIABLES = [
+  '--smart-doc-font-sans',
+  '--smart-doc-surface-raised',
+  '--smart-doc-surface-hover',
+  '--smart-doc-text',
+  '--smart-doc-text-secondary',
+  '--smart-doc-text-muted',
+  '--smart-doc-border',
+  '--smart-doc-accent',
+  '--smart-doc-radius-sm',
+  '--smart-doc-radius-md',
+  '--smart-doc-shadow-menu',
+  '--smart-doc-motion-fast',
+  '--smart-doc-ease',
+] as const;
+
+const BlockTypeMenu = ({
+  value,
+  onChange,
+}: {
+  value: BlockTypeValue;
+  onChange: (value: BlockTypeValue) => void;
+}) => {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<AnchoredMenuPosition | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const activeOption = BLOCK_TYPES.find((option) => option.value === value) || BLOCK_TYPES[0];
+
+  const updatePosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    const menu = menuRef.current;
+    if (!trigger || !menu) return;
+    const triggerStyle = window.getComputedStyle(trigger);
+    PORTAL_STYLE_VARIABLES.forEach((property) => {
+      menu.style.setProperty(property, triggerStyle.getPropertyValue(property));
+    });
+    const anchor = trigger.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    setPosition(calculateAnchoredMenuPosition({
+      anchor,
+      menuWidth: menuRect.width,
+      menuHeight: menuRect.height,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    }));
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return;
+    }
+    updatePosition();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updatePosition);
+    if (menuRef.current) observer?.observe(menuRef.current);
+    window.addEventListener('resize', updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', updatePosition);
+      window.removeEventListener('scroll', updatePosition, true);
+    };
+  }, [open, updatePosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeFromOutside = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (triggerRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setOpen(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', closeFromOutside);
+    document.addEventListener('keydown', closeFromEscape);
+    return () => {
+      document.removeEventListener('pointerdown', closeFromOutside);
+      document.removeEventListener('keydown', closeFromEscape);
+    };
+  }, [open]);
+
+  const menu = open && typeof document !== 'undefined' ? createPortal(
+    <div
+      ref={menuRef}
+      className="smart-document-block-menu"
+      data-side={position?.side || 'top'}
+      role="listbox"
+      aria-label="块类型"
+      style={{
+        left: position?.left ?? 0,
+        top: position?.top ?? 0,
+        visibility: position ? 'visible' : 'hidden',
+      }}
+    >
+      {BLOCK_TYPES.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          role="option"
+          aria-selected={option.value === value}
+          data-active={option.value === value ? 'true' : 'false'}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            onChange(option.value);
+            setOpen(false);
+          }}
+        >
+          <span className="smart-document-block-menu__shortcut" aria-hidden="true">{option.shortLabel}</span>
+          <span>{option.label}</span>
+        </button>
+      ))}
+    </div>,
+    document.body,
+  ) : null;
+
+  return (
+    <div className="smart-document-block-picker">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="smart-document-block-picker__trigger"
+        aria-label="当前块类型"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>{activeOption.label}</span>
+        <ChevronDown aria-hidden="true" />
+      </button>
+      {menu}
+    </div>
+  );
+};
 
 const TEXT_COLORS = [
   { label: '默认文字', value: '' },
@@ -296,9 +449,9 @@ export const EditorCompactToolbar = ({
       alignRight: current.isActive({ textAlign: 'right' }),
     }),
   });
-  const blockValue = toolbarState.blockValue;
+  const blockValue = toolbarState.blockValue as BlockTypeValue;
 
-  const changeBlock = (value: string) => {
+  const changeBlock = (value: BlockTypeValue) => {
     const chain = editor.chain().focus();
     if (value === 'h1') chain.setHeading({ level: 1 }).run();
     else if (value === 'h2') chain.setHeading({ level: 2 }).run();
@@ -316,17 +469,7 @@ export const EditorCompactToolbar = ({
         <MenuButton label="重做 (Ctrl+Shift+Z)" disabled={!toolbarState.canRedo} onClick={() => editor.chain().focus().redo().run()}><Redo2 /></MenuButton>
       </div>
       <span className="smart-document-toolbar-separator" aria-hidden="true" />
-      <label className="smart-document-block-select-label">
-        <span className="sr-only">当前块类型</span>
-        <select className="smart-document-block-select" value={blockValue} onChange={(event) => changeBlock(event.target.value)}>
-          <option value="paragraph">正文</option>
-          <option value="h1">一级标题</option>
-          <option value="h2">二级标题</option>
-          <option value="h3">三级标题</option>
-          <option value="quote">引用</option>
-          <option value="code">代码块</option>
-        </select>
-      </label>
+      <BlockTypeMenu value={blockValue} onChange={changeBlock} />
       <div className="smart-document-toolbar-group smart-document-toolbar-inline-actions">
         <MenuButton label="粗体" active={toolbarState.bold} onClick={() => editor.chain().focus().toggleBold().run()}><Bold /></MenuButton>
         <MenuButton label="斜体" active={toolbarState.italic} onClick={() => editor.chain().focus().toggleItalic().run()}><Italic /></MenuButton>

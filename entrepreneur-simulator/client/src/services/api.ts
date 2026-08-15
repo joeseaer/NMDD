@@ -57,6 +57,13 @@ export type SOPSaveResult = {
     message?: string;
 };
 
+export type SOPContentRepairResult = SOPSaveResult & {
+    recovery_backup: {
+        version: string;
+        content_revision: number;
+    };
+};
+
 export type SOPLocationResult = {
     id: string;
     parent_id: string | null;
@@ -225,6 +232,41 @@ export const api = {
             console.error("JSON Parse Error:", e, "Response Text:", text);
             throw new Error(e.message || `Invalid JSON response: ${truncateGraphemes(text, 100)}...`);
         }
+    },
+
+    repairSOPContent: async (
+        id: string,
+        payload: {
+            content: string;
+            content_json: unknown;
+            content_schema_version: number;
+            expected_revision?: number;
+            userId?: string;
+        },
+    ): Promise<SOPContentRepairResult> => {
+        const response = await fetch(`${API_BASE_URL}/sop/${encodeURIComponent(id)}/repair-content`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                ...payload,
+                userId: payload.userId || CURRENT_USER_ID,
+            }),
+        });
+        const text = await response.text();
+        if (!response.ok) {
+            let errorData: any = null;
+            try {
+                errorData = text ? JSON.parse(text) : null;
+            } catch {
+                // The normalized fallback below is sufficient for non-JSON errors.
+            }
+            if (response.status === 409 && errorData?.code === 'SOP_REVISION_CONFLICT') {
+                throw new SOPRevisionConflictError(errorData);
+            }
+            throw new Error(errorData?.error || parseApiErrorMessage(text, '文档修复失败'));
+        }
+        if (!text) throw new Error('文档修复失败：服务未返回确认信息');
+        return JSON.parse(text) as SOPContentRepairResult;
     },
 
     updateSOPLocation: async (

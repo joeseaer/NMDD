@@ -4,7 +4,7 @@ import {
   MoreHorizontal, Trash2, FileText, 
   ArrowLeft, ChevronRight, Link2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
-import { api, CURRENT_USER_ID } from '../services/api';
+import { api, CURRENT_USER_ID, type SOPContentRepairResult } from '../services/api';
 import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue, type SmartDocumentValueGetter } from '../components/SmartDocumentEditor';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -377,6 +377,23 @@ export default function NoteManager() {
     saveQueue.schedule(withoutRelationsForDocumentAutosave(updatedNote));
   }, [saveQueue]);
 
+  const handleRecoveredNote = useCallback((
+    id: string,
+    value: SmartDocumentValue,
+    result: SOPContentRepairResult,
+  ) => {
+    const current = items.find((item) => item.id === id);
+    if (!current) return;
+    saveQueue.acceptExternalSave(withoutRelationsForDocumentAutosave({
+      ...current,
+      content: value.markdown,
+      content_json: value.json,
+      content_schema_version: result.content_schema_version || current.content_schema_version,
+      content_revision: normalizeDocumentRevision(result.content_revision) ?? current.content_revision,
+      updated_at: new Date().toISOString(),
+    }), result);
+  }, [items, saveQueue]);
+
   const handleDeleteNote = async (id: string) => {
     if (confirm('确定要删除这篇文档吗？子页面会保留并提升一级，此操作无法撤销。')) {
         try {
@@ -584,6 +601,7 @@ export default function NoteManager() {
                 onRetrySave={() => saveQueue.retry(selectedNote.id)}
                 onReloadAfterConflict={() => window.location.reload()}
                 serializationFlushRef={activeEditorFlushRef}
+                onRecoveryRepaired={(value, result) => handleRecoveredNote(selectedNote.id, value, result)}
                 onBack={handleBack}
                 onUpdate={handleSaveNote}
                 onDelete={() => handleDeleteNote(selectedNote.id)}
@@ -695,6 +713,7 @@ function NoteDetailView({
   onRetrySave,
   onReloadAfterConflict,
   serializationFlushRef,
+  onRecoveryRepaired,
   onBack,
   onUpdate,
   onDelete,
@@ -715,6 +734,7 @@ function NoteDetailView({
   onRetrySave: () => void;
   onReloadAfterConflict: () => void;
   serializationFlushRef: React.MutableRefObject<(() => Promise<void>) | null>;
+  onRecoveryRepaired: (value: SmartDocumentValue, result: SOPContentRepairResult) => void;
   onBack: () => void;
   onUpdate: (note: SOPEntity) => void;
   onDelete: () => void;
@@ -1036,10 +1056,12 @@ function NoteDetailView({
           contentJson={note.content_json || null}
           pages={pages}
           currentDocumentId={note.id}
+          contentRevision={note.content_revision}
           mode={mode}
           theme={theme}
           serializationFlushRef={serializationFlushRef}
           exportValueRef={exportValueRef}
+          onRecoveryRepaired={onRecoveryRepaired}
           onChange={handleContentUpdate}
         />
       </DocumentWorkspaceShell>

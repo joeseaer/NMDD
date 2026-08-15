@@ -246,12 +246,14 @@ const EditorLab = () => {
   const [theme, setTheme] = useState<EditorTheme>('light');
   const [fixtureVersion, setFixtureVersion] = useState(0);
   const [value, setValue] = useState<SmartDocumentValue>(() => initialValue(selectedFixture));
+  const [recoveryComplete, setRecoveryComplete] = useState(false);
   const [changeCount, setChangeCount] = useState(0);
   const [flushState, setFlushState] = useState<'idle' | 'waiting' | 'done' | 'error'>('idle');
   const editorFlushRef = useRef<(() => Promise<void>) | null>(null);
 
   const resetFixture = () => {
     setValue(initialValue(selectedFixture));
+    setRecoveryComplete(false);
     setFixtureVersion(version => version + 1);
   };
 
@@ -331,16 +333,26 @@ const EditorLab = () => {
         <div data-testid="editor-surface">
           <SmartDocumentEditor
             key={fixtureVersion}
-            content={shouldRecoverInvalidJson ? '# Markdown 恢复副本\n\n旧文档正文已从安全备份恢复。' : ''}
+            content={shouldRecoverInvalidJson
+              ? (recoveryComplete ? value.markdown : '# Markdown 恢复副本\n\n旧文档正文已从安全备份恢复。')
+              : ''}
             contentJson={shouldRecoverInvalidJson
-              ? ({ type: 'doc', content: [{ type: 'legacyUnknownBlock' }] } as JSONContent)
+              ? (recoveryComplete
+                ? value.json
+                : ({ type: 'doc', content: [{ type: 'legacyUnknownBlock' }] } as JSONContent))
               : selectedFixture}
+            currentDocumentId={shouldRecoverInvalidJson ? 'lab-recovery-document' : null}
+            contentRevision={shouldRecoverInvalidJson ? 4 : null}
             mode={mode}
             theme={theme}
             serializationFlushRef={editorFlushRef}
             onChange={(nextValue) => {
               setValue(nextValue);
               setChangeCount(count => count + 1);
+            }}
+            onRecoveryRepaired={(nextValue) => {
+              setValue(nextValue);
+              setRecoveryComplete(true);
             }}
           />
         </div>

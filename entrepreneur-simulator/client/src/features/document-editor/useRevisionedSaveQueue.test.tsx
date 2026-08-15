@@ -247,4 +247,40 @@ describe('useRevisionedSaveQueue', () => {
     await expect(result.current.flush()).resolves.toMatchObject({ ok: true });
     expect(dispatchBeforeUnload().defaultPrevented).toBe(false);
   });
+
+  it('accepts an externally confirmed recovery save without scheduling a duplicate write', () => {
+    const saveDocument = vi.fn();
+    const onOptimisticUpdate = vi.fn();
+    const onConfirmed = vi.fn();
+    const { result } = renderHook(() => useRevisionedSaveQueue<TestDocument>({
+      delay: 60_000,
+      saveDocument,
+      onOptimisticUpdate,
+      onConfirmed,
+    }));
+
+    act(() => {
+      result.current.acceptExternalSave({
+        id: 'doc-repaired',
+        content: 'repaired',
+        content_revision: 3,
+      }, {
+        id: 'doc-repaired',
+        content_revision: 4,
+        content_schema_version: 2,
+      });
+    });
+
+    expect(saveDocument).not.toHaveBeenCalled();
+    expect(onOptimisticUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'doc-repaired',
+      content: 'repaired',
+      content_revision: 4,
+      content_schema_version: 2,
+    }));
+    expect(onConfirmed).toHaveBeenCalledWith('doc-repaired', expect.objectContaining({
+      content_revision: 4,
+    }));
+    expect(result.current.getStatus('doc-repaired').phase).toBe('saved');
+  });
 });

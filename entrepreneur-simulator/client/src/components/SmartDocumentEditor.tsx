@@ -23,7 +23,7 @@ import { selectedRect } from '@tiptap/pm/tables';
 import MarkdownIt from 'markdown-it';
 import TurndownService from 'turndown';
 import { gfm } from 'turndown-plugin-gfm';
-import { api, CURRENT_USER_ID } from '../services/api';
+import { api, CURRENT_USER_ID, type SOPContentRepairResult } from '../services/api';
 import { createSmartDocumentExtensions } from '../features/document-editor/createEditorExtensions';
 import { SmartCodeBlock } from '../features/document-editor/nodes/SmartCodeBlock';
 import { FindReplaceExtension } from '../features/document-editor/findReplace/FindReplaceExtension';
@@ -38,6 +38,7 @@ import { serializeToPlainText } from '../features/document-editor/serialization/
 import { decodeLegacyEncodedFormula } from '../features/document-editor/serialization/serializationUtils';
 import { installMindMapMarkdownFence } from '../features/document-editor/serialization/mindMapMarkdownFence';
 import type { DocumentNodeJson } from '../features/document-editor/schema/documentSchema';
+import { SMART_DOCUMENT_SCHEMA_VERSION } from '../features/document-editor/useRevisionedSaveQueue';
 import {
     EditorCompactToolbar,
     EditorEmptyBlockMenu,
@@ -2000,10 +2001,12 @@ type SmartDocumentEditorProps = {
     contentJson?: JSONContent | null;
     pages?: SmartDocumentPageLink[];
     currentDocumentId?: string | null;
+    contentRevision?: number | null;
     mode?: 'edit' | 'read';
     theme?: 'light' | 'dark' | 'system';
     serializationFlushRef?: React.MutableRefObject<(() => Promise<void>) | null>;
     exportValueRef?: React.MutableRefObject<SmartDocumentValueGetter | null>;
+    onRecoveryRepaired?: (value: SmartDocumentValue, result: SOPContentRepairResult) => void;
     onChange: (value: SmartDocumentValue) => void;
 };
 
@@ -2139,10 +2142,12 @@ export const SmartDocumentEditor = ({
     contentJson = null,
     pages = [],
     currentDocumentId = null,
+    contentRevision = null,
     mode = 'edit',
     theme = 'system',
     serializationFlushRef,
     exportValueRef,
+    onRecoveryRepaired,
     onChange,
 }: SmartDocumentEditorProps) => {
     const [showTOC, setShowTOC] = useState(false);
@@ -2152,10 +2157,17 @@ export const SmartDocumentEditor = ({
     const [dragBlock, setDragBlock] = useState<DragBlockState | null>(null);
     const [columnResizeHandles, setColumnResizeHandles] = useState<ColumnResizeHandleInfo[]>([]);
     const [commentPanelBlock, setCommentPanelBlock] = useState<BlockHandleInfo | null>(null);
-    const [contentRecoveryWarning, setContentRecoveryWarning] = useState(false);
+    const initiallyRequiresRecovery = contentJson !== null
+        && contentJson !== undefined
+        && !isValidDocJson(contentJson);
+    const [contentRecoveryWarning, setContentRecoveryWarning] = useState(initiallyRequiresRecovery);
+    const [contentRecoveryExpanded, setContentRecoveryExpanded] = useState(false);
+    const [contentRecoveryState, setContentRecoveryState] = useState<'idle' | 'saving' | 'error'>('idle');
+    const [contentRecoveryError, setContentRecoveryError] = useState('');
     const shellRef = React.useRef<HTMLDivElement | null>(null);
     const uploadControllerRef = React.useRef<SmartClipboardUploadController | null>(null);
     const initialContentRecoveryRef = React.useRef(false);
+    const recoveryBlockedRef = React.useRef(initiallyRequiresRecovery);
     const mmSigRef = React.useRef<string>('');
     const externalSigRef = React.useRef<string>(getContentSignature(contentJson, content));
     const onChangeRef = React.useRef(onChange);
@@ -2168,6 +2180,7 @@ export const SmartDocumentEditor = ({
     }, [onChange]);
 
     const serializeAndEmit = useCallback((editorInstance: any) => {
+        if (recoveryBlockedRef.current) return;
         const value = readSmartDocumentValue(editorInstance);
         if (!value) return;
         externalSigRef.current = getContentSignature(value.json, value.markdown);
@@ -2336,6 +2349,7 @@ export const SmartDocumentEditor = ({
         enableContentCheck: true,
         onContentError: ({ error }) => {
             initialContentRecoveryRef.current = true;
+            recoveryBlockedRef.current = true;
             console.warn('[document-editor] Invalid structured content detected; using the Markdown recovery copy.', error);
         },
         editorProps: {
@@ -2406,6 +2420,7 @@ export const SmartDocumentEditor = ({
                 errorOnInvalidContent: false,
             });
             externalSigRef.current = getContentSignature(contentJson, content);
+            recoveryBlockedRef.current = true;
             setContentRecoveryWarning(true);
         }, 0);
         return () => window.clearTimeout(timeoutId);
@@ -2432,10 +2447,10 @@ export const SmartDocumentEditor = ({
     useEffect(() => {
         if (!editor) return;
         const timeoutId = window.setTimeout(() => {
-            if (!editor.isDestroyed) editor.setEditable(mode === 'edit');
+            if (!editor.isDestroyed) editor.setEditable(mode === 'edit' && !contentRecoveryWarning);
         }, 0);
         return () => window.clearTimeout(timeoutId);
-    }, [editor, mode]);
+    }, [contentRecoveryWarning, editor, mode]);
 
     useEffect(() => {
         if (!editor) return;
@@ -2499,6 +2514,7 @@ export const SmartDocumentEditor = ({
                             errorOnInvalidContent: true,
                         });
                         ensureEditorBlockIds(editor);
+                        recoveryBlockedRef.current = false;
                         setContentRecoveryWarning(false);
                     } catch (error) {
                         console.warn('[document-editor] Rejected invalid external JSON and restored its Markdown copy.', error);
@@ -2506,6 +2522,7 @@ export const SmartDocumentEditor = ({
                             emitUpdate: false,
                             errorOnInvalidContent: false,
                         });
+                        recoveryBlockedRef.current = true;
                         setContentRecoveryWarning(true);
                     }
                 }
@@ -2521,6 +2538,9 @@ export const SmartDocumentEditor = ({
                 });
                 ensureEditorBlockIds(editor);
             }
+            const hasInvalidStructuredSource = contentJson !== null && contentJson !== undefined;
+            recoveryBlockedRef.current = hasInvalidStructuredSource;
+            setContentRecoveryWarning(hasInvalidStructuredSource);
             externalSigRef.current = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
         }, 0);
         return () => window.clearTimeout(timeoutId);
@@ -3235,6 +3255,71 @@ export const SmartDocumentEditor = ({
         editor.chain().focus().extendMarkRange('link').setLink({ href: url.trim() }).run();
     }, [editor]);
 
+    const downloadRecoverySource = useCallback(() => {
+        const source = JSON.stringify({
+            exported_at: new Date().toISOString(),
+            document_id: currentDocumentId,
+            markdown_backup: content || '',
+            original_content_json: contentJson ?? null,
+        }, null, 2);
+        const url = URL.createObjectURL(new Blob([source], { type: 'application/json;charset=utf-8' }));
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `document-${currentDocumentId || 'unknown'}-recovery-source.json`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    }, [content, contentJson, currentDocumentId]);
+
+    const repairRecoveredContent = useCallback(async () => {
+        if (!editor || editor.isDestroyed || !currentDocumentId || contentRecoveryState === 'saving') return;
+        setContentRecoveryState('saving');
+        setContentRecoveryError('');
+
+        try {
+            const value = readSmartDocumentValue(editor);
+            if (!value || !isValidDocJson(value.json)) {
+                throw new Error('修复结果不是有效的文档结构，已停止写入。');
+            }
+            const checked = editor.schema.nodeFromJSON(value.json);
+            checked.check();
+            if ((content || '').trim() && !value.markdown.trim() && !value.text.trim()) {
+                throw new Error('修复结果为空，与 Markdown 备份不一致，已停止写入。');
+            }
+
+            const result = await api.repairSOPContent(currentDocumentId, {
+                content: value.markdown,
+                content_json: value.json,
+                content_schema_version: SMART_DOCUMENT_SCHEMA_VERSION,
+                ...(Number.isSafeInteger(contentRevision) && Number(contentRevision) > 0
+                    ? { expected_revision: Number(contentRevision) }
+                    : {}),
+                userId: CURRENT_USER_ID,
+            });
+
+            recoveryBlockedRef.current = false;
+            initialContentRecoveryRef.current = false;
+            externalSigRef.current = getContentSignature(value.json, value.markdown);
+            setContentRecoveryWarning(false);
+            setContentRecoveryExpanded(false);
+            setContentRecoveryState('idle');
+            if (!editor.isDestroyed) editor.setEditable(mode === 'edit');
+            try {
+                onRecoveryRepaired?.(value, result);
+            } catch (callbackError) {
+                // The server repair is already confirmed at this point. A local
+                // state callback must never make the UI claim that it failed.
+                console.error('[document-editor] Recovery confirmation callback failed.', callbackError);
+            }
+        } catch (error) {
+            console.error('[document-editor] Safe content repair failed.', error);
+            recoveryBlockedRef.current = true;
+            setContentRecoveryState('error');
+            setContentRecoveryError(error instanceof Error ? error.message : '修复失败，请重试。');
+        }
+    }, [content, contentRecoveryState, contentRevision, currentDocumentId, editor, mode, onRecoveryRepaired]);
+
     if (!editor) return null;
 
     const commentPanelComments = commentPanelBlock
@@ -3247,11 +3332,12 @@ export const SmartDocumentEditor = ({
             className="smart-document smart-document-editor-shell"
             data-mode={mode}
             data-theme={theme}
+            data-recovery-blocked={contentRecoveryWarning ? 'true' : 'false'}
             onDragOver={handleEditorDragOver}
             onDrop={handleEditorDrop}
             onDragEnd={handleEditorDragEnd}
         >
-            {mode === 'edit' && <BlockHandleLayer
+            {mode === 'edit' && !contentRecoveryWarning && <BlockHandleLayer
                 block={hoveredBlock}
                 menuOpen={blockMenuOpen}
                 onMenuOpenChange={setBlockMenuOpen}
@@ -3313,17 +3399,60 @@ export const SmartDocumentEditor = ({
                 {contentRecoveryWarning && (
                     <div className="smart-document-recovery-warning" role="status" aria-live="polite">
                         <AlertTriangle aria-hidden="true" />
-                        <span>检测到旧版或损坏的结构化内容，已安全显示 Markdown 备份；原始 JSON 不会被静默覆盖。</span>
+                        <div className="smart-document-recovery-warning__body">
+                            <strong>这份文档需要安全修复</strong>
+                            <p>
+                                下方显示的是从 Markdown 备份重建的预览。修复前编辑已锁定；点击“修复并保存”后，
+                                服务端会先保存原始 JSON 与 Markdown 快照，再通过版本校验写入新结构。
+                            </p>
+                            <div className="smart-document-recovery-warning__actions">
+                                {mode === 'edit' ? (
+                                    <button
+                                        type="button"
+                                        className="smart-document-recovery-warning__primary"
+                                        disabled={contentRecoveryState === 'saving' || !currentDocumentId}
+                                        onClick={() => void repairRecoveredContent()}
+                                    >
+                                        {contentRecoveryState === 'saving' ? '正在备份并修复…' : '修复并保存'}
+                                    </button>
+                                ) : null}
+                                <button
+                                    type="button"
+                                    onClick={() => setContentRecoveryExpanded((current) => !current)}
+                                    aria-expanded={contentRecoveryExpanded}
+                                >
+                                    {contentRecoveryExpanded ? '收起修复预览' : '查看修复预览'}
+                                </button>
+                                <button type="button" onClick={downloadRecoverySource}>下载原始数据</button>
+                            </div>
+                            {contentRecoveryExpanded ? (
+                                <div className="smart-document-recovery-preview">
+                                    <section>
+                                        <h4>原始结构化 JSON</h4>
+                                        <pre>{JSON.stringify(contentJson ?? null, null, 2)}</pre>
+                                    </section>
+                                    <section>
+                                        <h4>待保存的 Markdown</h4>
+                                        <pre>{editorToMarkdown(editor) || '（空文档）'}</pre>
+                                    </section>
+                                </div>
+                            ) : null}
+                            {contentRecoveryError ? (
+                                <p className="smart-document-recovery-warning__error" role="alert">
+                                    {contentRecoveryError}
+                                </p>
+                            ) : null}
+                        </div>
                     </div>
                 )}
-                {mode === 'edit' && <EditorCompactToolbar
+                {mode === 'edit' && !contentRecoveryWarning && <EditorCompactToolbar
                     editor={editor} 
                     onAddImage={addImage}
                     onAddImageUrl={addImageByUrl}
                     outlineOpen={showTOC}
                     onToggleOutline={() => setShowTOC(!showTOC)}
                 />}
-                {mode === 'edit' && (
+                {mode === 'edit' && !contentRecoveryWarning && (
                     <div className="smart-document-context-toolbar-row">
                         <EditorTableMenu editor={editor} />
                         <TableCellBackgroundMenu editor={editor} />
@@ -3337,8 +3466,8 @@ export const SmartDocumentEditor = ({
                 >
                     <div className="smart-document-content-rail">
                         <EditorContent editor={editor} />
-                        {mode === 'edit' && <EditorSelectionMenu editor={editor} onSetLink={setSelectionLink} />}
-                        {mode === 'edit' && <EditorEmptyBlockMenu editor={editor} />}
+                        {mode === 'edit' && !contentRecoveryWarning && <EditorSelectionMenu editor={editor} onSetLink={setSelectionLink} />}
+                        {mode === 'edit' && !contentRecoveryWarning && <EditorEmptyBlockMenu editor={editor} />}
                     </div>
                 </div>
             </div>
