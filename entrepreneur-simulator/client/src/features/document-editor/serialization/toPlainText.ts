@@ -95,6 +95,11 @@ const renderPlainNode = (node: DocumentNodeJson, context: PlainContext): string 
   }
   if (node.type === 'pageLinkBlock') return String(node.attrs?.title || 'Page');
   if (node.type === 'mindMap') return String(node.attrs?.data || '');
+  if (node.type === 'whiteboardEmbed') {
+    const title = String(node.attrs?.title || '白板');
+    const caption = String(node.attrs?.caption || '').trim();
+    return caption ? `[白板] ${title} — ${caption}` : `[白板] ${title}`;
+  }
   if (node.type === 'databaseBlock') return renderPlainDatabase(node);
   if (node.type === 'templateButtonBlock') return String(node.attrs?.label || 'Template');
   if (node.type === 'columnList' || node.type === 'column' || node.type === 'syncedBlock' || node.type === 'doc') {

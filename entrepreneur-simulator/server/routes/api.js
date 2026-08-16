@@ -1,6 +1,7 @@
 const sceneService = require('../services/sceneService');
 const chatService = require('../services/chatService');
 const dbService = require('../services/dbService');
+const whiteboardService = require('../services/whiteboardService');
 const plannerAssistantService = require('../services/plannerAssistantService');
 const secretaryService = require('../services/secretaryService');
 const documentContextService = require('../services/documentContextService');
@@ -51,6 +52,22 @@ const MANAGED_IMAGE_RESOURCE_NAME = /^([a-f0-9]{64})\.(gif|jpg|png|webp)$/;
 const MANAGED_IMAGE_MAX_BYTES = 15 * 1024 * 1024;
 const MANAGED_IMAGE_MAX_DIMENSION = 32_768;
 const MANAGED_IMAGE_MAX_PIXELS = 40_000_000;
+
+const sendWhiteboardRouteError = (reply, request, error) => {
+  const statusCode = Number(error?.statusCode);
+  const safeStatus = Number.isInteger(statusCode) && statusCode >= 400 && statusCode <= 599
+    ? statusCode
+    : 500;
+  if (safeStatus >= 500) {
+    request.log.error({ event: 'whiteboard_request_failed', code: error?.code || 'UNKNOWN' }, 'Whiteboard request failed');
+  }
+  const isKnown = error instanceof whiteboardService.WhiteboardError;
+  return reply.code(safeStatus).send({
+    error: isKnown ? error.message : '白板操作失败',
+    code: isKnown ? error.code : 'WHITEBOARD_REQUEST_FAILED',
+    ...(isKnown && error.details && typeof error.details === 'object' ? error.details : {}),
+  });
+};
 
 const normalizeMimeType = (value) => {
   const mimeType = String(value || '').split(';', 1)[0].trim().toLowerCase();
@@ -905,6 +922,22 @@ async function routes(fastify, options) {
       const result = typeof saved === 'string'
         ? { id: saved, content_schema_version: 1, content_revision: null, revision_supported: false }
         : saved;
+      if (sopData.content_json && typeof sopData.content_json === 'object') {
+        try {
+          await whiteboardService.syncDocumentReferences({
+            sopId: result.id,
+            userId: sopData.user_id || sopData.userId || DEFAULT_USER_ID,
+            contentJson: sopData.content_json,
+          });
+        } catch (_referenceError) {
+          // Reference indexing is additive. Older deployments may receive the
+          // client before the migration and must still be able to save docs.
+          request.log.warn(
+            { event: 'whiteboard_reference_sync_failed', sop_id: result.id },
+            'Whiteboard references were not indexed',
+          );
+        }
+      }
       request.log.info({ id: result.id, content_revision: result.content_revision }, 'SOP Saved');
       if (Number.isSafeInteger(result.content_revision)) {
         reply.header('ETag', `"${result.content_revision}"`);
@@ -2505,14 +2538,230 @@ ${String(text).trim()}
       // Default to configured local user if not provided (for dev convenience)
       const uid = userId || DEFAULT_USER_ID;
       const data = await dbService.getAllUserData(uid);
+      let whiteboardData = {
+        whiteboards: [],
+        whiteboard_assets: [],
+        whiteboard_document_refs: [],
+      };
+      try {
+        whiteboardData = await whiteboardService.getBackupData(uid);
+      } catch (_whiteboardError) {
+        // Keep the existing backup endpoint compatible before the additive
+        // whiteboard migration is deployed.
+        request.log.warn({ event: 'whiteboard_backup_export_skipped' }, 'Whiteboard backup data is unavailable');
+      }
       
       reply
         .header('Content-Type', 'application/json')
         .header('Content-Disposition', `attachment; filename="backup-${uid}-${new Date().toISOString().split('T')[0]}.json"`)
-        .send(data);
+        .send({
+          ...(data || {}),
+          ...whiteboardData,
+          tables: {
+            ...(data?.tables || {}),
+            ...whiteboardData,
+          },
+        });
     } catch (err) {
       request.log.error(err);
       reply.code(500).send({ error: 'Backup export failed' });
+    }
+  });
+
+  // Standalone Excalidraw whiteboards. The application currently uses one
+  // configured local account, so routes consistently scope data to the same
+  // DEFAULT_USER_ID used by documents and planners.
+  fastify.get('/whiteboards', async (request, reply) => {
+    try {
+      const userId = String(request.query?.userId || DEFAULT_USER_ID);
+      return await whiteboardService.listWhiteboards(userId);
+    } catch (error) {
+      return sendWhiteboardRouteError(reply, request, error);
+    }
+  });
+
+  fastify.post('/whiteboards', async (request, reply) => {
+    try {
+      const body = request.body || {};
+      const result = await whiteboardService.createWhiteboard({
+        userId: String(body.userId || body.user_id || DEFAULT_USER_ID),
+        title: body.title,
+        scene: body.scene || body.scene_json,
+      });
+      return reply.code(201).send(result);
+    } catch (error) {
+      return sendWhiteboardRouteError(reply, request, error);
+    }
+  });
+
+  fastify.get('/whiteboards/:id', async (request, reply) => {
+    try {
+      const userId = String(request.query?.userId || DEFAULT_USER_ID);
+      return await whiteboardService.getWhiteboard(request.params.id, userId);
+    } catch (error) {
+      return sendWhiteboardRouteError(reply, request, error);
+    }
+  });
+
+  fastify.get('/whiteboards/:id/meta', async (request, reply) => {
+    try {
+      const userId = String(request.query?.userId || DEFAULT_USER_ID);
+      return await whiteboardService.getWhiteboardMetadata(request.params.id, userId);
+    } catch (error) {
+      return sendWhiteboardRouteError(reply, request, error);
+    }
+  });
+
+  fastify.patch('/whiteboards/:id', async (request, reply) => {
+    try {
+      const body = request.body || {};
+      const result = await whiteboardService.updateWhiteboard({
+        id: request.params.id,
+        userId: String(body.userId || body.user_id || DEFAULT_USER_ID),
+        title: body.title,
+        scene: body.scene || body.scene_json,
+        expectedRevision: body.expected_revision ?? body.expectedRevision,
+      });
+      reply.header('ETag', `"${result.content_revision}"`);
+      return result;
+    } catch (error) {
+      return sendWhiteboardRouteError(reply, request, error);
+    }
+  });
+
+  fastify.post('/whiteboards/:id/duplicate', async (request, reply) => {
+    try {
+      const body = request.body || {};
+      const result = await whiteboardService.duplicateWhiteboard({
+        id: request.params.id,
+        userId: String(body.userId || body.user_id || DEFAULT_USER_ID),
+        title: body.title,
+      });
+      return reply.code(201).send(result);
+    } catch (error) {
+      return sendWhiteboardRouteError(reply, request, error);
+    }
+  });
+
+  fastify.get('/whiteboards/:id/references', async (request, reply) => {
+    try {
+      const userId = String(request.query?.userId || DEFAULT_USER_ID);
+      return await whiteboardService.getReferences(request.params.id, userId);
+    } catch (error) {
+      return sendWhiteboardRouteError(reply, request, error);
+    }
+  });
+
+  fastify.delete('/whiteboards/:id', async (request, reply) => {
+    try {
+      const userId = String(request.query?.userId || DEFAULT_USER_ID);
+      return await whiteboardService.deleteWhiteboard({ id: request.params.id, userId });
+    } catch (error) {
+      return sendWhiteboardRouteError(reply, request, error);
+    }
+  });
+
+  fastify.post('/whiteboards/:id/assets', async (request, reply) => {
+    try {
+      const part = await request.file();
+      if (!part) return reply.code(400).send({ error: '没有上传图片', code: 'WHITEBOARD_ASSET_MISSING' });
+      const buffer = await part.toBuffer();
+      if (buffer.length === 0) return reply.code(400).send({ error: '上传图片为空', code: 'WHITEBOARD_ASSET_EMPTY' });
+      if (buffer.length > MANAGED_IMAGE_MAX_BYTES) {
+        return reply.code(413).send({ error: '图片超过 15MB 限制', code: 'WHITEBOARD_ASSET_TOO_LARGE' });
+      }
+      const declaredMimeType = IMAGE_MIME_ALIASES.get(normalizeMimeType(part.mimetype));
+      const detectedMimeType = detectRasterMimeType(buffer);
+      if (!declaredMimeType || !detectedMimeType || declaredMimeType !== detectedMimeType) {
+        return reply.code(415).send({ error: '图片格式无效或与声明类型不一致', code: 'INVALID_WHITEBOARD_ASSET' });
+      }
+      const fileId = String(request.query?.fileId || part.fields?.fileId?.value || '').trim();
+      const userId = String(request.query?.userId || part.fields?.userId?.value || DEFAULT_USER_ID);
+      const contentSha256 = crypto.createHash('sha256').update(buffer).digest('hex');
+      const result = await whiteboardService.putAsset({
+        id: request.params.id,
+        userId,
+        fileId,
+        buffer,
+        mimeType: detectedMimeType,
+        sha256: contentSha256,
+        metadata: {
+          created: Number(request.query?.created || part.fields?.created?.value) || Date.now(),
+          fileName: sanitizeUploadFileName(part.filename),
+        },
+      });
+      return reply.code(201).send({
+        ...result,
+        url: `/api/whiteboards/${encodeURIComponent(request.params.id)}/assets/${encodeURIComponent(fileId)}`,
+      });
+    } catch (error) {
+      if (MULTIPART_LIMIT_ERROR_CODES.has(error?.code)) {
+        return reply.code(413).send({ error: '图片超过 15MB 限制', code: 'WHITEBOARD_ASSET_TOO_LARGE' });
+      }
+      return sendWhiteboardRouteError(reply, request, error);
+    }
+  });
+
+  fastify.get('/whiteboards/:id/assets/:fileId', async (request, reply) => {
+    try {
+      const userId = String(request.query?.userId || DEFAULT_USER_ID);
+      const asset = await whiteboardService.getAsset({
+        id: request.params.id,
+        userId,
+        fileId: request.params.fileId,
+      });
+      if (!asset) return reply.code(404).send({ error: '白板图片不存在', code: 'WHITEBOARD_ASSET_NOT_FOUND' });
+      return reply
+        .header('Content-Type', asset.mime_type)
+        .header('Content-Length', String(asset.buffer.length))
+        .header('ETag', `"${asset.sha256}"`)
+        .header('Cache-Control', 'private, no-store')
+        .header('X-Content-Type-Options', 'nosniff')
+        .send(asset.buffer);
+    } catch (error) {
+      return sendWhiteboardRouteError(reply, request, error);
+    }
+  });
+
+  fastify.put('/whiteboards/:id/preview', async (request, reply) => {
+    try {
+      const part = await request.file();
+      if (!part) return reply.code(400).send({ error: '没有上传缩略图', code: 'WHITEBOARD_PREVIEW_MISSING' });
+      const buffer = await part.toBuffer();
+      const detectedMimeType = detectRasterMimeType(buffer);
+      if (detectedMimeType !== 'image/png') {
+        return reply.code(415).send({ error: '缩略图必须为 PNG', code: 'INVALID_WHITEBOARD_PREVIEW' });
+      }
+      const revision = request.query?.revision || part.fields?.revision?.value;
+      const userId = String(request.query?.userId || part.fields?.userId?.value || DEFAULT_USER_ID);
+      return await whiteboardService.putPreview({
+        id: request.params.id,
+        userId,
+        revision,
+        buffer,
+      });
+    } catch (error) {
+      if (MULTIPART_LIMIT_ERROR_CODES.has(error?.code)) {
+        return reply.code(413).send({ error: '缩略图超过上传限制', code: 'WHITEBOARD_PREVIEW_TOO_LARGE' });
+      }
+      return sendWhiteboardRouteError(reply, request, error);
+    }
+  });
+
+  fastify.get('/whiteboards/:id/preview', async (request, reply) => {
+    try {
+      const userId = String(request.query?.userId || DEFAULT_USER_ID);
+      const preview = await whiteboardService.getPreview({ id: request.params.id, userId });
+      if (!preview) return reply.code(404).send({ error: '白板尚无缩略图', code: 'WHITEBOARD_PREVIEW_NOT_FOUND' });
+      return reply
+        .header('Content-Type', 'image/png')
+        .header('Content-Length', String(preview.buffer.length))
+        .header('ETag', `"whiteboard-${request.params.id}-${preview.revision}"`)
+        .header('Cache-Control', 'private, no-store')
+        .header('X-Content-Type-Options', 'nosniff')
+        .send(preview.buffer);
+    } catch (error) {
+      return sendWhiteboardRouteError(reply, request, error);
     }
   });
 

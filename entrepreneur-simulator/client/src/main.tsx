@@ -7,6 +7,10 @@ import AppErrorBoundary from './components/AppErrorBoundary'
 import { DocumentNavigationGuardProvider } from './features/document-editor/navigation/DocumentNavigationGuard'
 import AuthGate from './components/AuthGate'
 
+// Keep Excalidraw fonts same-origin and available offline. The editor itself
+// remains route-level lazy loaded.
+;(window as any).EXCALIDRAW_ASSET_PATH = '/excalidraw-assets/'
+
 const showBootError = (err: unknown) => {
   const root = document.getElementById('root');
   if (!root) return;

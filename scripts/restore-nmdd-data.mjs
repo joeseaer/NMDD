@@ -49,6 +49,7 @@ const preferredOrder = [
   'people_profiles',
   'scenes',
   'sops',
+  'whiteboards',
   'planner_lists',
   'planner_tags',
   'interaction_logs',
@@ -57,6 +58,8 @@ const preferredOrder = [
   'sop_usage_logs',
   'scene_sop_rel',
   'people_sop_rel',
+  'whiteboard_assets',
+  'whiteboard_document_refs',
   'planner_items',
   'planner_item_tags',
 ];

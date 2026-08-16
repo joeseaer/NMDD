@@ -22,6 +22,7 @@ import {
   List,
   ListOrdered,
   PanelLeft,
+  Palette,
   Quote,
   Redo2,
   RemoveFormatting,
@@ -415,12 +416,14 @@ export const EditorCompactToolbar = ({
   onToggleOutline,
   onAddImage,
   onAddImageUrl,
+  onAddWhiteboard,
 }: {
   editor: Editor;
   outlineOpen: boolean;
   onToggleOutline: () => void;
   onAddImage: () => void;
   onAddImageUrl: () => void;
+  onAddWhiteboard: () => void;
 }) => {
   const toolbarState = useEditorState({
     editor,
@@ -487,6 +490,7 @@ export const EditorCompactToolbar = ({
         <MenuButton label="居中" active={toolbarState.alignCenter} onClick={() => editor.chain().focus().setTextAlign('center').run()}><AlignCenter /></MenuButton>
         <MenuButton label="右对齐" active={toolbarState.alignRight} onClick={() => editor.chain().focus().setTextAlign('right').run()}><AlignRight /></MenuButton>
         <MenuButton label="插入表格" onClick={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}><Table /></MenuButton>
+        <MenuButton label="插入白板" onClick={onAddWhiteboard}><Palette /></MenuButton>
         <MenuButton label="上传图片" onClick={onAddImage}><Image /></MenuButton>
         <MenuButton label="通过网址插入图片" onClick={onAddImageUrl}><Link /></MenuButton>
       </div>
