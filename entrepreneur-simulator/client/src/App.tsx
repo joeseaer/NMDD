@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import React, { Suspense, lazy, useState, useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { Brain, MessageSquare, User, Settings, LayoutDashboard, Users, FileText, Menu, X, Notebook, ChevronLeft, ChevronRight, Calendar, Microscope } from 'lucide-react'
+import { Brain, MessageSquare, User, Settings, LayoutDashboard, Users, FileText, Menu, X, Notebook, ChevronLeft, ChevronRight, Calendar, Microscope, Palette } from 'lucide-react'
 
 // Pages
 import Dashboard from './pages/Dashboard'
@@ -18,6 +18,10 @@ import Relationships from './features/relationships/Relationships'
 import FloatingAssistant from './components/FloatingAssistant'
 import { CURRENT_USER_ID } from './config/currentUser'
 import { GuardedLink } from './features/document-editor/navigation/DocumentNavigationGuard'
+import { WhiteboardPickerHost } from './features/whiteboard/embed/WhiteboardPickerHost'
+
+const Whiteboards = lazy(() => import('./pages/Whiteboards'))
+const WhiteboardEditorPage = lazy(() => import('./pages/WhiteboardEditorPage'))
 
 function App() {
   const location = useLocation();
@@ -35,6 +39,7 @@ function App() {
     if (location.pathname.includes('/training') || location.pathname.includes('/evolution-tree')) setActiveTab('dashboard');
     else if (location.pathname.includes('/planner')) setActiveTab('planner');
     else if (location.pathname.includes('/research')) setActiveTab('research');
+    else if (location.pathname.includes('/whiteboards')) setActiveTab('whiteboards');
     else if (location.pathname.includes('/dashboard')) setActiveTab('dashboard');
     else if (location.pathname.includes('/notes')) setActiveTab('notes');
     else if (location.pathname.includes('/relationships') || location.pathname.includes('/personality')) setActiveTab('relationships');
@@ -77,6 +82,8 @@ function App() {
 
   const defaultHome = (import.meta as any).env?.VITE_DEFAULT_HOME || 'planner';
   const isRelationshipRoute = location.pathname.startsWith('/relationships') || location.pathname === '/personality';
+  const isWhiteboardEditorRoute = /^\/whiteboards\/[^/]+$/.test(location.pathname);
+  const isFullBleedRoute = isRelationshipRoute || isWhiteboardEditorRoute;
   const Home = () => {
     if (defaultHome === 'planner') return <Navigate to="/planner" replace />;
     return <Dashboard />;
@@ -84,9 +91,12 @@ function App() {
 
   if (location.pathname === '/editor-lab') {
     return (
-      <Routes>
-        <Route path="/editor-lab" element={<EditorLab />} />
-      </Routes>
+      <>
+        <Routes>
+          <Route path="/editor-lab" element={<EditorLab />} />
+        </Routes>
+        <WhiteboardPickerHost />
+      </>
     );
   }
 
@@ -139,6 +149,7 @@ function App() {
             <SidebarLink collapsed={isSidebarCollapsed} to="/planner" icon={<Calendar size={20} />} label="日程待办" active={activeTab === 'planner'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/notes?view=notes" icon={<Notebook size={20} />} label="随笔/文档" active={activeTab === 'notes'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/research?type=document" icon={<Microscope size={20} />} label="科研工作台" active={activeTab === 'research'} />
+            <SidebarLink collapsed={isSidebarCollapsed} to="/whiteboards" icon={<Palette size={20} />} label="白板" active={activeTab === 'whiteboards'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/relationships/today" icon={<Users size={20} />} label="关系与机会" active={activeTab === 'relationships'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/real-review" icon={<FileText size={20} />} label="真实场景复盘" active={activeTab === 'real-review'} />
           </div>
@@ -190,9 +201,10 @@ function App() {
           </GuardedLink>
         </header>
 
-        <div className={`flex-1 p-2 sm:p-4 lg:p-8 w-full ${isRelationshipRoute ? 'overflow-hidden' : 'overflow-auto'}`}>
-          <div className={`${isRelationshipRoute ? 'max-w-none' : 'max-w-7xl'} mx-auto h-full`}>
-            <Routes>
+        <div className={`flex-1 w-full ${isFullBleedRoute ? 'overflow-hidden p-0' : 'overflow-auto p-2 sm:p-4 lg:p-8'}`}>
+          <div className={`${isFullBleedRoute ? 'max-w-none' : 'max-w-7xl'} mx-auto h-full`}>
+            <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-gray-500">正在加载…</div>}>
+              <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/training/:sceneId" element={<Training />} />
@@ -201,18 +213,22 @@ function App() {
               <Route path="/sop" element={<Navigate to="/notes?view=sop" replace />} />
               <Route path="/notes" element={<NoteManager />} />
               <Route path="/research" element={<ResearchWorkspace />} />
+              <Route path="/whiteboards" element={<Whiteboards />} />
+              <Route path="/whiteboards/:whiteboardId" element={<WhiteboardEditorPage />} />
               <Route path="/relationships/*" element={<Relationships />} />
               <Route path="/personality" element={<Navigate to="/relationships/people" replace />} />
               <Route path="/real-review" element={<RealReview />} />
               <Route path="/evolution-tree" element={<EvolutionTree />} />
               <Route path="/assistant" element={<ChatAssistant />} />
               <Route path="/settings" element={<SettingsPage />} />
-            </Routes>
+              </Routes>
+            </Suspense>
           </div>
         </div>
       </main>
 
-      {!isRelationshipRoute && <FloatingAssistant />}
+      {!isRelationshipRoute && !isWhiteboardEditorRoute && <FloatingAssistant />}
+      <WhiteboardPickerHost />
     </div>
   )
 }

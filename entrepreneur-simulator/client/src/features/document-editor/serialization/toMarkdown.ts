@@ -21,6 +21,12 @@ const escapeTableCell = (value: string): string => (
   value.replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>').trim()
 );
 
+const escapeHtmlAttribute = (value: unknown): string => String(value ?? '')
+  .replace(/&/g, '&amp;')
+  .replace(/"/g, '&quot;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;');
+
 const destination = (value: unknown): string => {
   const url = String(value || '').trim().replace(/>/g, '%3E');
   return /[\s()]/.test(url) ? `<${url}>` : url;
@@ -202,6 +208,25 @@ const renderNode = (node: DocumentNodeJson, context: MarkdownContext): string =>
     const data = node.attrs?.data;
     const serialized = typeof data === 'string' ? data : JSON.stringify(data ?? {}, null, 2);
     return `\`\`\`mindmap\n${serialized}\n\`\`\``;
+  }
+  if (node.type === 'whiteboardEmbed') {
+    const attrs = node.attrs || {};
+    const title = String(attrs.title || '白板');
+    const caption = String(attrs.caption || '');
+    const height = Math.max(240, Math.min(900, Number(attrs.height) || 420));
+    const previewRevision = Number(attrs.previewRevision) || '';
+    return [
+      '<figure',
+      ' data-type="whiteboard-embed"',
+      ` data-whiteboard-id="${escapeHtmlAttribute(attrs.whiteboardId)}"`,
+      ` data-whiteboard-title="${escapeHtmlAttribute(title)}"`,
+      ` data-height="${height}"`,
+      ` data-display-mode="${escapeHtmlAttribute(attrs.displayMode || 'preview')}"`,
+      attrs.blockId ? ` data-block-id="${escapeHtmlAttribute(attrs.blockId)}"` : '',
+      caption ? ` data-caption="${escapeHtmlAttribute(caption)}"` : '',
+      previewRevision ? ` data-preview-revision="${previewRevision}"` : '',
+      `><figcaption>${escapeHtmlAttribute(caption || title)}</figcaption></figure>`,
+    ].join('');
   }
   if (node.type === 'databaseBlock') return renderDatabase(node);
   if (node.type === 'templateButtonBlock') return `[Template: ${escapeMarkdownText(String(node.attrs?.label || 'New template'))}]`;

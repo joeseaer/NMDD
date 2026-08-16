@@ -18,13 +18,17 @@ import {
   Quote, Minus, Code, Layout, Image as ImageIcon, Strikethrough,
   Type, Network, ChevronRight, AlertTriangle, Bookmark, Globe,
   Paperclip, Video, Music, FileText, Sigma, RefreshCw, CalendarDays, X, ExternalLink, Copy, Unlink,
-  Database, Plus, Trash2, Table as TableIcon
+  Database, Plus, Trash2, Table as TableIcon, Palette
 } from 'lucide-react';
 import { MindMapComponent } from './MindMapExtension';
 import { createMindMapBlockDocument } from '../features/mindmap/domain/createDocument';
 import { isMindMapV2Enabled } from '../features/mindmap/featureFlags';
 import { createMindMapStaticSvgPreview } from '../features/mindmap/export/staticSvg';
 import { createSmartDocumentExtensions } from '../features/document-editor/createEditorExtensions';
+import {
+  WhiteboardEmbed,
+  insertWhiteboardIntoEditor,
+} from '../features/whiteboard/embed/WhiteboardExtension';
 import { SmartClipboardExtension } from '../features/document-editor/SmartClipboardExtension';
 import { decodeLegacyEncodedFormula } from '../features/document-editor/serialization/serializationUtils';
 import { takeGraphemes } from '../features/document-editor/text/graphemes';
@@ -2544,6 +2548,7 @@ const DatabaseRowPageEditor = ({
         }),
         Indent,
         MindMap,
+        WhiteboardEmbed,
         ToggleBlock,
         CalloutBlock,
         BookmarkBlock,
@@ -4993,6 +4998,7 @@ const SLASH_COMMAND_METADATA: Record<string, Pick<SlashCommandItem, 'category' |
   '/3': { category: 'layout', description: '插入三栏布局', aliases: ['columns', 'three columns', '三栏', '3栏'] },
   '/table': { category: 'layout', description: '插入普通 3x3 表格', aliases: ['simple table', '表格', 'table'] },
   '/swdt': { category: 'advanced', description: '插入可编辑思维导图', aliases: ['mindmap', 'mind map', '导图'] },
+  '/whiteboard': { category: 'media', description: '插入可复用的 Excalidraw 白板', aliases: ['excalidraw', 'whiteboard', '白板', '画板'] },
   '/toggle': { category: 'advanced', description: '可折叠内容块', aliases: ['toggle list', '折叠', 'toggle'] },
   '/toggle1': { category: 'advanced', description: '可折叠的一级章节标题', aliases: ['toggle h1', '折叠一级标题'] },
   '/toggle2': { category: 'advanced', description: '可折叠的二级章节标题', aliases: ['toggle h2', '折叠二级标题'] },
@@ -5171,6 +5177,14 @@ export const getSuggestionItems = ({ query }: { query: string }) => {
                 }
             }).run();
         },
+    },
+    {
+      title: '白板',
+      shortcut: '/whiteboard',
+      icon: <Palette className="w-3 h-3" />,
+      command: ({ editor, range }: any) => {
+        void insertWhiteboardIntoEditor(editor, range);
+      },
     },
     {
       title: '折叠块',

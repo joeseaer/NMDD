@@ -40,6 +40,10 @@ import { installMindMapMarkdownFence } from '../features/document-editor/seriali
 import type { DocumentNodeJson } from '../features/document-editor/schema/documentSchema';
 import { SMART_DOCUMENT_SCHEMA_VERSION } from '../features/document-editor/useRevisionedSaveQueue';
 import {
+    WhiteboardEmbed,
+    insertWhiteboardIntoEditor,
+} from '../features/whiteboard/embed/WhiteboardExtension';
+import {
     EditorCompactToolbar,
     EditorEmptyBlockMenu,
     EditorSelectionMenu,
@@ -90,6 +94,7 @@ const BLOCK_ID_TYPES = [
     'columnList',
     'column',
     'mindMap',
+    'whiteboardEmbed',
     'toggleBlock',
     'calloutBlock',
     'bookmarkBlock',
@@ -1274,6 +1279,16 @@ turndownService.addRule('keepMindMap', {
   }
 });
 
+// Whiteboard documents live independently; Markdown stores only the stable reference.
+turndownService.addRule('keepWhiteboardEmbed', {
+  filter: (node) => {
+    const el = node as HTMLElement;
+    return String(el.nodeName || '').toLowerCase() === 'figure'
+      && el.getAttribute?.('data-type') === 'whiteboard-embed';
+  },
+  replacement: (_content, node) => `\n\n${(node as HTMLElement).outerHTML}\n\n`,
+});
+
 // --- Custom Node Views ---
 const ResizableImageComponent = (props: any) => {
     return <NotionImageComponent {...props} />;
@@ -2322,6 +2337,7 @@ export const SmartDocumentEditor = ({
                 }),
                 Indent,
                 MindMap,
+                WhiteboardEmbed,
                 ToggleBlock,
                 CalloutBlock,
                 BookmarkBlock,
@@ -3449,6 +3465,7 @@ export const SmartDocumentEditor = ({
                     editor={editor} 
                     onAddImage={addImage}
                     onAddImageUrl={addImageByUrl}
+                    onAddWhiteboard={() => { void insertWhiteboardIntoEditor(editor); }}
                     outlineOpen={showTOC}
                     onToggleOutline={() => setShowTOC(!showTOC)}
                 />}

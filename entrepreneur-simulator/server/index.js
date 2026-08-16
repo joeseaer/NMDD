@@ -32,6 +32,7 @@ fastify.register(require('@fastify/multipart'), {
 
 // Services
 const dbService = require('./services/dbService');
+const whiteboardService = require('./services/whiteboardService');
 const chatService = require('./services/chatService');
 const sceneService = require('./services/sceneService');
 const { isAuthenticated } = require('./routes/auth');
@@ -75,6 +76,11 @@ fastify.register(require('./routes/relationshipSystem'), { prefix: '/api/relatio
 const start = async () => {
   try {
     await dbService.initDB();
+    try {
+      await whiteboardService.initStorage();
+    } catch (error) {
+      fastify.log.warn({ event: 'whiteboard_storage_init_failed' }, 'Whiteboard storage is unavailable');
+    }
     const port = Number(process.env.PORT || 3000);
     // Railway can only route traffic to a process listening on every
     // interface. Force the required binding there even if a stale HOST value
