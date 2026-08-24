@@ -6,7 +6,7 @@ import {
   ImagePlus, Download, ExternalLink, Maximize2, Trash2, Copy, GripVertical,
   MoreHorizontal, ArrowUp, ArrowDown, Heading1, Heading2, Heading3, MessageSquare,
   Paperclip, Video, Music, FileText, RefreshCw, Palette, ChevronRight, AlertTriangle,
-  Plus
+  Plus, ListTree
 } from 'lucide-react';
 import { useEditor, EditorContent, useEditorState } from '@tiptap/react';
 import Image from '@tiptap/extension-image';
@@ -2019,6 +2019,8 @@ type SmartDocumentEditorProps = {
     contentRevision?: number | null;
     mode?: 'edit' | 'read';
     theme?: 'light' | 'dark' | 'system';
+    outlineOpen?: boolean;
+    onOutlineOpenChange?: (open: boolean) => void;
     serializationFlushRef?: React.MutableRefObject<(() => Promise<void>) | null>;
     exportValueRef?: React.MutableRefObject<SmartDocumentValueGetter | null>;
     onRecoveryRepaired?: (value: SmartDocumentValue, result: SOPContentRepairResult) => void;
@@ -2160,12 +2162,20 @@ export const SmartDocumentEditor = ({
     contentRevision = null,
     mode = 'edit',
     theme = 'system',
+    outlineOpen: controlledOutlineOpen,
+    onOutlineOpenChange,
     serializationFlushRef,
     exportValueRef,
     onRecoveryRepaired,
     onChange,
 }: SmartDocumentEditorProps) => {
-    const [showTOC, setShowTOC] = useState(false);
+    const [internalOutlineOpen, setInternalOutlineOpen] = useState(false);
+    const showTOC = controlledOutlineOpen ?? internalOutlineOpen;
+    const showLocalOutlineToggle = controlledOutlineOpen === undefined && onOutlineOpenChange === undefined;
+    const setShowTOC = useCallback((open: boolean) => {
+        if (controlledOutlineOpen === undefined) setInternalOutlineOpen(open);
+        onOutlineOpenChange?.(open);
+    }, [controlledOutlineOpen, onOutlineOpenChange]);
     const [findPanelMode, setFindPanelMode] = useState<FindPanelMode | null>(null);
     const [hoveredBlock, setHoveredBlock] = useState<BlockHandleInfo | null>(null);
     const [blockMenuOpen, setBlockMenuOpen] = useState(false);
@@ -2180,6 +2190,8 @@ export const SmartDocumentEditor = ({
     const [contentRecoveryState, setContentRecoveryState] = useState<'idle' | 'saving' | 'error'>('idle');
     const [contentRecoveryError, setContentRecoveryError] = useState('');
     const shellRef = React.useRef<HTMLDivElement | null>(null);
+    const outlineLayerRef = React.useRef<HTMLDivElement | null>(null);
+    const outlinePanelRef = React.useRef<HTMLElement | null>(null);
     const uploadControllerRef = React.useRef<SmartClipboardUploadController | null>(null);
     const initialContentRecoveryRef = React.useRef(false);
     const recoveryBlockedRef = React.useRef(initiallyRequiresRecovery);
@@ -2193,6 +2205,63 @@ export const SmartDocumentEditor = ({
     useEffect(() => {
         onChangeRef.current = onChange;
     }, [onChange]);
+
+    React.useLayoutEffect(() => {
+        if (!showTOC) return;
+        const layer = outlineLayerRef.current;
+        const editorShell = shellRef.current;
+        if (!layer || !editorShell) return;
+
+        const workspaceBody = editorShell.closest('.smart-document-shell')
+            ?.querySelector<HTMLElement>('.smart-document-shell__body');
+        const viewportTarget = workspaceBody || editorShell;
+
+        const updateBounds = () => {
+            const bounds = viewportTarget.getBoundingClientRect();
+            layer.style.setProperty('--smart-document-outline-top', `${Math.max(0, bounds.top)}px`);
+            layer.style.setProperty('--smart-document-outline-right', `${Math.max(0, window.innerWidth - bounds.right)}px`);
+            layer.style.setProperty('--smart-document-outline-bottom', `${Math.max(0, window.innerHeight - bounds.bottom)}px`);
+            layer.style.setProperty('--smart-document-outline-left', `${Math.max(0, bounds.left)}px`);
+        };
+
+        updateBounds();
+        const resizeObserver = typeof ResizeObserver === 'undefined'
+            ? null
+            : new ResizeObserver(updateBounds);
+        resizeObserver?.observe(viewportTarget);
+        window.addEventListener('resize', updateBounds);
+        window.addEventListener('scroll', updateBounds, true);
+
+        return () => {
+            resizeObserver?.disconnect();
+            window.removeEventListener('resize', updateBounds);
+            window.removeEventListener('scroll', updateBounds, true);
+        };
+    }, [showTOC]);
+
+    useEffect(() => {
+        if (!showTOC) return;
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target;
+            if (!(target instanceof Node)) return;
+            if (outlinePanelRef.current?.contains(target)) return;
+            if (target instanceof Element && target.closest('[data-smart-document-outline-toggle]')) return;
+            setShowTOC(false);
+        };
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape') return;
+            event.stopPropagation();
+            setShowTOC(false);
+        };
+
+        document.addEventListener('pointerdown', handlePointerDown, true);
+        document.addEventListener('keydown', handleKeyDown, true);
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown, true);
+            document.removeEventListener('keydown', handleKeyDown, true);
+        };
+    }, [setShowTOC, showTOC]);
 
     const serializeAndEmit = useCallback((editorInstance: any) => {
         if (recoveryBlockedRef.current) return;
@@ -3349,6 +3418,7 @@ export const SmartDocumentEditor = ({
             data-mode={mode}
             data-theme={theme}
             data-recovery-blocked={contentRecoveryWarning ? 'true' : 'false'}
+            data-outline-local-toggle={showLocalOutlineToggle ? 'true' : 'false'}
             onDragOver={handleEditorDragOver}
             onDrop={handleEditorDrop}
             onDragEnd={handleEditorDragEnd}
@@ -3379,31 +3449,59 @@ export const SmartDocumentEditor = ({
                 onResolve={resolveBlockComment}
                 onDelete={deleteBlockComment}
             />}
-            {/* Outline / Table of Contents (Left Side) */}
-            {showTOC && (
-                <aside className="smart-document-outline-panel" aria-label="文档大纲">
-                    <div className="smart-document-outline-header">
-                         <h4>
-                            <ListOrdered className="w-3 h-3 mr-2" /> 
-                            大纲
-                         </h4>
-                         <button 
-                            type="button"
-                            onClick={() => setShowTOC(false)} 
-                            className="smart-document-icon-button"
-                            title="隐藏大纲"
-                            aria-label="隐藏大纲"
-                          >
-                            <X className="w-3 h-3" />
-                         </button>
-                    </div>
-                    <div className="smart-document-outline-content custom-scrollbar">
-                        <TableOfContents editor={editor} />
-                    </div>
-                </aside>
-            )}
-
             <div className="smart-document-editor-main">
+                {showLocalOutlineToggle ? (
+                    <div className="smart-document-outline-local-control">
+                        <button
+                            type="button"
+                            className="smart-document-icon-button"
+                            data-smart-document-outline-toggle
+                            data-active={showTOC ? 'true' : 'false'}
+                            aria-label={showTOC ? '隐藏文档大纲' : '显示文档大纲'}
+                            aria-expanded={showTOC}
+                            aria-controls="smart-document-outline"
+                            title={showTOC ? '隐藏文档大纲' : '显示文档大纲'}
+                            onClick={() => setShowTOC(!showTOC)}
+                        >
+                            <ListTree aria-hidden="true" />
+                        </button>
+                    </div>
+                ) : null}
+                {showTOC && (
+                    <div ref={outlineLayerRef} className="smart-document-outline-layer">
+                        <button
+                            type="button"
+                            className="smart-document-outline-scrim"
+                            aria-label="关闭文档大纲"
+                            onClick={() => setShowTOC(false)}
+                        />
+                        <aside
+                            ref={outlinePanelRef}
+                            id="smart-document-outline"
+                            className="smart-document-outline-panel"
+                            aria-label="文档大纲"
+                        >
+                            <div className="smart-document-outline-header">
+                                <h4>
+                                    <ListTree aria-hidden="true" />
+                                    大纲
+                                </h4>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowTOC(false)}
+                                    className="smart-document-icon-button"
+                                    title="隐藏文档大纲"
+                                    aria-label="隐藏文档大纲"
+                                >
+                                    <X aria-hidden="true" />
+                                </button>
+                            </div>
+                            <div className="smart-document-outline-content custom-scrollbar">
+                                <TableOfContents editor={editor} onNavigate={() => setShowTOC(false)} />
+                            </div>
+                        </aside>
+                    </div>
+                )}
                 {findPanelMode ? (
                     <EditorFindReplace
                         editor={editor}
@@ -3466,8 +3564,6 @@ export const SmartDocumentEditor = ({
                     onAddImage={addImage}
                     onAddImageUrl={addImageByUrl}
                     onAddWhiteboard={() => { void insertWhiteboardIntoEditor(editor); }}
-                    outlineOpen={showTOC}
-                    onToggleOutline={() => setShowTOC(!showTOC)}
                 />}
                 {mode === 'edit' && !contentRecoveryWarning && (
                     <div className="smart-document-context-toolbar-row">
@@ -3913,8 +4009,12 @@ const ColumnResizeLayer = ({
     );
 };
 
-const TableOfContents = ({ editor }: { editor: any }) => {
-    const [headings, setHeadings] = useState<{ level: number; text: string; id: string; pos: number }[]>([]);
+type OutlineHeading = { level: number; text: string; id: string; pos: number };
+
+const TableOfContents = ({ editor, onNavigate }: { editor: any; onNavigate?: () => void }) => {
+    const [headings, setHeadings] = useState<OutlineHeading[]>([]);
+    const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
+    const listRef = React.useRef<HTMLUListElement | null>(null);
 
     useEffect(() => {
         if (!editor) return;
@@ -3922,14 +4022,14 @@ const TableOfContents = ({ editor }: { editor: any }) => {
         let previousSignature = '';
 
         const updateHeadings = () => {
-            const items: any[] = [];
+            const items: OutlineHeading[] = [];
             editor.state.doc.descendants((node: any, pos: number) => {
                 if (node.type.name === 'heading') {
                     items.push({
                         level: node.attrs.level,
                         text: node.textContent,
-                        id: `heading-${pos}`, // Simple ID
-                        pos: pos
+                        id: `heading-${pos}`,
+                        pos,
                     });
                 }
                 if (node.type.name === 'toggleBlock' && Number(node.attrs.level) > 0) {
@@ -3965,28 +4065,95 @@ const TableOfContents = ({ editor }: { editor: any }) => {
         };
     }, [editor]);
 
-    if (headings.length === 0) return <div className="text-xs text-gray-400 pl-2 italic">暂无标题，请使用 H1-H6 添加</div>;
+    useEffect(() => {
+        if (!editor || headings.length === 0) {
+            setActiveHeadingId(null);
+            return;
+        }
+
+        const editorElement = editor.view.dom as HTMLElement;
+        const workspaceScroll = editorElement.closest<HTMLElement>('.smart-document-shell__scroll');
+        const editorCanvas = editorElement.closest<HTMLElement>('.smart-document-canvas');
+        const scrollContainer = workspaceScroll
+            || (editorCanvas && editorCanvas.scrollHeight > editorCanvas.clientHeight + 1 ? editorCanvas : null);
+        const scrollTarget: HTMLElement | Window = scrollContainer || window;
+        let frame = 0;
+
+        const updateActiveHeading = () => {
+            const containerTop = scrollContainer?.getBoundingClientRect().top || 0;
+            const activationLine = containerTop + (editor.isEditable ? 64 : 32);
+            let activeId = headings[0]?.id || null;
+
+            for (const heading of headings) {
+                const element = editor.view.nodeDOM(heading.pos) as HTMLElement | null;
+                if (!element) continue;
+                if (element.getBoundingClientRect().top <= activationLine) activeId = heading.id;
+                else break;
+            }
+
+            setActiveHeadingId((current) => current === activeId ? current : activeId);
+        };
+        const scheduleUpdate = () => {
+            if (frame) return;
+            frame = window.requestAnimationFrame(() => {
+                frame = 0;
+                updateActiveHeading();
+            });
+        };
+
+        updateActiveHeading();
+        scrollTarget.addEventListener('scroll', scheduleUpdate, { passive: true });
+        window.addEventListener('resize', scheduleUpdate);
+        editor.on('update', scheduleUpdate);
+
+        return () => {
+            scrollTarget.removeEventListener('scroll', scheduleUpdate);
+            window.removeEventListener('resize', scheduleUpdate);
+            editor.off('update', scheduleUpdate);
+            if (frame) window.cancelAnimationFrame(frame);
+        };
+    }, [editor, headings]);
+
+    useEffect(() => {
+        if (!activeHeadingId) return;
+        const list = listRef.current;
+        const content = list?.closest<HTMLElement>('.smart-document-outline-content');
+        const activeButton = list?.querySelector<HTMLElement>(`[data-outline-heading="${activeHeadingId}"]`);
+        if (!content || !activeButton) return;
+
+        const contentBounds = content.getBoundingClientRect();
+        const buttonBounds = activeButton.getBoundingClientRect();
+        if (buttonBounds.top < contentBounds.top + 8) {
+            content.scrollTop -= contentBounds.top + 8 - buttonBounds.top;
+        } else if (buttonBounds.bottom > contentBounds.bottom - 8) {
+            content.scrollTop += buttonBounds.bottom - contentBounds.bottom + 8;
+        }
+    }, [activeHeadingId]);
+
+    if (headings.length === 0) {
+        return <div className="smart-document-outline-empty">暂无标题，请使用 H1-H6 添加</div>;
+    }
 
     return (
-        <ul className="space-y-1 font-sans">
-            {headings.map((heading, index) => (
-                <li 
-                    key={index} 
-                    className={`
-                        text-sm py-1.5 pr-2 rounded-md cursor-pointer hover:bg-gray-100 hover:text-primary transition-colors truncate block
-                        ${heading.level === 1 ? 'font-bold text-gray-900 pl-2' : ''}
-                        ${heading.level === 2 ? 'font-medium text-gray-700 pl-4' : ''}
-                        ${heading.level === 3 ? 'text-gray-600 pl-6' : ''}
-                        ${heading.level === 4 ? 'text-gray-500 pl-8 text-xs' : ''}
-                        ${heading.level >= 5 ? 'text-gray-400 pl-10 text-xs' : ''}
-                    `}
-                    onClick={() => {
-                        editor.chain().focus().setTextSelection(heading.pos + 1).run();
-                        const element = editor.view.nodeDOM(heading.pos) as HTMLElement | null;
-                        if (element) element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }}
-                >
-                    {heading.text || '(空标题)'}
+        <ul ref={listRef} className="smart-document-outline-list">
+            {headings.map((heading) => (
+                <li key={heading.id} data-active={activeHeadingId === heading.id ? 'true' : 'false'}>
+                    <button
+                        type="button"
+                        data-outline-heading={heading.id}
+                        data-level={Math.min(heading.level, 6)}
+                        aria-current={activeHeadingId === heading.id ? 'location' : undefined}
+                        title={heading.text || '(空标题)'}
+                        onClick={() => {
+                            setActiveHeadingId(heading.id);
+                            if (editor.isEditable) editor.commands.setTextSelection(heading.pos + 1);
+                            const element = editor.view.nodeDOM(heading.pos) as HTMLElement | null;
+                            element?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            if (window.matchMedia('(max-width: 48rem)').matches) onNavigate?.();
+                        }}
+                    >
+                        {heading.text || '(空标题)'}
+                    </button>
                 </li>
             ))}
         </ul>

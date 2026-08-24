@@ -6,6 +6,7 @@ import {
   FileText,
   Lightbulb,
   Link2,
+  ListTree,
   MessageSquare,
   PanelLeftClose,
   PanelLeftOpen,
@@ -853,6 +854,7 @@ function ResearchDetail({
 }) {
   const [showPromote, setShowPromote] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const [fullscreenEntryWidth, setFullscreenEntryWidth] = useState<number | null>(null);
   const workspaceShellRef = React.useRef<HTMLDivElement | null>(null);
   const exportValueRef = React.useRef<SmartDocumentValueGetter | null>(null);
@@ -887,6 +889,10 @@ function ResearchDetail({
     impact: '',
     followup: '',
   }));
+
+  useEffect(() => {
+    setOutlineOpen(false);
+  }, [item.id]);
 
   useEffect(() => {
     setPromoteDraft({
@@ -1021,6 +1027,19 @@ function ResearchDetail({
             actions={(
               <>
                 <DocumentSaveIndicator status={saveStatus} onRetry={onRetrySave} onReload={onReloadAfterConflict} />
+                <button
+                  type="button"
+                  className="smart-document-icon-button"
+                  data-smart-document-outline-toggle
+                  data-active={outlineOpen ? 'true' : 'false'}
+                  aria-label={outlineOpen ? '隐藏文档大纲' : '显示文档大纲'}
+                  aria-pressed={outlineOpen}
+                  aria-controls="smart-document-outline"
+                  title={outlineOpen ? '隐藏文档大纲' : '显示文档大纲'}
+                  onClick={() => setOutlineOpen(current => !current)}
+                >
+                  <ListTree aria-hidden="true" />
+                </button>
                 <DocumentViewControls
                   mode={mode}
                   theme={theme}
@@ -1199,6 +1218,8 @@ function ResearchDetail({
           contentRevision={item.content_revision}
           mode={mode}
           theme={theme}
+          outlineOpen={outlineOpen}
+          onOutlineOpenChange={setOutlineOpen}
           serializationFlushRef={serializationFlushRef}
           exportValueRef={exportValueRef}
           onRecoveryRepaired={onRecoveryRepaired}

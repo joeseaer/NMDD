@@ -1622,17 +1622,48 @@
   font-size: 0.75rem;
 }
 
-.smart-document-outline-panel {
-  position: relative;
-  z-index: 24;
+.smart-document-editor-shell[data-outline-local-toggle="true"] .smart-document-toolbar {
+  padding-right: 3.5rem !important;
+}
+
+.smart-document-outline-local-control {
+  position: absolute;
+  z-index: 28;
+  top: 0.25rem;
+  right: 0.5rem;
   display: flex;
-  width: 16rem;
-  min-width: 14rem;
+}
+
+.smart-document-outline-layer {
+  position: fixed;
+  z-index: 48;
+  top: var(--smart-document-outline-top, 0);
+  right: var(--smart-document-outline-right, 0);
+  bottom: var(--smart-document-outline-bottom, 0);
+  left: var(--smart-document-outline-left, 0);
+  pointer-events: none;
+}
+
+.smart-document-outline-scrim {
+  display: none;
+}
+
+.smart-document-outline-panel {
+  position: absolute;
+  top: 0.75rem;
+  right: max(0.75rem, var(--smart-doc-gutter));
+  display: flex;
+  width: min(19rem, calc(100% - 1.5rem));
+  max-height: calc(100% - 1.5rem);
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  border-right: 1px solid var(--smart-doc-border);
-  background: var(--smart-doc-canvas);
+  pointer-events: auto;
+  border: 1px solid var(--smart-doc-border);
+  border-radius: var(--smart-doc-radius-lg);
+  background: color-mix(in srgb, var(--smart-doc-surface-raised) 97%, transparent);
+  box-shadow: var(--smart-doc-shadow-menu);
+  backdrop-filter: blur(14px);
 }
 
 .smart-document-outline-header {
@@ -1657,11 +1688,102 @@
   text-transform: uppercase;
 }
 
+.smart-document-outline-header h4 svg {
+  width: 0.875rem;
+  height: 0.875rem;
+  margin-right: 0.45rem;
+}
+
+.smart-document-outline-header .smart-document-icon-button {
+  min-width: 2rem;
+  min-height: 2rem;
+}
+
 .smart-document-outline-content {
   min-height: 0;
   flex: 1;
   padding: 0.75rem;
   overflow: auto;
+}
+
+.smart-document-outline-empty {
+  padding: 0.25rem 0.5rem;
+  color: var(--smart-doc-text-faint);
+  font-size: 0.75rem;
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.smart-document-outline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--smart-doc-font-sans);
+}
+
+.smart-document-outline-list li {
+  min-width: 0;
+}
+
+.smart-document-outline-list button {
+  display: block;
+  width: 100%;
+  min-height: 2rem;
+  overflow: hidden;
+  padding: 0.35rem 0.625rem;
+  border: 0;
+  border-radius: var(--smart-doc-radius-sm);
+  background: transparent;
+  color: var(--smart-doc-text-secondary);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background-color var(--smart-doc-motion-fast) var(--smart-doc-ease), color var(--smart-doc-motion-fast) var(--smart-doc-ease);
+}
+
+.smart-document-outline-list button[data-level="1"] {
+  padding-left: 0.625rem;
+  color: var(--smart-doc-text);
+  font-weight: 680;
+}
+
+.smart-document-outline-list button[data-level="2"] {
+  padding-left: 1.25rem;
+  font-weight: 620;
+}
+
+.smart-document-outline-list button[data-level="3"] {
+  padding-left: 1.875rem;
+}
+
+.smart-document-outline-list button[data-level="4"] {
+  padding-left: 2.5rem;
+  font-size: 0.75rem;
+}
+
+.smart-document-outline-list button:is([data-level="5"], [data-level="6"]) {
+  padding-left: 3.125rem;
+  color: var(--smart-doc-text-muted);
+  font-size: 0.75rem;
+}
+
+.smart-document-outline-list button:hover {
+  background: var(--smart-doc-surface-hover);
+  color: var(--smart-doc-text);
+}
+
+.smart-document-outline-list li[data-active="true"] button {
+  background: var(--smart-doc-accent-soft);
+  color: var(--smart-doc-accent);
+}
+
+.smart-document-content :is(h1, h2, h3, h4, h5, h6, [data-type="toggle-block"]) {
+  scroll-margin-top: 4rem;
 }
 
 .smart-document-slash-menu,
@@ -1718,6 +1840,7 @@
 
 .smart-document-shell__scroll,
 .smart-document-shell__outline,
+.smart-document-outline-content,
 .smart-document-slash-menu,
 .smart-document-popover {
   scrollbar-color: var(--smart-doc-border-strong) transparent;
@@ -1726,6 +1849,7 @@
 
 .smart-document-shell__scroll::-webkit-scrollbar,
 .smart-document-shell__outline::-webkit-scrollbar,
+.smart-document-outline-content::-webkit-scrollbar,
 .smart-document-slash-menu::-webkit-scrollbar,
 .smart-document-popover::-webkit-scrollbar {
   width: 8px;
@@ -1734,6 +1858,7 @@
 
 .smart-document-shell__scroll::-webkit-scrollbar-thumb,
 .smart-document-shell__outline::-webkit-scrollbar-thumb,
+.smart-document-outline-content::-webkit-scrollbar-thumb,
 .smart-document-slash-menu::-webkit-scrollbar-thumb,
 .smart-document-popover::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
@@ -1743,8 +1868,7 @@
 }
 
 @media (max-width: 64rem) {
-  .smart-document-shell__outline,
-  .smart-document-outline-panel {
+  .smart-document-shell__outline {
     position: absolute;
     z-index: 40;
     top: 0;
@@ -1757,6 +1881,27 @@
 }
 
 @media (max-width: 48rem) {
+  .smart-document-outline-layer {
+    z-index: 64;
+  }
+
+  .smart-document-outline-scrim {
+    position: absolute;
+    inset: 0;
+    display: block;
+    pointer-events: auto;
+    border: 0;
+    background: color-mix(in srgb, #111827 24%, transparent);
+  }
+
+  .smart-document-outline-panel {
+    top: 0.5rem;
+    right: 0.5rem;
+    bottom: 0.5rem;
+    width: min(21rem, calc(100% - 1rem));
+    max-height: none;
+  }
+
   .smart-document-topbar {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.375rem;

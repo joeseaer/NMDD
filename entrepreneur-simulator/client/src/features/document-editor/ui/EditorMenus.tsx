@@ -21,7 +21,6 @@ import {
   Link,
   List,
   ListOrdered,
-  PanelLeft,
   Palette,
   Quote,
   Redo2,
@@ -412,15 +411,11 @@ export const EditorTableMenu = ({ editor }: { editor: Editor }) => {
 };
 export const EditorCompactToolbar = ({
   editor,
-  outlineOpen,
-  onToggleOutline,
   onAddImage,
   onAddImageUrl,
   onAddWhiteboard,
 }: {
   editor: Editor;
-  outlineOpen: boolean;
-  onToggleOutline: () => void;
   onAddImage: () => void;
   onAddImageUrl: () => void;
   onAddWhiteboard: () => void;
@@ -467,7 +462,6 @@ export const EditorCompactToolbar = ({
   return (
     <div className="smart-document-toolbar" role="toolbar" aria-label="文档工具栏">
       <div className="smart-document-toolbar-group">
-        <MenuButton label={outlineOpen ? '隐藏大纲' : '显示大纲'} active={outlineOpen} onClick={onToggleOutline}><PanelLeft /></MenuButton>
         <MenuButton label="撤销 (Ctrl+Z)" disabled={!toolbarState.canUndo} onClick={() => editor.chain().focus().undo().run()}><Undo2 /></MenuButton>
         <MenuButton label="重做 (Ctrl+Shift+Z)" disabled={!toolbarState.canRedo} onClick={() => editor.chain().focus().redo().run()}><Redo2 /></MenuButton>
       </div>

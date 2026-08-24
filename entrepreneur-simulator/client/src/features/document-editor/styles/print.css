@@ -66,6 +66,8 @@
   :is(.smart-document-shell, .smart-document) :is(
       .smart-document-shell__topbar,
       .smart-document-shell__outline,
+      .smart-document-outline-layer,
+      .smart-document-outline-local-control,
       .smart-document-outline-panel,
       .smart-document-shell__floating,
       .smart-document-toolbar,

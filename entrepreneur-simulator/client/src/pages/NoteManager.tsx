@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Plus, RefreshCw, Tag, Search, X,
   MoreHorizontal, Trash2, FileText, 
-  ArrowLeft, ChevronRight, Link2, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen
+  ArrowLeft, ChevronRight, Link2, ListTree, Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen
 } from 'lucide-react';
 import { api, CURRENT_USER_ID, type SOPContentRepairResult } from '../services/api';
 import { SmartDocumentEditor, type SmartDocumentPageLink, type SmartDocumentValue, type SmartDocumentValueGetter } from '../components/SmartDocumentEditor';
@@ -753,6 +753,7 @@ function NoteDetailView({
   const [showMenu, setShowMenu] = useState(false);
   const [showPublish, setShowPublish] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const exportValueRef = React.useRef<SmartDocumentValueGetter | null>(null);
   const [publishCat, setPublishCat] = useState<'people' | 'business' | 'brand'>('people');
   const {
@@ -762,6 +763,10 @@ function NoteDetailView({
   const handleBackFromEditor = async () => {
     await onBack();
   };
+
+  useEffect(() => {
+    setOutlineOpen(false);
+  }, [note.id]);
 
   useEffect(() => {
     if (!isFullscreen) return;
@@ -869,6 +874,19 @@ function NoteDetailView({
             actions={(
               <>
                 <DocumentSaveIndicator status={saveStatus} onRetry={onRetrySave} onReload={onReloadAfterConflict} />
+                <button
+                  type="button"
+                  className="smart-document-icon-button"
+                  data-smart-document-outline-toggle
+                  data-active={outlineOpen ? 'true' : 'false'}
+                  aria-label={outlineOpen ? '隐藏文档大纲' : '显示文档大纲'}
+                  aria-pressed={outlineOpen}
+                  aria-controls="smart-document-outline"
+                  title={outlineOpen ? '隐藏文档大纲' : '显示文档大纲'}
+                  onClick={() => setOutlineOpen(current => !current)}
+                >
+                  <ListTree aria-hidden="true" />
+                </button>
                 <DocumentViewControls
                   mode={mode}
                   theme={theme}
@@ -1059,6 +1077,8 @@ function NoteDetailView({
           contentRevision={note.content_revision}
           mode={mode}
           theme={theme}
+          outlineOpen={outlineOpen}
+          onOutlineOpenChange={setOutlineOpen}
           serializationFlushRef={serializationFlushRef}
           exportValueRef={exportValueRef}
           onRecoveryRepaired={onRecoveryRepaired}
