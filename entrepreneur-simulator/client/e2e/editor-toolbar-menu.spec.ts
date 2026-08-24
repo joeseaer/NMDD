@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { clearEditor } from './editorTestUtils';
 
 test.beforeEach(async ({ page }) => {
   await page.route('**/api/auth/session', async route => {
@@ -35,6 +36,14 @@ test('block type menu opens above the toolbar without covering the editor', asyn
   await menu.getByRole('option', { name: /二级标题/ }).click();
   await expect(trigger).toContainText('二级标题');
   await expect(page.getByTestId('editor-surface').locator('h2').first()).toContainText('Editor Lab');
+});
+
+test('empty paragraphs do not show the floating insert toolbar', async ({ page }) => {
+  await page.goto('/editor-lab');
+  await clearEditor(page);
+
+  await expect(page.getByRole('toolbar', { name: '插入内容' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '当前块类型' })).toBeVisible();
 });
 
 test('mobile block type menu stays inside the viewport', async ({ page }) => {

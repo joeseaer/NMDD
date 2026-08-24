@@ -1431,7 +1431,6 @@
 .smart-document-icon-button svg,
 .smart-document-toolbar button svg,
 .smart-document-bubble-menu button svg,
-.smart-document-floating-menu button svg,
 .smart-document-context-menu button svg {
   width: 1rem;
   height: 1rem;
@@ -1471,7 +1470,6 @@
 }
 
 .smart-document-bubble-menu,
-.smart-document-floating-menu,
 .smart-document-context-menu {
   display: flex;
   align-items: center;
@@ -1505,10 +1503,6 @@
 .smart-document-bubble-menu .smart-document-link-open-button span {
   font-size: 0.75rem;
   font-weight: 620;
-}
-
-.smart-document-floating-menu {
-  flex-direction: column;
 }
 
 .smart-document-context-toolbar-row {
@@ -1813,7 +1807,6 @@
   .smart-document-toolbar,
   .smart-document-editor-toolbar,
   .smart-document-bubble-menu,
-  .smart-document-floating-menu,
   .smart-document-block-handle,
   .smart-document-block-menu,
   [data-smart-doc-ui="image-toolbar"],

@@ -45,7 +45,6 @@ import {
 } from '../features/whiteboard/embed/WhiteboardExtension';
 import {
     EditorCompactToolbar,
-    EditorEmptyBlockMenu,
     EditorSelectionMenu,
     EditorTableMenu,
 } from '../features/document-editor/ui/EditorMenus';
@@ -3580,7 +3579,6 @@ export const SmartDocumentEditor = ({
                     <div className="smart-document-content-rail">
                         <EditorContent editor={editor} />
                         {mode === 'edit' && !contentRecoveryWarning && <EditorSelectionMenu editor={editor} onSetLink={setSelectionLink} />}
-                        {mode === 'edit' && !contentRecoveryWarning && <EditorEmptyBlockMenu editor={editor} />}
                     </div>
                 </div>
             </div>

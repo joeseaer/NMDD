@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/core';
 import { useEditorState } from '@tiptap/react';
-import { BubbleMenu, FloatingMenu } from '@tiptap/react/menus';
+import { BubbleMenu } from '@tiptap/react/menus';
 import {
   AlignCenter,
   AlignLeft,
@@ -13,8 +13,6 @@ import {
   Code,
   Columns3,
   ExternalLink,
-  Heading1,
-  Heading2,
   Highlighter,
   Image,
   Italic,
@@ -22,7 +20,6 @@ import {
   List,
   ListOrdered,
   Palette,
-  Quote,
   Redo2,
   RemoveFormatting,
   Strikethrough,
@@ -351,30 +348,6 @@ export const EditorSelectionMenu = ({
     </MenuButton>
   </BubbleMenu>;
 };
-
-export const EditorEmptyBlockMenu = ({ editor }: { editor: Editor }) => (
-  <FloatingMenu
-    editor={editor}
-    pluginKey="smartDocumentEmptyBlockMenu"
-    shouldShow={({ editor: currentEditor }) => (
-      currentEditor.isEditable
-      && currentEditor.isActive('paragraph')
-      && currentEditor.state.selection.empty
-      && currentEditor.state.selection.$from.parent.content.size === 0
-    )}
-    options={{ placement: 'left-start', offset: 10, flip: true, shift: { padding: 8 } }}
-    className="smart-document-floating-menu"
-    role="toolbar"
-    aria-label="插入内容"
-  >
-    <MenuButton label="一级标题" onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}><Heading1 /></MenuButton>
-    <MenuButton label="二级标题" onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}><Heading2 /></MenuButton>
-    <MenuButton label="项目列表" onClick={() => editor.chain().focus().toggleBulletList().run()}><List /></MenuButton>
-    <MenuButton label="待办列表" onClick={() => editor.chain().focus().toggleTaskList().run()}><CheckSquare /></MenuButton>
-    <MenuButton label="引用" onClick={() => editor.chain().focus().toggleBlockquote().run()}><Quote /></MenuButton>
-    <MenuButton label="代码块" onClick={() => editor.chain().focus().toggleCodeBlock().run()}><Code /></MenuButton>
-  </FloatingMenu>
-);
 
 export const EditorTableMenu = ({ editor }: { editor: Editor }) => {
   const tableState = useEditorState({
