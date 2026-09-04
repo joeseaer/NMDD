@@ -5,6 +5,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { RichText } from '../domain/types';
 import {
   editorJsonToRichText,
+  richTableFromClipboardHtml,
   richTextToEditorJson,
   sanitizeTopicRichTextHtml,
   TopicRichText,
@@ -169,6 +170,25 @@ describe('TopicRichText canonical conversion and display', () => {
     expect(sanitized).toContain('<ol start="4">');
     expect(sanitized).not.toMatch(/javascript:|onclick|onerror|background|<script|<img|<h1/i);
     expect(sanitized).not.toContain('href=""');
+  });
+
+  it('converts a sanitized clipboard table into canonical note content', () => {
+    expect(richTableFromClipboardHtml(`
+      <table onclick="alert(1)"><thead><tr><th>负责人</th><th>状态</th></tr></thead>
+      <tbody><tr><td><strong>小王</strong></td><td>进行中<script>alert(1)</script></td></tr></tbody></table>
+    `)).toEqual({
+      type: 'table',
+      rows: [
+        { type: 'tableRow', cells: [
+          { type: 'tableHeader', text: '负责人' },
+          { type: 'tableHeader', text: '状态' },
+        ] },
+        { type: 'tableRow', cells: [
+          { type: 'tableCell', text: '小王' },
+          { type: 'tableCell', text: '进行中' },
+        ] },
+      ],
+    });
   });
 });
 

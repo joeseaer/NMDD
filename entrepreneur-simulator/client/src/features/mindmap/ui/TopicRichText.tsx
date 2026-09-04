@@ -480,6 +480,35 @@ export const sanitizeTopicRichTextHtml = (html: string): string => {
   return template.innerHTML;
 };
 
+/**
+ * Converts the first table in a browser clipboard HTML payload into the small,
+ * portable table model used by topic Notes.  The HTML first crosses the same
+ * sanitization boundary as the rich-text editor, so a canvas paste cannot
+ * introduce attributes, executable content, or a different table shape.
+ */
+export const richTableFromClipboardHtml = (html: string): RichTable | undefined => {
+  const template = document.createElement('template');
+  template.innerHTML = sanitizeTopicRichTextHtml(html);
+  const table = template.content.querySelector('table');
+  if (!(table instanceof HTMLTableElement)) return undefined;
+
+  const rows = Array.from(table.rows)
+    .slice(0, 1_000)
+    .map((row) => ({
+      type: 'tableRow' as const,
+      cells: Array.from(row.cells)
+        .slice(0, 100)
+        .map((cell) => ({
+          type: cell.tagName.toLowerCase() === 'th'
+            ? 'tableHeader' as const
+            : 'tableCell' as const,
+          text: (cell.textContent ?? '').replace(/\s+/gu, ' ').trim().slice(0, 1_000_000),
+        })),
+    }))
+    .filter((row) => row.cells.length > 0);
+  return rows.length ? { type: 'table', rows } : undefined;
+};
+
 const markStyle = (marks: readonly RichMark[] | undefined): CSSProperties => {
   const style: CSSProperties = {};
   marks?.forEach((mark) => {

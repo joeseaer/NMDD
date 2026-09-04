@@ -188,7 +188,10 @@ import {
   TopicEnrichmentPanel,
   type TopicEnrichmentSection,
 } from './TopicEnrichmentPanel';
-import type { TopicEnrichmentCommand } from './enrichmentPlanning';
+import {
+  planUpsertTopicNoteCommand,
+  type TopicEnrichmentCommand,
+} from './enrichmentPlanning';
 import { MarkerLegendPanel } from './MarkerLegendPanel';
 import { MarkerLegendCanvas } from './MarkerLegendCanvas';
 import {
@@ -196,7 +199,11 @@ import {
   type MarkerLegendCommand,
 } from './markerPlanning';
 import { MindMapContextMenu } from './MindMapContextMenu';
-import { TopicRichTextDisplay, TopicRichTextEditor } from './TopicRichText';
+import {
+  richTableFromClipboardHtml,
+  TopicRichTextDisplay,
+  TopicRichTextEditor,
+} from './TopicRichText';
 import {
   CanvasNavigationControls,
   MAX_CANVAS_ZOOM,
@@ -770,10 +777,28 @@ const writeEncodedClipboard = (
   return { customWritten, writtenCount };
 };
 
-const isNativeClipboardTarget = (target: EventTarget | null): boolean =>
-  target instanceof HTMLElement
-  && !target.closest('[data-mindmap-clipboard-sink]')
-  && Boolean(target.closest('input, textarea, [contenteditable="true"]'));
+const isNativeClipboardTarget = (target: EventTarget | null): boolean => {
+  if (!(target instanceof HTMLElement) || target.closest('[data-mindmap-clipboard-sink]')) {
+    return false;
+  }
+  if (target.closest('input, textarea')) return true;
+  // The enclosing document editor is contenteditable too. Only defer to an
+  // editable region that belongs to this mind-map NodeView itself.
+  const editable = target.closest('[contenteditable="true"]');
+  return Boolean(editable?.closest('[data-mindmap-version="2"]'));
+};
+
+/** Clipboard APIs expose image blobs as either files or file DataTransferItems. */
+const clipboardImageFiles = (clipboardData: DataTransfer): File[] => {
+  const listedFiles = Array.from(clipboardData.files)
+    .filter((file) => file.type.startsWith('image/'));
+  if (listedFiles.length > 0) return listedFiles;
+  return Array.from(clipboardData.items)
+    .filter((item) => item.kind === 'file')
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => file !== null)
+    .filter((file) => file.type.startsWith('image/'));
+};
 
 const DiagnosticView = ({ store }: { store: MindMapContentStore }) => {
   const result = store.parseResult;
@@ -2818,6 +2843,47 @@ const MindMapV2Canvas = ({
     }
   }, [activeSheetId, deleteSelection, focusCanvas, readOnly, selectedTopicIdList, store]);
 
+  const appendPastedTableToTopicNote = useCallback((
+    topicId: TopicId,
+    table: NonNullable<ReturnType<typeof richTableFromClipboardHtml>>,
+  ) => {
+    const currentDocument = store.getSnapshot();
+    const sheet = activeSheetId ? currentDocument?.sheets[activeSheetId] : undefined;
+    if (!currentDocument || !activeSheetId || !sheet) return;
+    const existingNote = Object.values(sheet.notes).find((note) => note.topicId === topicId);
+    const currentContent = existingNote?.content ?? createRichText('');
+    const isEmptyDefaultParagraph = currentContent.blocks.length === 1
+      && currentContent.blocks[0]?.type === 'paragraph'
+      && currentContent.blocks[0].children.length === 0;
+    try {
+      store.dispatch(planUpsertTopicNoteCommand({
+        document: currentDocument,
+        sheetId: activeSheetId,
+        topicId,
+        content: {
+          ...currentContent,
+          blocks: [
+            ...(isEmptyDefaultParagraph ? [] : currentContent.blocks),
+            table,
+          ],
+        },
+        origin: 'mindmap-v2-clipboard-table',
+      }));
+      setSelection({ kind: 'topic', id: topicId });
+      setImportExportOpen(false);
+      setMarkerLegendPanelOpen(false);
+      setStickerCatalogOpen(false);
+      setTopicEnrichmentPanel((previous) => ({
+        section: 'note',
+        focusLinkRequest: previous?.focusLinkRequest ?? 0,
+      }));
+      if (!workspaceChromeVisible) setFullScreen(true);
+      setStatus('已将剪贴板表格添加到当前主题的笔记。');
+    } catch (error) {
+      setStatus(errorMessage(error));
+    }
+  }, [activeSheetId, setSelection, store, workspaceChromeVisible]);
+
   const pasteFromSystemClipboard = useCallback(async (requestedParentTopicId?: TopicId) => {
     const currentDocument = store.getSnapshot();
     if (readOnly || !currentDocument || !activeSheetId || !activeSheet) return;
@@ -2830,10 +2896,12 @@ const MindMapV2Canvas = ({
     let custom = '';
     let markdown = '';
     let plain = '';
+    let html = '';
+    const imageFiles: File[] = [];
     try {
       if (typeof clipboard.read === 'function') {
         const items = await clipboard.read();
-        for (const item of items) {
+        for (const [itemIndex, item] of items.entries()) {
           const readType = async (mime: string): Promise<string> => {
             if (!item.types.includes(mime)) return '';
             return (await item.getType(mime)).text();
@@ -2841,6 +2909,16 @@ const MindMapV2Canvas = ({
           custom ||= await readType(MIND_MAP_CLIPBOARD_MIME);
           markdown ||= await readType(MIND_MAP_CLIPBOARD_MARKDOWN_MIME);
           plain ||= await readType(MIND_MAP_CLIPBOARD_TEXT_MIME);
+          html ||= await readType('text/html');
+          const imageMime = item.types.find((type) => type.startsWith('image/'));
+          if (imageMime) {
+            const image = await item.getType(imageMime);
+            imageFiles.push(new File(
+              [image],
+              `clipboard-image-${itemIndex + 1}.${imageMime.split('/')[1] || 'png'}`,
+              { type: image.type || imageMime },
+            ));
+          }
         }
       } else if (typeof clipboard.readText === 'function') {
         plain = await clipboard.readText();
@@ -2849,15 +2927,15 @@ const MindMapV2Canvas = ({
       setStatus(`无法读取系统剪贴板：${errorMessage(error)}`);
       return;
     }
-    if (!custom.trim() && !markdown.trim() && !plain.trim()) {
-      setStatus('系统剪贴板中没有可粘贴的脑图或文本。');
-      return;
-    }
-
     const latestDocument = store.getSnapshot();
     if (!latestDocument?.sheets[activeSheetId]) return;
     const parentTopicId = requestedParentTopicId
       ?? (isTopicSelection(currentSelection) ? currentSelection.id : activeSheet.rootTopicId);
+    const table = html ? richTableFromClipboardHtml(html) : undefined;
+    if (!custom.trim() && !markdown.trim() && !plain.trim() && !table && imageFiles.length === 0) {
+      setStatus('系统剪贴板中没有可粘贴的脑图、图片、表格或文本。');
+      return;
+    }
     try {
       if (custom.trim()) {
         const envelope = decodeMindMapClipboard(custom);
@@ -2873,6 +2951,10 @@ const MindMapV2Canvas = ({
           id: topicId,
         })));
         setStatus('已从系统剪贴板粘贴完整主题结构。');
+      } else if (imageFiles.length > 0) {
+        await ingestLocalImage(parentTopicId, imageFiles);
+      } else if (table) {
+        appendPastedTableToTopicNote(parentTopicId, table);
       } else {
         const command = planPasteTextTopicCommand({
           document: latestDocument,
@@ -2893,8 +2975,10 @@ const MindMapV2Canvas = ({
   }, [
     activeSheet,
     activeSheetId,
+    appendPastedTableToTopicNote,
     currentSelection,
     focusCanvas,
+    ingestLocalImage,
     readOnly,
     setSelection,
     setSelections,
@@ -2909,10 +2993,14 @@ const MindMapV2Canvas = ({
     let custom = '';
     let markdown = '';
     let plain = '';
+    let html = '';
+    let imageFiles: File[] = [];
     try {
       custom = event.clipboardData.getData(MIND_MAP_CLIPBOARD_MIME);
       markdown = event.clipboardData.getData(MIND_MAP_CLIPBOARD_MARKDOWN_MIME);
       plain = event.clipboardData.getData(MIND_MAP_CLIPBOARD_TEXT_MIME);
+      html = event.clipboardData.getData('text/html');
+      imageFiles = clipboardImageFiles(event.clipboardData);
     } catch (error) {
       event.preventDefault();
       event.stopPropagation();
@@ -2920,14 +3008,15 @@ const MindMapV2Canvas = ({
       focusCanvas();
       return;
     }
-    if (!custom.trim() && !markdown.trim() && !plain.trim()) {
+    const table = html ? richTableFromClipboardHtml(html) : undefined;
+    if (!custom.trim() && !markdown.trim() && !plain.trim() && imageFiles.length === 0 && !table) {
       focusCanvas();
       return;
     }
     event.preventDefault();
     event.stopPropagation();
     if (readOnly) {
-      setStatus('只读模式不能粘贴主题。');
+      setStatus('只读模式不能粘贴内容。');
       focusCanvas();
       return;
     }
@@ -2957,6 +3046,16 @@ const MindMapV2Canvas = ({
         return;
       }
 
+      if (imageFiles.length > 0) {
+        void ingestLocalImage(parentTopicId, imageFiles);
+        return;
+      }
+
+      if (table) {
+        appendPastedTableToTopicNote(parentTopicId, table);
+        return;
+      }
+
       const command = planPasteTextTopicCommand({
         document: currentDocument,
         sheetId: activeSheetId,
@@ -2975,13 +3074,28 @@ const MindMapV2Canvas = ({
   }, [
     activeSheet,
     activeSheetId,
+    appendPastedTableToTopicNote,
     currentSelection,
     focusCanvas,
+    ingestLocalImage,
     readOnly,
     setSelection,
     setSelections,
     store,
   ]);
+
+  // ProseMirror owns the parent editor's native paste listener. Bind directly
+  // to the canvas so image/table clipboard data is consumed before it can be
+  // transformed into a document-level block by that parent editor.
+  useEffect(() => {
+    const canvas = containerRef.current;
+    if (!canvas) return undefined;
+    const onNativePaste = (event: ClipboardEvent): void => {
+      handlePaste(event as unknown as ReactClipboardEvent<HTMLDivElement>);
+    };
+    canvas.addEventListener('paste', onNativePaste);
+    return () => canvas.removeEventListener('paste', onNativePaste);
+  }, [handlePaste]);
 
   const handleKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -3210,7 +3324,6 @@ const MindMapV2Canvas = ({
         aria-label={`${document.title || '未命名思维导图'}，当前画布 ${activeSheet.title || '未命名 Sheet'}`}
         onCopy={(event) => handleCopyOrCut(event, false)}
         onCut={(event) => handleCopyOrCut(event, true)}
-        onPaste={handlePaste}
         onKeyDown={handleKeyDown}
         onMouseDown={(event) => event.stopPropagation()}
         data-testid="mindmap-v2-canvas"

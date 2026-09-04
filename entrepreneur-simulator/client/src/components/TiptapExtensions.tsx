@@ -332,7 +332,11 @@ export const MindMap = Node.create({
   },
 
   addNodeView() {
-    return ReactNodeViewRenderer(MindMapComponent)
+    return ReactNodeViewRenderer(MindMapComponent, {
+      // A clipboard image is otherwise consumed by the surrounding ProseMirror
+      // editor before the interactive canvas receives its paste handler.
+      stopEvent: ({ event }) => event.type === 'paste',
+    })
   },
 });
 

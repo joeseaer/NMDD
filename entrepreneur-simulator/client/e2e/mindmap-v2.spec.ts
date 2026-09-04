@@ -3152,6 +3152,110 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await expect(page.getByTestId(`topic-image-${finalImageId}`)).toBeVisible();
   });
 
+  // Evidence: Ctrl/Cmd+V recognizes clipboard image files and spreadsheet HTML on the canvas.
+  test('pastes a clipboard image and HTML table into the selected topic', async ({ page }) => {
+    test.setTimeout(60_000);
+    const pngBase64 = await page.evaluate(async () => {
+      const source = document.createElement('canvas');
+      source.width = 16;
+      source.height = 12;
+      const context = source.getContext('2d');
+      if (!context) throw new Error('Canvas 2D is unavailable.');
+      context.fillStyle = '#2563eb';
+      context.fillRect(0, 0, source.width, source.height);
+      const blob = await new Promise<Blob>((resolve, reject) => source.toBlob(
+        (value) => value ? resolve(value) : reject(new Error('PNG encode failed.')),
+        'image/png',
+      ));
+      const bytes = new Uint8Array(await blob.arrayBuffer());
+      let binary = '';
+      for (const byte of bytes) binary += String.fromCharCode(byte);
+      return btoa(binary);
+    });
+    const png = Buffer.from(pngBase64, 'base64');
+    const assetUrl = 'https://assets.example.test/pasted-mindmap-image.png';
+    await page.route('**/api/upload?kind=image', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          url: assetUrl,
+          fileName: 'pasted-image.png',
+          mimeType: 'image/png',
+          byteSize: png.byteLength,
+          sha256: 'c'.repeat(64),
+        }),
+      });
+    });
+    await page.route(assetUrl, route => route.fulfill({
+      status: 200,
+      contentType: 'image/png',
+      body: png,
+    }));
+
+    await page.goto('/editor-lab?fixture=mindmap-v1-small');
+    await topicButton(page, '主主题 1').click();
+    const imagePastePrevented = await canvas(page).evaluate((element, base64) => {
+      const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([bytes], 'pasted-image.png', { type: 'image/png' }));
+      const event = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: transfer,
+      });
+      element.dispatchEvent(event);
+      return event.defaultPrevented;
+    }, pngBase64);
+    expect(imagePastePrevented).toBe(true);
+    await expect.poll(async () => {
+      const document = await canonicalData(page);
+      const target = document ? canonicalTopicByTitle(document, '主主题 1') : undefined;
+      const images = document ? firstCanonicalSheet(document)?.images : undefined;
+      if (!target || images === null || typeof images !== 'object' || Array.isArray(images)) return 0;
+      return Object.values(images as Record<string, unknown>).filter((candidate) =>
+        candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate)
+        && (candidate as Record<string, unknown>).topicId === target[0],
+      ).length;
+    }).toBe(1);
+
+    const tablePastePrevented = await canvas(page).evaluate((element) => {
+      const transfer = new DataTransfer();
+      transfer.setData('text/html', [
+        '<table><thead><tr><th>负责人</th><th>状态</th></tr></thead>',
+        '<tbody><tr><td>小王</td><td>进行中</td></tr></tbody></table>',
+      ].join(''));
+      transfer.setData('text/plain', '负责人\t状态\n小王\t进行中');
+      const event = new ClipboardEvent('paste', {
+        bubbles: true,
+        cancelable: true,
+        clipboardData: transfer,
+      });
+      element.dispatchEvent(event);
+      return event.defaultPrevented;
+    });
+    expect(tablePastePrevented).toBe(true);
+    await expect.poll(async () => {
+      const document = await canonicalData(page);
+      const target = document ? canonicalTopicByTitle(document, '主主题 1') : undefined;
+      const notes = document ? firstCanonicalSheet(document)?.notes : undefined;
+      if (!target || notes === null || typeof notes !== 'object' || Array.isArray(notes)) return null;
+      const note = Object.values(notes as Record<string, unknown>).find((candidate) =>
+        candidate !== null && typeof candidate === 'object' && !Array.isArray(candidate)
+        && (candidate as Record<string, unknown>).topicId === target[0]);
+      if (note === null || typeof note !== 'object' || Array.isArray(note)) return null;
+      return (note as Record<string, unknown>).content;
+    }).toMatchObject({
+      blocks: [{
+        type: 'table',
+        rows: [
+          { cells: [{ type: 'tableHeader', text: '负责人' }, { type: 'tableHeader', text: '状态' }] },
+          { cells: [{ type: 'tableCell', text: '小王' }, { type: 'tableCell', text: '进行中' }] },
+        ],
+      }],
+    });
+  });
+
   // Evidence: first-party Sticker catalog, managed Asset, four-way placement, history, and read-only.
   test('inserts and edits an original managed Sticker through the catalog', async ({ page }) => {
     test.setTimeout(90_000);
