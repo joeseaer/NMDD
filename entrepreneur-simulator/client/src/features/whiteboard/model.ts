@@ -5,6 +5,49 @@ export type WhiteboardScene = {
   elements: readonly any[];
   appState: Record<string, any>;
 };
+
+const NON_PERSISTED_APP_STATE_KEYS = [
+  // Excalidraw keeps active collaborators in a Map. JSON turns that Map into
+  // `{}`, which then crashes Excalidraw on the next load because it calls
+  // `collaborators.forEach(...)`.
+  'collaborators',
+  // These are editor-session state, not whiteboard content.
+  'selectedElementIds',
+  'selectedGroupIds',
+  'editingElement',
+  'editingGroupId',
+  'editingTextElement',
+  'editingLinearElement',
+  'selectedLinearElement',
+  'newElement',
+  'selectionElement',
+  'resizingElement',
+  'draggingElement',
+] as const;
+
+const isRecord = (value: unknown): value is Record<string, any> => (
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+);
+
+/**
+ * Removes editor-only values before a scene is persisted or passed back into
+ * Excalidraw. It also makes whiteboards written by older clients recoverable.
+ */
+export const sanitizeWhiteboardScene = (value: unknown): WhiteboardScene => {
+  const scene = isRecord(value) ? value : {};
+  const appState = isRecord(scene.appState) ? { ...scene.appState } : {};
+  for (const key of NON_PERSISTED_APP_STATE_KEYS) delete appState[key];
+
+  return {
+    type: 'excalidraw',
+    version: 2,
+    source: 'nmdd',
+    elements: Array.isArray(scene.elements)
+      ? scene.elements.filter(isRecord)
+      : [],
+    appState,
+  };
+};
 export type WhiteboardAsset = {
   file_id: string;
   mime_type: string;

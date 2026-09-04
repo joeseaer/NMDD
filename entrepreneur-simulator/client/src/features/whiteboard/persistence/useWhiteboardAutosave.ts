@@ -3,7 +3,12 @@ import type { AppState, BinaryFiles } from '@excalidraw/excalidraw/types';
 import { useDocumentNavigationGuard } from '../../document-editor/navigation/DocumentNavigationGuard';
 import { whiteboardApi, WhiteboardRevisionConflictError } from '../api/whiteboardApi';
 import { uploadMissingWhiteboardAssets } from '../assets/assetTransport';
-import type { Whiteboard, WhiteboardSaveStatus, WhiteboardScene } from '../model';
+import {
+  sanitizeWhiteboardScene,
+  type Whiteboard,
+  type WhiteboardSaveStatus,
+  type WhiteboardScene,
+} from '../model';
 import { clearWhiteboardDraft, writeWhiteboardDraft } from './localDraftStore';
 
 export type WhiteboardSnapshot = {
@@ -21,13 +26,12 @@ type UseWhiteboardAutosaveOptions = {
   onPreviewRequested?: (snapshot: WhiteboardSnapshot, revision: number) => Promise<void>;
 };
 
-const toScene = (elements: readonly any[], appState: AppState | Record<string, any>): WhiteboardScene => ({
-  type: 'excalidraw',
-  version: 2,
-  source: 'nmdd',
-  elements: elements.filter((element) => !element.isDeleted),
-  appState: { ...appState },
-});
+const toScene = (elements: readonly any[], appState: AppState | Record<string, any>): WhiteboardScene => (
+  sanitizeWhiteboardScene({
+    elements: elements.filter((element) => !element.isDeleted),
+    appState,
+  })
+);
 
 const snapshotSignature = (snapshot: WhiteboardSnapshot) => JSON.stringify({
   title: snapshot.title,
@@ -59,10 +63,14 @@ export const useWhiteboardAutosave = ({
   onConfirmed,
   onPreviewRequested,
 }: UseWhiteboardAutosaveOptions) => {
-  const baseSnapshot = initialSnapshot || {
+  const rawBaseSnapshot = initialSnapshot || {
     title: whiteboard.title,
     scene: whiteboard.scene_json,
     files: initialFiles,
+  };
+  const baseSnapshot: WhiteboardSnapshot = {
+    ...rawBaseSnapshot,
+    scene: sanitizeWhiteboardScene(rawBaseSnapshot.scene),
   };
   const latestRef = useRef<WhiteboardSnapshot>(baseSnapshot);
   const revisionRef = useRef(Number(whiteboard.content_revision));
@@ -73,7 +81,7 @@ export const useWhiteboardAutosave = ({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSignatureRef = useRef(snapshotSignature(initialDirty ? {
     title: whiteboard.title,
-    scene: whiteboard.scene_json,
+    scene: sanitizeWhiteboardScene(whiteboard.scene_json),
     files: initialFiles,
   } : baseSnapshot));
   const blockedRef = useRef(false);
@@ -167,8 +175,12 @@ export const useWhiteboardAutosave = ({
   }, [delay, processQueue]);
 
   const scheduleSnapshot = useCallback((snapshot: WhiteboardSnapshot, force = false) => {
-    latestRef.current = snapshot;
-    const signature = snapshotSignature(snapshot);
+    const sanitizedSnapshot: WhiteboardSnapshot = {
+      ...snapshot,
+      scene: sanitizeWhiteboardScene(snapshot.scene),
+    };
+    latestRef.current = sanitizedSnapshot;
+    const signature = snapshotSignature(sanitizedSnapshot);
     if (!force && signature === lastSignatureRef.current) return;
     lastSignatureRef.current = signature;
     dirtyGenerationRef.current += 1;
@@ -178,9 +190,9 @@ export const useWhiteboardAutosave = ({
       version: 1,
       whiteboardId: whiteboard.id,
       baseRevision: revisionRef.current,
-      title: snapshot.title,
-      scene: snapshot.scene,
-      files: snapshot.files,
+      title: sanitizedSnapshot.title,
+      scene: sanitizedSnapshot.scene,
+      files: sanitizedSnapshot.files,
       savedAt: new Date().toISOString(),
     });
     scheduleTimer();
@@ -218,7 +230,7 @@ export const useWhiteboardAutosave = ({
     if (timerRef.current) clearTimeout(timerRef.current);
     revisionRef.current = Number(next.content_revision);
     knownFileIdsRef.current = new Set((next.assets || []).map((asset) => asset.file_id));
-    latestRef.current = { title: next.title, scene: next.scene_json, files };
+    latestRef.current = { title: next.title, scene: sanitizeWhiteboardScene(next.scene_json), files };
     lastSignatureRef.current = snapshotSignature(latestRef.current);
     dirtyGenerationRef.current = 0;
     savedGenerationRef.current = 0;

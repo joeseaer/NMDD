@@ -12,6 +12,9 @@ const BOARD = {
 };
 
 test.beforeEach(async ({ page }) => {
+  let scene = { type: 'excalidraw', version: 2, source: 'nmdd', elements: [], appState: {} };
+  let revision = BOARD.content_revision;
+
   await page.route('**/api/auth/session', route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -32,7 +35,8 @@ test.beforeEach(async ({ page }) => {
         contentType: 'application/json',
         body: JSON.stringify({
           ...BOARD,
-          scene_json: { type: 'excalidraw', version: 2, source: 'nmdd', elements: [], appState: {} },
+          content_revision: revision,
+          scene_json: scene,
           preview_object_key: null,
           deleted_at: null,
           assets: [],
@@ -41,10 +45,12 @@ test.beforeEach(async ({ page }) => {
     }
     if (request.method() === 'PATCH' && pathname === `/api/whiteboards/${BOARD.id}`) {
       const body = request.postDataJSON();
+      if (body.scene) scene = body.scene;
+      revision += 1;
       return route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ...BOARD, title: body.title, content_revision: 4 }),
+        body: JSON.stringify({ ...BOARD, title: body.title || BOARD.title, content_revision: revision }),
       });
     }
     if (request.method() === 'PUT' && pathname === `/api/whiteboards/${BOARD.id}/preview`) {
@@ -52,6 +58,32 @@ test.beforeEach(async ({ page }) => {
     }
     return route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ error: 'unmocked' }) });
   });
+});
+
+test('persists text and reopens a scene without serialized runtime collaborator state', async ({ page }) => {
+  const saveRequest = page.waitForRequest(request => (
+    request.method() === 'PATCH'
+    && new URL(request.url()).pathname === `/api/whiteboards/${BOARD.id}`
+  ));
+
+  await page.goto(`/whiteboards/${BOARD.id}`);
+  await expect(page.getByTestId('whiteboard-editor')).toBeVisible({ timeout: 30_000 });
+
+  await page.getByTitle(/文字/).click();
+  await page.locator('.excalidraw').click({ position: { x: 500, y: 300 } });
+  await page.locator('textarea.excalidraw-wysiwyg').fill('保存后仍可见');
+  await page.keyboard.press('Escape');
+
+  const request = await saveRequest;
+  const payload = request.postDataJSON();
+  expect(payload.scene.elements).toEqual(expect.arrayContaining([
+    expect.objectContaining({ type: 'text', text: '保存后仍可见' }),
+  ]));
+  expect(payload.scene.appState).not.toHaveProperty('collaborators');
+
+  await page.reload();
+  await expect(page.getByTestId('whiteboard-editor')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText('页面加载失败')).toHaveCount(0);
 });
 
 test('lists, filters, opens and autosaves a standalone whiteboard', async ({ page }) => {

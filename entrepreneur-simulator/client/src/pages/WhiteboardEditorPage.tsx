@@ -30,6 +30,7 @@ import '@excalidraw/excalidraw/index.css';
 import {
   WhiteboardReferencedError,
   hydrateWhiteboardAssets,
+  sanitizeWhiteboardScene,
   whiteboardApi,
 } from '../features/whiteboard';
 import type { Whiteboard } from '../features/whiteboard';
@@ -158,11 +159,11 @@ function WhiteboardEditorSession({
   const [actionError, setActionError] = useState(staleDraft ? '发现基于旧版本的本地草稿，已保留在浏览器中；当前加载服务器版本。' : '');
   const initialSnapshot = useMemo<WhiteboardSnapshot>(() => draft ? {
     title: draft.title,
-    scene: draft.scene,
+    scene: sanitizeWhiteboardScene(draft.scene),
     files: draft.files,
   } : {
     title: initialWhiteboard.title,
-    scene: initialWhiteboard.scene_json,
+    scene: sanitizeWhiteboardScene(initialWhiteboard.scene_json),
     files: initialFiles,
   }, [draft, initialFiles, initialWhiteboard]);
 
