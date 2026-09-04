@@ -2701,12 +2701,12 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     const deleteAction = menu.locator('[data-action="delete-element"]');
     await expect(deleteAction).toHaveAttribute('aria-disabled', 'false');
     await expect(deleteAction).toHaveText(/删除/);
-    await page.keyboard.press('Escape');
-
-    await rightClickPath(connector);
-    await expect(menu).toHaveAttribute('data-target-kind', 'summary');
-    await expect(deleteAction).toHaveAttribute('aria-disabled', 'false');
-    await deleteAction.click();
+    await page.mouse.click(1, 1);
+    await expect(menu).toHaveCount(0);
+    await expect(summaryOverlay).toHaveAttribute('data-selected', 'true');
+    const directDelete = page.getByTestId(`mindmap-summary-delete-${summaryId}`);
+    await expect(directDelete).toBeVisible();
+    await directDelete.click();
     await expect.poll(cascadeState).toEqual(deletedCascade);
     await expect(summaryOverlay).toHaveCount(0);
 

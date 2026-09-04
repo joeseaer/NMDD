@@ -66,6 +66,8 @@ export interface SemanticOverlaySvgProps {
   /** Styles are resolved from Theme → rules → named Style → local overrides. */
   readonly styles?: Readonly<Record<string, SemanticVisualStyle | ConnectorVisualStyle>>;
   readonly onSelect?: (selection: ElementRef) => void;
+  /** Selected Summaries expose an immediate destructive action in the canvas. */
+  readonly onDelete?: (selection: ElementRef) => void;
   readonly onContextMenu?: (
     selection: ElementRef,
     eventInfo: SemanticOverlayContextMenuEventInfo,
@@ -566,6 +568,7 @@ export const SemanticOverlaySvgContents = memo(({
   geometry,
   labels,
   onContextMenu,
+  onDelete,
   onBoundaryFrameResize,
   onBoundaryRangeDrag,
   onSummaryRangeDrag,
@@ -797,6 +800,63 @@ export const SemanticOverlaySvgContents = memo(({
           ?? (item.orientation === 'left' || item.orientation === 'right'
             ? 'vertical'
             : 'horizontal');
+        const connectorStart = item.resultConnector?.commands[0]?.kind === 'move'
+          ? item.resultConnector.commands[0].to
+          : undefined;
+        const actionWidth = 70 / Math.max(0.01, viewport.zoom);
+        const actionHeight = 22 / Math.max(0.01, viewport.zoom);
+        const actionCenter = connectorStart ? {
+          x: connectorStart.x + (item.orientation === 'left' ? -1 : 1) * (
+            actionWidth / 2 + 20 / Math.max(0.01, viewport.zoom)
+          ),
+          y: connectorStart.y + ((item.orientation === 'left' || item.orientation === 'right')
+            ? -(actionHeight / 2 + 12 / Math.max(0.01, viewport.zoom))
+            : 0),
+        } : undefined;
+        const deleteAction = selected && !readOnly && actionCenter && onDelete ? (
+          <g
+            aria-label="删除概要"
+            data-testid={`mindmap-summary-delete-${item.entityId}`}
+            role="button"
+            tabIndex={0}
+            style={{ cursor: 'pointer', pointerEvents: 'all' }}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'Delete' && event.key !== 'Backspace') return;
+              event.preventDefault();
+              event.stopPropagation();
+              onDelete(elementRefFor(item));
+            }}
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onDelete(elementRefFor(item));
+            }}
+          >
+            <rect
+              x={actionCenter.x - actionWidth / 2}
+              y={actionCenter.y - actionHeight / 2}
+              width={actionWidth}
+              height={actionHeight}
+              rx={actionHeight / 2}
+              fill="#FEF2F2"
+              stroke="#FCA5A5"
+              strokeWidth={1 / Math.max(0.01, viewport.zoom)}
+              vectorEffect="non-scaling-stroke"
+            />
+            <text
+              x={actionCenter.x}
+              y={actionCenter.y}
+              dominantBaseline="middle"
+              textAnchor="middle"
+              fill="#DC2626"
+              fontSize={11 / Math.max(0.01, viewport.zoom)}
+              fontWeight={600}
+              style={{ pointerEvents: 'none', userSelect: 'none' }}
+            >
+              删除概要
+            </text>
+          </g>
+        ) : null;
         const renderSummaryPath = (
           part: 'bracket' | 'connector',
           path: SemanticGeometryPath | undefined,
@@ -809,7 +869,7 @@ export const SemanticOverlaySvgContents = memo(({
               data-summary-hit-part={part}
               fill="none"
               stroke="transparent"
-              strokeWidth={14}
+              strokeWidth={28}
               vectorEffect="non-scaling-stroke"
               style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
               onPointerDown={(event) => stopAndSelect(event, item, onSelect)}
@@ -829,6 +889,12 @@ export const SemanticOverlaySvgContents = memo(({
               vectorEffect="non-scaling-stroke"
               style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
               onKeyDown={(event) => {
+                if ((event.key === 'Delete' || event.key === 'Backspace') && !readOnly) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onDelete?.(elementRefFor(item));
+                  return;
+                }
                 if (event.key !== 'Enter' && event.key !== ' ') return;
                 event.preventDefault();
                 event.stopPropagation();
@@ -851,6 +917,7 @@ export const SemanticOverlaySvgContents = memo(({
           >
             {renderSummaryPath('bracket', item.bracket)}
             {renderSummaryPath('connector', item.resultConnector, '4 3')}
+            {deleteAction}
             {showRangeHandles ? (
               <>
                 <SemanticRangeHandle

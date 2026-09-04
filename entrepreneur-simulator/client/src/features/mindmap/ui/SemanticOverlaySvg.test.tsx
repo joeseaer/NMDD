@@ -291,6 +291,27 @@ describe('SemanticOverlaySvg', () => {
     expect(onSelect).toHaveBeenCalledWith({ kind: 'callout', id: IDS.callout });
   });
 
+  it('makes selected Summaries easy to remove directly from the canvas', () => {
+    const onDelete = vi.fn();
+    const { container } = render(
+      <SemanticOverlaySvgContents
+        geometry={geometry}
+        viewport={{ x: 0, y: 0, zoom: 1 }}
+        currentSelection={{ kind: 'summary', id: IDS.summary }}
+        onDelete={onDelete}
+      />,
+    );
+
+    const hitTarget = container.querySelector('[data-testid="mindmap-semantic-overlay"]')!
+      .querySelector('[data-summary-hit-part="bracket"]');
+    expect(hitTarget).toHaveAttribute('stroke-width', '28');
+
+    const deleteButton = screen.getByTestId(`mindmap-summary-delete-${IDS.summary}`);
+    expect(deleteButton).toHaveAttribute('role', 'button');
+    fireEvent.pointerDown(deleteButton, { button: 0 });
+    expect(onDelete).toHaveBeenCalledWith({ kind: 'summary', id: IDS.summary });
+  });
+
   it('places Summary range handles on bracket endpoints and lands on real sibling centers', () => {
     const onSummaryRangeDrag = vi.fn();
     const bracket: SemanticGeometryPath = {

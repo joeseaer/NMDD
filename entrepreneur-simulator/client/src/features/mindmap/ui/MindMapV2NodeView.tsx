@@ -3803,6 +3803,9 @@ const MindMapV2Canvas = ({
             onBoundaryRangeDrag={adjustBoundaryRangeFromOverlay}
             onSummaryRangeDrag={adjustSummaryRangeFromOverlay}
             onSelect={selectSemanticOverlay}
+            onDelete={(selection) => {
+              if (isDeletableSemanticElementRef(selection)) deleteSemanticElement(selection);
+            }}
             onContextMenu={(selection, eventInfo) => {
               setSelection(selection);
               setEditingTopicId(null);
