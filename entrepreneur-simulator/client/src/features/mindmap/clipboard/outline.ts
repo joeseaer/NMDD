@@ -1,4 +1,4 @@
-import type { RichInline, RichList, RichText, TreeEdge } from '../domain/types';
+import type { RichInline, RichList, RichTable, RichText, TreeEdge } from '../domain/types';
 import type {
   MindMapClipboardEnvelopeV1,
   OutlineProjectionOptions,
@@ -17,12 +17,18 @@ function listText(list: RichList): string {
     .join(' ');
 }
 
+function tableText(table: RichTable): string {
+  return table.rows.flatMap((row) => row.cells.map((cell) => cell.text)).join(' ');
+}
+
 export function clipboardRichTextToPlainText(value: RichText): string {
   const text = value.blocks
     .map((block) =>
       block.type === 'paragraph'
         ? block.children.map(inlineText).join('')
-        : listText(block))
+        : block.type === 'table'
+          ? tableText(block)
+          : listText(block))
     .join(' ')
     .replace(/\s+/gu, ' ')
     .trim();

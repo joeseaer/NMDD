@@ -18,9 +18,9 @@ const parseOverride = (value: string | null | undefined): boolean | undefined =>
 };
 
 export const resolveMindMapV2Flag = ({
-  pathname = '',
+  pathname: _pathname = '',
   search = '',
-  isDevelopment = false,
+  isDevelopment: _isDevelopment = false,
   environmentValue,
 }: MindMapV2FlagContext): boolean => {
   const queryOverride = parseOverride(new URLSearchParams(search).get('mindmapV2'));
@@ -29,7 +29,10 @@ export const resolveMindMapV2Flag = ({
   const environmentOverride = parseOverride(environmentValue);
   if (environmentOverride !== undefined) return environmentOverride;
 
-  return pathname === '/editor-lab' || isDevelopment;
+  // V2 is the supported editor.  Keep the query/environment switches as an
+  // immediate, explicit rollback path while existing persisted V0 payloads
+  // are lazily migrated by the attribute bridge.
+  return true;
 };
 
 type ViteImportMeta = ImportMeta & {
@@ -50,4 +53,3 @@ export const isMindMapV2Enabled = (): boolean => {
     environmentValue: environment?.VITE_MINDMAP_V2,
   });
 };
-

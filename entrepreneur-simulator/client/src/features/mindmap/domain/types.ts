@@ -136,10 +136,26 @@ export interface RichList {
   items: RichListItem[];
 }
 
+/** A deliberately small, portable table for topic Notes and annotations. */
+export interface RichTableCell {
+  type: 'tableCell' | 'tableHeader';
+  text: string;
+}
+
+export interface RichTableRow {
+  type: 'tableRow';
+  cells: RichTableCell[];
+}
+
+export interface RichTable {
+  type: 'table';
+  rows: RichTableRow[];
+}
+
 export interface RichText {
   type: 'doc';
   version: 1;
-  blocks: Array<Paragraph | RichList>;
+  blocks: Array<Paragraph | RichList | RichTable>;
 }
 
 export type TopicRole = 'central' | 'regular' | 'floating-root' | 'summary-result';

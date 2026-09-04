@@ -214,7 +214,12 @@ const sourceLines = (richText: Readonly<RichText>): readonly SourceLine[] => {
   const result: SourceLine[] = [];
   for (const block of richText.blocks) {
     if (block.type === 'paragraph') result.push(...paragraphSourceLines(block));
-    else result.push(...listSourceLines(block, 0));
+    else if (block.type === 'table') {
+      block.rows.forEach((row) => result.push({
+        align: 'left',
+        runs: [{ text: row.cells.map((cell) => cell.text).join(' | ') }],
+      }));
+    } else result.push(...listSourceLines(block, 0));
   }
   return result.length > 0 ? result : [{ align: 'left', runs: [] }];
 };

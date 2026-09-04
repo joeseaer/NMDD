@@ -451,6 +451,7 @@ export const TopicEnrichmentPanel = ({
                 initialValue={note?.content ?? createRichText('')}
                 ariaLabel="编辑主题笔记"
                 submitShortcut="mod-enter"
+                allowTables
                 className="w-full"
                 onCommit={(content) => {
                   if (dispatch(planUpsertTopicNoteCommand({ document, sheetId, topicId, content }))) {
@@ -486,7 +487,7 @@ export const TopicEnrichmentPanel = ({
             ) : (
               <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center">
                 <NotebookPen size={20} className="mx-auto text-slate-300" aria-hidden="true" />
-                <p className="mt-2 text-xs text-slate-500">笔记独立于主题布局，支持富文本和嵌套列表。</p>
+                <p className="mt-2 text-xs text-slate-500">笔记独立于主题布局，支持富文本、嵌套列表和表格。</p>
                 {!readOnly ? (
                   <button
                     type="button"

@@ -122,6 +122,32 @@ describe('TopicRichText canonical conversion and display', () => {
     expect(container.querySelectorAll('br')).toHaveLength(1);
   });
 
+  it('round-trips and renders a portable table without flattening its cells', () => {
+    const table: RichText = {
+      type: 'doc',
+      version: 1,
+      blocks: [{
+        type: 'table',
+        rows: [
+          { type: 'tableRow', cells: [
+            { type: 'tableHeader', text: '负责人' },
+            { type: 'tableHeader', text: '状态' },
+          ] },
+          { type: 'tableRow', cells: [
+            { type: 'tableCell', text: '小王' },
+            { type: 'tableCell', text: '进行中' },
+          ] },
+        ],
+      }],
+    };
+
+    expect(editorJsonToRichText(richTextToEditorJson(table))).toEqual(table);
+    const { container } = render(<TopicRichText value={table} ariaLabel="表格笔记" />);
+    expect(screen.getByRole('document', { name: '表格笔记' })).toHaveTextContent('负责人');
+    expect(container.querySelectorAll('table tr')).toHaveLength(2);
+    expect(container.querySelector('th')).toHaveTextContent('负责人');
+  });
+
   it('ACC-SEM-015/016 sanitizes unknown pasted HTML, unsafe URLs, attributes, and CSS', () => {
     const sanitized = sanitizeTopicRichTextHtml(`
       <h1 onclick="alert(1)">标题</h1>
@@ -219,6 +245,23 @@ describe('TopicRichTextEditor interaction contract', () => {
       { type: 'paragraph', children: [{ type: 'text', text: '第一段' }] },
       { type: 'paragraph', children: [{ type: 'text', text: '第二段' }] },
     ]);
+  });
+
+  it('exposes table insertion only when editing a long-form Note', () => {
+    const { rerender } = render(
+      <TopicRichTextEditor initialValue={paragraph('')} onCommit={vi.fn()} onCancel={vi.fn()} />,
+    );
+    expect(screen.queryByRole('button', { name: '插入 3×3 表格' })).not.toBeInTheDocument();
+
+    rerender(
+      <TopicRichTextEditor
+        initialValue={paragraph('')}
+        allowTables
+        onCommit={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: '插入 3×3 表格' })).toBeInTheDocument();
   });
 
   it('cancels exactly once on Escape and never commits on the following blur', () => {

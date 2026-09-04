@@ -202,6 +202,30 @@ describe('schema validation', () => {
     });
   });
 
+  it('accepts portable table cells in a topic Note', () => {
+    const document = createValidDocument();
+    document.sheets[IDS.sheet].notes[IDS.todo] = {
+      id: IDS.todo,
+      topicId: IDS.root,
+      content: {
+        type: 'doc',
+        version: 1,
+        blocks: [{
+          type: 'table',
+          rows: [{
+            type: 'tableRow',
+            cells: [
+              { type: 'tableHeader', text: '项目' },
+              { type: 'tableCell', text: '完成' },
+            ],
+          }],
+        }],
+      },
+    };
+
+    expect(validateMindMapDocument(document)).toMatchObject({ valid: true, issues: [] });
+  });
+
   it('normalizes required and additional-property paths as JSON Pointers', () => {
     const missing = createValidDocument();
     delete missing.actors;

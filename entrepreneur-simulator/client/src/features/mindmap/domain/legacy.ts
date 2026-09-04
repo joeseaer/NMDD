@@ -885,6 +885,9 @@ const richTextToPlainText = (value: RichText): string => {
         .map((child) => child.type === 'text' ? child.text : '\n')
         .join('');
     }
+    if (block.type === 'table') {
+      return block.rows.map((row) => row.cells.map((cell) => cell.text).join('\t')).join('\n');
+    }
     return block.items
       .map((item) => item.children.map((child) => blockText(child)).join('\n'))
       .join('\n');

@@ -7,6 +7,7 @@ import type {
   MindMapSheet,
   Relationship,
   RichList,
+  RichTable,
   RichText,
   Size,
   SummaryId,
@@ -140,11 +141,15 @@ const paragraphText = (block: RichText['blocks'][number]): string => {
       .map((child) => child.type === 'hardBreak' ? '\n' : child.text)
       .join('');
   }
-  return listText(block);
+  return block.type === 'table' ? tableText(block) : listText(block);
 };
 
 const listText = (list: RichList): string => list.items
   .map((item) => item.children.map(paragraphText).join('\n'))
+  .join('\n');
+
+const tableText = (table: RichTable): string => table.rows
+  .map((row) => row.cells.map((cell) => cell.text).join('\t'))
   .join('\n');
 
 export const richTextToPlainText = (richText: RichText | undefined): string =>

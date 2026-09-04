@@ -119,6 +119,14 @@ describe('MindMapV2NodeView presentation contracts', () => {
     expect(root).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('keeps image and tree-table actions available from an embedded mind map', () => {
+    render(<MindMapV2NodeView {...createNodeViewProps('embedded-table-map', '0000000016')} />);
+
+    expect(screen.getByTestId('mindmap-insert-local-image')).toBeEnabled();
+    expect(screen.getByTestId('mindmap-toggle-tree-table')).toBeEnabled();
+    expect(screen.getByLabelText('转换为树形表格')).toBeInTheDocument();
+  });
+
   it('opens the fullscreen search workspace when Ctrl+F starts in the embedded preview', () => {
     render(<MindMapV2NodeView {...createNodeViewProps('embedded-search-map', '0000000015')} />);
     const canvas = screen.getByTestId('mindmap-v2-canvas');

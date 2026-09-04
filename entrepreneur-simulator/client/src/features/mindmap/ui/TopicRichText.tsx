@@ -2,6 +2,10 @@ import { Extension, type JSONContent } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import TextAlign from '@tiptap/extension-text-align';
+import { Table } from '@tiptap/extension-table';
+import { TableCell } from '@tiptap/extension-table-cell';
+import { TableHeader } from '@tiptap/extension-table-header';
+import { TableRow } from '@tiptap/extension-table-row';
 import {
   Color,
   FontFamily,
@@ -20,6 +24,7 @@ import {
   Palette,
   RemoveFormatting,
   Strikethrough,
+  Table2,
   Underline,
   type LucideIcon,
 } from 'lucide-react';
@@ -39,6 +44,7 @@ import type {
   RichInline,
   RichList,
   RichMark,
+  RichTable,
   RichText,
 } from '../domain/types';
 
@@ -106,6 +112,10 @@ const editorExtensions = [
   FontSize,
   TextTransform,
   TextAlign.configure({ types: ['paragraph'] }),
+  Table.configure({ resizable: true }),
+  TableRow,
+  TableHeader,
+  TableCell,
 ];
 
 type EditorMark = NonNullable<JSONContent['marks']>[number];
@@ -195,12 +205,30 @@ const listToTiptap = (list: RichList): JSONContent => ({
   })),
 });
 
+const tableToTiptap = (table: RichTable): JSONContent => ({
+  type: 'table',
+  content: table.rows.map((row) => ({
+    type: 'tableRow',
+    content: row.cells.map((cell) => ({
+      type: cell.type,
+      content: [{
+        type: 'paragraph',
+        ...(cell.text ? { content: [{ type: 'text', text: cell.text }] } : {}),
+      }],
+    })),
+  })),
+});
+
 /** Convert canonical RichText into the deliberately smaller editor schema. */
 export const richTextToEditorJson = (value: RichText): JSONContent => ({
   type: 'doc',
   content: value.blocks.length
     ? value.blocks.map((block) => (
-      block.type === 'paragraph' ? paragraphToTiptap(block) : listToTiptap(block)
+      block.type === 'paragraph'
+        ? paragraphToTiptap(block)
+        : block.type === 'table'
+          ? tableToTiptap(block)
+          : listToTiptap(block)
     ))
     : [{ type: 'paragraph' }],
 });
@@ -312,6 +340,29 @@ const listFromTiptap = (node: JSONContent): RichList | undefined => {
   };
 };
 
+const tiptapNodeText = (node: JSONContent): string => {
+  if (node.type === 'hardBreak') return '\n';
+  const ownText = node.type === 'text' && typeof node.text === 'string' ? node.text : '';
+  return ownText + (node.content ?? []).map(tiptapNodeText).join('');
+};
+
+const tableFromTiptap = (node: JSONContent): RichTable | undefined => {
+  if (node.type !== 'table') return undefined;
+  const rows = (node.content ?? [])
+    .filter((row) => row.type === 'tableRow')
+    .map((row) => ({
+      type: 'tableRow' as const,
+      cells: (row.content ?? [])
+        .filter((cell) => cell.type === 'tableCell' || cell.type === 'tableHeader')
+        .map((cell) => ({
+          type: cell.type as 'tableCell' | 'tableHeader',
+          text: (cell.content ?? []).map(tiptapNodeText).join('').slice(0, 1_000_000),
+        })),
+    }))
+    .filter((row) => row.cells.length > 0);
+  return rows.length ? { type: 'table', rows } : undefined;
+};
+
 /** Convert editor JSON back into complete canonical RichText, dropping unknown nodes/marks. */
 export const editorJsonToRichText = (json: JSONContent): RichText => {
   const blocks: RichText['blocks'] = [];
@@ -321,7 +372,12 @@ export const editorJsonToRichText = (json: JSONContent): RichText => {
       return;
     }
     const list = listFromTiptap(node);
-    if (list) blocks.push(list);
+    if (list) {
+      blocks.push(list);
+      return;
+    }
+    const table = tableFromTiptap(node);
+    if (table) blocks.push(table);
   });
   return {
     type: 'doc',
@@ -350,7 +406,7 @@ const supportedStyleDeclarations = (style: string): ReadonlyMap<string, string> 
 export const sanitizeTopicRichTextHtml = (html: string): string => {
   const purified = String(DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
-      'p', 'br', 'ul', 'ol', 'li', 'span', 'a',
+      'p', 'br', 'ul', 'ol', 'li', 'span', 'a', 'table', 'tbody', 'thead', 'tr', 'td', 'th',
       'strong', 'b', 'em', 'i', 'u', 's', 'strike', 'del', 'code',
     ],
     ALLOWED_ATTR: ['href', 'title', 'start', 'style'],
@@ -508,6 +564,23 @@ const renderList = (list: RichList, key: string): ReactNode => {
     : <ul key={key}>{children}</ul>;
 };
 
+const renderTable = (table: RichTable, key: string): ReactNode => (
+  <div key={key} className="my-1 overflow-x-auto">
+    <table className="min-w-full border-collapse text-left text-sm">
+      <tbody>
+        {table.rows.map((row, rowIndex) => (
+          <tr key={`${key}:r${rowIndex}`}>
+            {row.cells.map((cell, cellIndex) => {
+              const Cell = cell.type === 'tableHeader' ? 'th' : 'td';
+              return <Cell key={`${key}:r${rowIndex}:c${cellIndex}`} className="border border-slate-300 px-2 py-1 align-top font-normal first:font-medium">{cell.text}</Cell>;
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
+
 export interface TopicRichTextDisplayProps {
   readonly value: RichText;
   readonly ariaLabel?: string;
@@ -529,7 +602,9 @@ export const TopicRichTextDisplay = ({
     {value.blocks.map((block, index) => (
       block.type === 'paragraph'
         ? renderParagraph(block, `p${index}`)
-        : renderList(block, `l${index}`)
+        : block.type === 'table'
+          ? renderTable(block, `t${index}`)
+          : renderList(block, `l${index}`)
     ))}
   </div>
 );
@@ -570,6 +645,8 @@ export interface TopicRichTextEditorProps {
   readonly autoFocus?: boolean;
   /** Topic titles commit on Enter; long-form Notes commit on Ctrl/Cmd+Enter. */
   readonly submitShortcut?: 'enter' | 'mod-enter';
+  /** Tables are intended for long-form Notes, not compact topic titles. */
+  readonly allowTables?: boolean;
   onCommit(value: RichText): void;
   onCancel(): void;
 }
@@ -581,6 +658,7 @@ export const TopicRichTextEditor = ({
   className,
   autoFocus = true,
   submitShortcut = 'enter',
+  allowTables = false,
   onCommit,
   onCancel,
 }: TopicRichTextEditorProps) => {
@@ -610,7 +688,7 @@ export const TopicRichTextEditor = ({
     content: richTextToEditorJson(initialValue),
     editorProps: {
       attributes: {
-        class: 'min-h-8 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded border border-blue-400 bg-white px-2 py-1 text-sm text-slate-900 outline-none ring-2 ring-blue-100',
+        class: 'min-h-8 max-h-48 overflow-y-auto whitespace-pre-wrap break-words rounded border border-blue-400 bg-white px-2 py-1 text-sm text-slate-900 outline-none ring-2 ring-blue-100 [&_table]:my-2 [&_table]:min-w-full [&_table]:border-collapse [&_td]:min-w-20 [&_td]:border [&_td]:border-slate-300 [&_td]:px-2 [&_td]:py-1 [&_th]:min-w-20 [&_th]:border [&_th]:border-slate-300 [&_th]:bg-slate-50 [&_th]:px-2 [&_th]:py-1',
         role: 'textbox',
         'aria-label': ariaLabel,
         'aria-multiline': 'true',
@@ -715,6 +793,17 @@ export const TopicRichTextEditor = ({
           active={editor.isActive('bulletList')}
           onActivate={() => { editor.chain().focus().toggleBulletList().run(); }}
         />
+        {allowTables ? <>
+          <span className="mx-0.5 h-5 w-px bg-slate-200" aria-hidden="true" />
+          <FormatButton
+            label="插入 3×3 表格"
+            icon={Table2}
+            active={editor.isActive('table')}
+            onActivate={() => {
+              editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run();
+            }}
+          />
+        </> : null}
         <FormatButton
           label="编号列表"
           icon={ListOrdered}
@@ -810,6 +899,7 @@ export const TopicRichTextEditor = ({
 export interface TopicRichTextProps extends TopicRichTextDisplayProps {
   readonly editing?: boolean;
   readonly autoFocus?: boolean;
+  readonly allowTables?: boolean;
   onCommit?(value: RichText): void;
   onCancel?(): void;
 }
@@ -821,6 +911,7 @@ export const TopicRichText = ({
   ariaLabel,
   className,
   autoFocus,
+  allowTables,
   onCommit,
   onCancel,
 }: TopicRichTextProps) => {
@@ -833,6 +924,7 @@ export const TopicRichText = ({
       ariaLabel={ariaLabel}
       className={className}
       autoFocus={autoFocus}
+      allowTables={allowTables}
       onCommit={onCommit ?? (() => undefined)}
       onCancel={onCancel ?? (() => undefined)}
     />

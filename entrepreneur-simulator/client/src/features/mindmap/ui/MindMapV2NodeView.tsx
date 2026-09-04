@@ -37,6 +37,7 @@ import {
   Search,
   Sparkles,
   Tags,
+  Table2,
   Trash2,
   Undo2,
 } from 'lucide-react';
@@ -3436,6 +3437,29 @@ const MindMapV2Canvas = ({
               data-local-image-busy={localImageBusy ? 'true' : 'false'}
             >
               <ImagePlus size={15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+                activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
+                  ? 'border-blue-300 text-blue-700'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => changeLayoutStructure(
+                activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
+                  ? 'core:mind-map'
+                  : 'core:tree-table',
+              )}
+              disabled={readOnly || !activeSheet}
+              title={activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
+                ? '切换为思维导图'
+                : '转换为树形表格'}
+              aria-label={activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
+                ? '切换为思维导图'
+                : '转换为树形表格'}
+              data-testid="mindmap-toggle-tree-table"
+            >
+              <Table2 size={15} aria-hidden="true" />
             </button>
             <button
               type="button"

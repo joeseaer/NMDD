@@ -2651,7 +2651,7 @@ const codeMarkedRichText = (richText: Readonly<RichText>): string => {
             parts.push(inline.text);
           }
         }
-      } else {
+      } else if (block.type !== 'table') {
         for (const item of block.items) visit(item.children);
       }
     }

@@ -2,6 +2,7 @@ import type {
   Paragraph,
   RichList,
   RichListItem,
+  RichTable,
   RichText,
 } from '../domain/types';
 
@@ -19,10 +20,16 @@ const listToPlainText = (list: RichList): string => list.items
   .map(listItemToPlainText)
   .join('\n');
 
+const tableToPlainText = (table: RichTable): string => table.rows
+  .map((row) => row.cells.map((cell) => cell.text).join('\t'))
+  .join('\n');
+
 export const mindMapRichTextToPlainText = (richText: RichText | undefined): string => (
   richText?.blocks
     .map((block) => block.type === 'paragraph'
       ? paragraphToPlainText(block)
-      : listToPlainText(block))
+      : block.type === 'table'
+        ? tableToPlainText(block)
+        : listToPlainText(block))
     .join('\n') ?? ''
 );
