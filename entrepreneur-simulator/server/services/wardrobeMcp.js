@@ -96,8 +96,28 @@ function createWardrobeMcp({
       inputSchema,
       run,
       annotations,
+      securitySchemes: [
+        {
+          type: "oauth2",
+          scopes:
+            name === "inspiration_match_wardrobe"
+              ? [scope, "wardrobe:read"]
+              : [scope],
+        },
+      ],
       validate: ajv.compile(inputSchema),
-      ...(meta ? { _meta: meta } : {}),
+      _meta: {
+        ...meta,
+        securitySchemes: [
+          {
+            type: "oauth2",
+            scopes:
+              name === "inspiration_match_wardrobe"
+                ? [scope, "wardrobe:read"]
+                : [scope],
+          },
+        ],
+      },
     });
   const actor = auth.clientId;
   add(
@@ -360,6 +380,15 @@ function createWardrobeMcp({
       const known = error instanceof WardrobeError;
       return {
         isError: true,
+        ...(known && error.statusCode === 403 && tool
+          ? {
+              _meta: {
+                "mcp/www_authenticate": [
+                  `Bearer error="insufficient_scope", error_description="Reconnect NMDD with the required permissions", scope="${tool.securitySchemes[0].scopes.join(" ")}"`,
+                ],
+              },
+            }
+          : {}),
         content: [
           {
             type: "text",

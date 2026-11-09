@@ -420,6 +420,18 @@ test("inspirations: production SQL + OAuth/PKCE + official MCP client + website 
         }),
       );
       t.after(() => mcp.close());
+      const availableTools = (await mcp.listTools()).tools;
+      assert.ok(
+        availableTools.every(
+          (tool) => tool._meta.securitySchemes[0].type === "oauth2",
+        ),
+      );
+      assert.deepEqual(
+        availableTools.find(
+          (tool) => tool.name === "inspiration_match_wardrobe",
+        )._meta.securitySchemes[0].scopes,
+        ["inspiration:read", "wardrobe:read"],
+      );
       const listed = await call("wardrobe_list_items", { page_size: 100 });
       assert.equal(listed.total, 10);
       const result = await mcp.callTool({
