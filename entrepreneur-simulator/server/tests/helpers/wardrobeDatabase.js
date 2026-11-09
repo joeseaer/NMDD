@@ -1,7 +1,10 @@
 const { PGlite } = require('@electric-sql/pglite');
 const fs = require('node:fs');
 const path = require('node:path');
-const migration = fs.readFileSync(path.resolve(__dirname, '../../../../supabase/migrations/20261109_add_wardrobe.sql'), 'utf8');
+const migrationsDirectory = path.resolve(__dirname, '../../../../supabase/migrations');
+const wardrobeMigrationFiles = ['20261109_add_wardrobe.sql', ...fs.readdirSync(migrationsDirectory)
+  .filter(name => name.endsWith('_index_wardrobe_outfit_item_id.sql')).sort()];
+const migration = wardrobeMigrationFiles.map(name => fs.readFileSync(path.join(migrationsDirectory, name), 'utf8')).join('\n');
 
 // Executes production SQL in an embedded PostgreSQL engine; only PostgREST transport
 // and binary Storage are substituted. No production credentials or network calls.

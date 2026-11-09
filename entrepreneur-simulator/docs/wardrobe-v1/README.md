@@ -1,6 +1,6 @@
 # NMDD 数字衣橱 V1
 
-交付分支：`main`（按用户要求直接提交）。开发起点：`main` / `651e63b749c9b4b7ffec9fd143f719c0396107e3`；已完成的实现及测试整合为一个衣橱 V1 提交。
+交付分支：`main`（按用户要求直接提交）。开发起点：`main` / `651e63b749c9b4b7ffec9fd143f719c0396107e3`；初始实现为衣橱 V1 提交 `37fbdfe`。后续 Supabase 迁移结果见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 沿用 React 18 / TypeScript / Tailwind、Fastify 5、现有 cookie 会话、Supabase、Railway 与 Vercel。原始任务书在 [SPEC.md](SPEC.md)，逐项验证与文件清单在 [ACCEPTANCE.md](ACCEPTANCE.md)。没有调用站内 LLM，也没有修改 v1 交换字段名、枚举、版本或目录结构。
 
@@ -35,10 +35,10 @@ node entrepreneur-simulator/server/scripts/split-wardrobe-export.cjs ./nmdd-ward
 
 ## 部署顺序
 
-本次交付直接提交到 GitHub `main`，可能触发现有 Railway / Vercel 自动部署。未连接生产数据执行数据库迁移；推送代码不等于已完成下面的数据库配置与线上验收。
+2026-11-09 已通过用户授权的 Supabase 连接，在 `NMDD_test`（`vhbyauefgjhlfjbikdek`）执行衣橱迁移及关联索引补充，并完成真实数据库权限、Storage 配置和 REST/RPC 验证。原有 16 张业务表及其 RLS 状态保持不变。迁移版本和证据边界见 [DEPLOYMENT.md](DEPLOYMENT.md)。Railway / Vercel 部署状态及网站端到端线上验收仍需核查。
 
 1. **先在测试 Supabase 项目演练**，备份现有项目，确认已有版本正常。
-2. **正式迁移目标**：现有 Railway `nmdd` API 服务环境变量 `SUPABASE_URL` 对应的同一 Supabase 项目，使用其 SQL Editor 执行 `supabase/migrations/20261109_add_wardrobe.sql`。本机配置的项目 ref 为 `vhbyauefgjhlfjbikdek`；这仅是本机证据，执行前必须与 Railway 当前 `SUPABASE_URL` 核对，不推断二者已同步。`supabase/config.toml` 的 `project_id="NMDD"` 是本地项目名。
+2. **迁移目标**：现有 Railway `nmdd` API 服务环境变量 `SUPABASE_URL` 对应的同一 Supabase 项目。`NMDD_test`（`vhbyauefgjhlfjbikdek`）已完成迁移；对其他项目部署时，依次执行 `supabase/migrations/20261109_add_wardrobe.sql` 和 `supabase/migrations/20261109064520_index_wardrobe_outfit_item_id.sql`。执行前与 Railway 当前 `SUPABASE_URL` 核对；本次连接证明该项目状态，不推断 Railway 环境变量同步。`supabase/config.toml` 的 `project_id="NMDD"` 是本地项目名。
 3. migration 是事务化、增量、可重跑的；只增加本模块对象，并确保新 bucket 为私有。下面 SQL 可检查状态。若通过 Supabase CLI 管理迁移，先核对历史；仓库部分旧迁移使用描述性文件名，不能未经检查对现有生产项目直接全量 `db push`。
 4. **Railway 必须重新部署**包含本次 `main` 衣橱提交的版本（若已启用自动部署，检查对应部署结果），目录仍为 `entrepreneur-simulator/server`，安装 `npm ci --omit=dev`，启动 `npm start`。新增运行依赖 `yauzl` / `yazl`；PGlite 只是开发测试依赖。继续使用已有 `SUPABASE_URL`、`SUPABASE_SERVICE_KEY`、`DEFAULT_USER_ID` 和 `AUTH_*` 配置，不在前端或仓库写入密钥。不需要新环境变量。
 5. **Vercel 必须部署同一 `main` 提交的前端**（若已启用自动部署，检查对应部署结果），目录仍为 `entrepreneur-simulator/client`，构建 `npm ci`、`npm run build`，输出 `dist`。现有 `/api` rewrite 仍指向 `https://nmdd.up.railway.app/api/:path*`，无需新建站点，也不需要另建分支或等待 PR 合并。若另外使用 Preview 做隔离验收，其 API 目标必须指向隔离的 Railway 测试服务/测试 Supabase，避免误写现有数据。

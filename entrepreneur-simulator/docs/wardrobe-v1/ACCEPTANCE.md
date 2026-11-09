@@ -2,6 +2,8 @@
 
 日期：2026-11-09（Asia/Shanghai）。交付分支：`main`（按用户要求直接提交）。运行环境：Windows、Node 20.20.2。以下测试针对整合前已完成的同一份实现代码；本次整合仅同步了交付和部署文档。
 
+后续数据库上线记录：同日已通过 Supabase 插件执行迁移、补齐搭配单品外键索引并验证真实 REST/RPC；详见 [DEPLOYMENT.md](DEPLOYMENT.md)。下文原始开发测试记录保留其执行时的证据范围，后续验证不等同于完成网站线上端到端验收。
+
 ## 实际运行结果
 
 | 命令 | 结果 | 范围 |
@@ -30,13 +32,14 @@
 | 8 回归 | 前端全量测试覆盖既有编辑器/文档/白板/日程/关系/思维导图等；服务端全量测试通过；原有路由与上传全局设置保持原值 |
 | 9 增量迁移 | 在 PostgreSQL 内实际执行两次，无错误；三张表启用 RLS，anon 表和 RPC 权限被拒绝，bucket 私有 |
 
-这些证据来自隔离环境。真实 Supabase Storage SDK 接口由测试 double 代替；不声称已经验证生产 Supabase、Railway/Vercel 反向代理、真实跨电脑、生产账号或线上所有页面。正式上线仍需按 README 在对应项目迁移并进行部署域名冒烟测试。本次按用户要求将改动直接提交到 GitHub `main`；未执行生产 migration 或修改生产数据，代码推送后的自动部署结果需要在部署平台核查。
+上表证据来自初始隔离环境，Storage 使用测试 double。后续已完成的真实 Supabase 迁移、权限及 REST/RPC 核查另见 DEPLOYMENT.md；真实照片上传下载、Railway/Vercel 反向代理、跨电脑及线上所有页面未由这些测试证明。代码推送后的自动部署结果和网站冒烟测试仍需要核查。
 
 ## 修改文件清单
 
 后端与数据：
 
 - `supabase/migrations/20261109_add_wardrobe.sql`：三表、索引、RLS/权限、私有 bucket、事务导入/编辑/搭配 RPC。
+- `supabase/migrations/20261109064520_index_wardrobe_outfit_item_id.sql`：根据真实 Supabase advisor 补齐搭配单品外键索引，采用独立增量迁移。
 - `entrepreneur-simulator/server/index.js`：注册 `/api/wardrobe`。
 - `entrepreneur-simulator/server/routes/wardrobe.js`：认证 CRUD、导入/导出、图片、搭配及专用 multipart 限制。
 - `entrepreneur-simulator/server/services/wardrobeBundle.js`：有界 ZIP 解析、交换校验、图片头、CRC、SHA、生成工具。
@@ -67,6 +70,6 @@
 - `entrepreneur-simulator/client/e2e/wardrobe.spec.ts`、`wardrobe.vite.config.ts`：真实浏览器全流程及专用 Vite API 代理。
 - `entrepreneur-simulator/client/playwright.wardrobe.config.ts`：桌面/手机项目与专用测试端口。
 
-文档：`entrepreneur-simulator/docs/wardrobe-v1/{README.md,ACCEPTANCE.md,SPEC.md}`。
+文档：`entrepreneur-simulator/docs/wardrobe-v1/{README.md,ACCEPTANCE.md,SPEC.md,DEPLOYMENT.md}`。
 
 用户原有未跟踪文件 `whiteboard-reload-diagnosis.png` 和 `yichu/` 保留原状；不作为代码变更提交。测试日志、生成构建和浏览器截图保留在本地忽略目录，不提交私人数据或凭据。
