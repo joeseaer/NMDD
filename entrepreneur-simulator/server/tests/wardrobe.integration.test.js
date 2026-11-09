@@ -36,6 +36,21 @@ test('wardrobe production SQL, routes, storage and exchange round-trip', async t
     for (const [method,url] of [['GET','items'],['POST','import'],['GET','export'],['GET','outfits'],['POST','items'],['GET','items/00000000-0000-4000-8000-000000000001/image']]) assert.equal((await app.inject({ method,url:`/api/wardrobe/${url}` })).statusCode,401);
   });
   await t.test('provided demo and 10-item fixture validate', async () => { assert.equal((await parseBundle(demo)).items.length,1); assert.equal((await parseBundle(fixture)).items.length,10); });
+  await t.test('ZIP metadata rejects links, duplicate filenames, traversal and lying sizes', async () => {
+    const patchCentral = (input, change) => { const bytes=Buffer.from(input); for(let offset=0;offset<bytes.length-46;offset++) if(bytes.readUInt32LE(offset)===0x02014b50) change(bytes,offset); return bytes; };
+    const linked=patchCentral(fixture,(bytes,offset)=>bytes.writeUInt32LE(0xa1ff0000,offset+38));
+    await assert.rejects(parseBundle(linked),/链接/);
+    const original=Buffer.from('images/mock_002.png'), replacement=Buffer.from('images/mock_001.png');
+    const duplicate=Buffer.from(fixture); for(let pos=duplicate.indexOf(original);pos>=0;pos=duplicate.indexOf(original,pos+original.length)) replacement.copy(duplicate,pos);
+    await assert.rejects(parseBundle(duplicate),/重复文件名/);
+    const traversal=patchCentral(fixture,(bytes,offset)=>{ const size=bytes.readUInt16LE(offset+28); if(size===19) Buffer.from('../bad/mock_001.png').copy(bytes,offset+46); });
+    await assert.rejects(parseBundle(traversal));
+    const huge=patchCentral(fixture,(bytes,offset)=>bytes.writeUInt32LE(0x7fffffff,offset+24)); await assert.rejects(parseBundle(huge),/超限/);
+    const lying=patchCentral(fixture,(bytes,offset)=>bytes.writeUInt32LE(1,offset+24)); await assert.rejects(parseBundle(lying));
+    const files=await readZip(fixture), image=files.get('images/mock_001.png'), stored=await zipFiles(files,{compress:false});
+    const offset=stored.indexOf(image); assert.ok(offset>=0); stored[offset+40]^=1; await assert.rejects(parseBundle(stored),/CRC/);
+    const mismatch=await mutateZip(({files,items})=>{ const item=items[0]; item.image_path=item.image_path.replace('.png','.jpg'); files.set(item.image_path,files.get('images/mock_001.png')); }); await assert.rejects(parseBundle(mismatch),/校验失败/);
+  });
   await t.test('10 items import; retry skips; image bytes are private and persistence survives service recreation', async () => {
     const response = await app.inject({ method:'POST',url:'/api/wardrobe/import?user_id=attacker',...multipartBody(fixture) });
     assert.equal(response.statusCode,200,response.body); assert.equal(response.json().created,10);
@@ -103,4 +118,15 @@ test('wardrobe production SQL, routes, storage and exchange round-trip', async t
     const parsed=await parseBundle(exported.rawPayload), fresh=await createWardrobeDatabase();
     try { const target=createWardrobeService(fresh.client); const report=await target.importBundle(exported.rawPayload); assert.equal(report.created,10); const restored=(await target.listItems()).items; for(const item of parsed.items) { const row=restored.find(i=>i.external_id===item.external_id); for(const key of ['name','notes','primary_color','status','needs_review']) assert.equal(row[key],item[key]); assert.deepEqual((await target.getImage(row.id)).bytes,item.bytes); } } finally {await fresh.pg.close();}
   });
+});
+
+test('wardrobe import raises only its own multipart file limit to 60MB', async t => {
+  const app=Fastify(); await app.register(multipart,{limits:{fileSize:15*1024*1024}});
+  let accepted=0; await app.register(routes,{prefix:'/api/wardrobe',service:{importBundle:async bytes=>{accepted=bytes.length;return {created:0,skipped:0,updated:0,failed:0,errors:[]};}}});
+  app.post('/other-upload',async request=>{await (await request.file()).toBuffer();return {ok:true};});
+  await app.ready();t.after(()=>app.close());
+  const large=Buffer.alloc(16*1024*1024,1);
+  const response=await app.inject({method:'POST',url:'/api/wardrobe/import',...multipartBody(large)});assert.equal(response.statusCode,200);assert.equal(accepted,large.length);
+  assert.equal((await app.inject({method:'POST',url:'/other-upload',...multipartBody(large)})).statusCode,413);
+  assert.equal((await app.inject({method:'POST',url:'/api/wardrobe/import',...multipartBody(Buffer.alloc(LIMITS.zip+1))})).statusCode,413);
 });

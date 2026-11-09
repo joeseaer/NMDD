@@ -15,6 +15,10 @@ const ENUMS = {
 };
 const TEXT = ['external_id', 'name', 'subcategory', 'primary_color', 'brand', 'size', 'material', 'notes'];
 const FIELDS = [...TEXT, 'category', 'color_family', 'fit', 'pattern', 'seasons', 'style_tags', 'occasions', 'formality', 'status', 'needs_review'];
+const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, index) => {
+  let value = index; for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ ((value & 1) ? 0xedb88320 : 0); return value >>> 0;
+});
+function crc32(bytes) { let value = 0xffffffff; for (const byte of bytes) value = (value >>> 8) ^ CRC_TABLE[(value ^ byte) & 255]; return (value ^ 0xffffffff) >>> 0; }
 class WardrobeError extends Error {
   constructor(message, statusCode = 400, details = []) { super(message); this.statusCode = statusCode; this.details = details; }
 }
@@ -97,7 +101,12 @@ async function readZip(buffer) {
           const chunks = []; let size = 0;
           stream.on('data', chunk => { size += chunk.length; if (size > max || size > entry.uncompressedSize) { stream.destroy(); fail(new WardrobeError('ZIP 实际解压大小超限')); } else chunks.push(chunk); });
           stream.on('error', fail);
-          stream.on('end', () => { if (!ended) { files.set(name, Buffer.concat(chunks)); zip.readEntry(); } });
+          stream.on('end', () => {
+            if (ended) return;
+            const bytes = Buffer.concat(chunks);
+            if (crc32(bytes) !== entry.crc32) return fail(new WardrobeError('ZIP 文件 CRC 校验失败'));
+            files.set(name, bytes); zip.readEntry();
+          });
         });
       } catch (error) { fail(error); }
     });
@@ -130,13 +139,13 @@ async function parseBundle(buffer) {
   for (const [name, bytes] of files) if (name.startsWith('images/') && !name.endsWith('/')) imageInfo(bytes, name);
   return { manifest, items: normalized, warnings };
 }
-function zipFiles(files) {
+function zipFiles(files, options) {
   return new Promise((resolve, reject) => {
     const zip = new yazl.ZipFile(); const chunks = [];
     zip.outputStream.on('data', chunk => chunks.push(chunk));
     zip.outputStream.on('error', reject); zip.on('error', reject);
     zip.outputStream.on('end', () => resolve(Buffer.concat(chunks)));
-    for (const [name, bytes] of files) zip.addBuffer(bytes, name);
+    for (const [name, bytes] of files) zip.addBuffer(bytes, name, options);
     zip.end();
   });
 }

@@ -59,8 +59,8 @@ function createWardrobeService(client) {
     const ownerPrefix = crypto.createHash('sha256').update(OWNER).digest('hex').slice(0, 24);
     // Attempt-unique suffix makes compensation safe across concurrent server instances.
     const key = `${ownerPrefix}/sha256/${info.sha256}/${crypto.randomUUID()}.${info.ext}`;
-    check(await bucket().upload(key, bytes, { contentType: info.mime, upsert: false }));
     staged.push(key);
+    check(await bucket().upload(key, bytes, { contentType: info.mime, upsert: false }));
     return { image_object_key: key, image_sha256: info.sha256 };
   }
   async function cleanup(staged) {
