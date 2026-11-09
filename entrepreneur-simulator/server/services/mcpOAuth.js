@@ -370,6 +370,12 @@ function createOAuthService(client, config, { owner = DEFAULT_USER_ID } = {}) {
         );
     },
   };
+  function consentPolicy(redirectUri) {
+    // Chromium also applies form-action to redirects. The signed authorization
+    // request may return only to the callback already validated by the SDK.
+    const callback = redirectUri ? ` ${new URL(redirectUri).origin}` : "";
+    return `default-src 'none'; style-src 'unsafe-inline'; form-action 'self'${callback}; frame-ancestors 'none'; base-uri 'none'`;
+  }
   function consentRoutes(router) {
     const express = require("express");
     router.use(
@@ -379,10 +385,11 @@ function createOAuthService(client, config, { owner = DEFAULT_USER_ID } = {}) {
     router.use("/oauth/consent", (_req, res, next) => {
       res.set({
         "Cache-Control": "no-store",
-        "Content-Security-Policy":
-          "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+        "Content-Security-Policy": consentPolicy(),
         "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "no-referrer",
+        // Native form POSTs under no-referrer send Origin: null. Keep the
+        // same-origin CSRF check working without leaking referrers to callbacks.
+        "Referrer-Policy": "same-origin",
       });
       next();
     });
@@ -391,6 +398,7 @@ function createOAuthService(client, config, { owner = DEFAULT_USER_ID } = {}) {
         const data = readConsent(req),
           info = await clientsStore.getClient(data.client_id);
         if (!info) throw new InvalidGrantError("Client removed");
+        res.setHeader("Content-Security-Policy", consentPolicy(data.redirect));
         const login = isAuthenticated(req)
           ? "<p>已登录当前 NMDD 账户。</p>"
           : '<p>使用现有 NMDD 账户登录并授权。</p><label>账号<input required name="username" autocomplete="username"></label><label>密码<input required type="password" name="password" autocomplete="current-password"></label>';
@@ -412,6 +420,7 @@ function createOAuthService(client, config, { owner = DEFAULT_USER_ID } = {}) {
         )
           return res.status(403).send("授权请求校验失败，请重新连接。");
         const redirect = new URL(data.redirect);
+        res.setHeader("Content-Security-Policy", consentPolicy(data.redirect));
         if (data.state !== undefined)
           redirect.searchParams.set("state", data.state);
         if (req.body.decision === "deny") {

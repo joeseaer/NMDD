@@ -92,6 +92,7 @@ test("inspirations: production SQL + OAuth/PKCE + official MCP client + website 
     assert.equal(response.status, 201, await response.clone().text());
     return response.json();
   }
+  let checkedConsentForgery = false;
   async function authorize(
     info,
     scope = "wardrobe:read wardrobe:write inspiration:read inspiration:write",
@@ -116,6 +117,17 @@ test("inspirations: production SQL + OAuth/PKCE + official MCP client + website 
     });
     const html = await consent.text();
     assert.equal(consent.status, 200, html);
+    assert.equal(consent.headers.get("referrer-policy"), "same-origin");
+    assert.ok(
+      consent.headers
+        .get("content-security-policy")
+        .includes(`form-action 'self' ${base};`),
+    );
+    assert.ok(
+      consent.headers
+        .get("content-security-policy")
+        .includes("frame-ancestors 'none'"),
+    );
     assert.match(html, /Isolated MCP client/);
     const nonce = /name="nonce" value="([^"]+)"/.exec(html)[1];
     const denied = await fetch(`${base}/oauth/consent`, {
@@ -128,6 +140,28 @@ test("inspirations: production SQL + OAuth/PKCE + official MCP client + website 
       redirect: "manual",
     });
     assert.equal(denied.status, 403);
+    if (!checkedConsentForgery) {
+      for (const invalid of [
+        { origin: "null", nonce },
+        { origin: base, nonce: "wrong-nonce" },
+        { origin: base },
+      ]) {
+        const rejected = await fetch(`${base}/oauth/consent`, {
+          method: "POST",
+          headers: {
+            cookie: `${cookie}; ${consentCookie}`,
+            Origin: invalid.origin,
+          },
+          body: new URLSearchParams({
+            decision: "allow",
+            ...(invalid.nonce ? { nonce: invalid.nonce } : {}),
+          }),
+          redirect: "manual",
+        });
+        assert.equal(rejected.status, 403);
+      }
+      checkedConsentForgery = true;
+    }
     const approved = await fetch(`${base}/oauth/consent`, {
       method: "POST",
       headers: { cookie: `${cookie}; ${consentCookie}`, Origin: base },

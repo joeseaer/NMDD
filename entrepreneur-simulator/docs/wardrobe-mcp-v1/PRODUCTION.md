@@ -82,6 +82,16 @@ GitHub 另有 Railway 项目 `outstanding-curiosity` 的失败状态，在本轮
 
 ## 扫描与回滚
 
+### 授权表单修复（2026-11-09）
+
+用户实际连接时遇到「授权请求校验失败」。线上 POST `/oauth/consent` 返回 403；补充原生浏览器测试后复现：原 `Referrer-Policy: no-referrer` 使表单提交携带 `Origin: null`，与后端严格来源检查冲突。此前 API 验证手工设置了 Origin，未覆盖该行为。
+
+授权页改用 `same-origin`，保留来源和一次性 nonce 校验，继续拒绝 null / 外站来源以及缺失或错误的 nonce。另按注册并经 SDK 验证的回调域名限定 `form-action`，允许浏览器完成跨站 OAuth 回调；其余 CSP 限制保留。
+
+回归用真实浏览器填写测试账户、点击同意、跳转至不同来源的回调站点并兑换 PKCE token，测试不注入 Origin 请求头，覆盖桌面与手机。原 10 个衣橱 / 灵感场景加上这两个授权场景共 12 个；后端 149 项回归通过。用户应关闭修复前已打开的授权页，从 ChatGPT 重新发起连接，取得新授权页面。
+
+参考：[Referrer-Policy 对 Origin 的影响](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Referrer-Policy#effect_on_the_origin_header)、[form-action 对重定向的限制](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Content-Security-Policy/form-action)。
+
 新模块没有缺失外键索引提示。RLS 开启而没有浏览器 policy 的 INFO 符合后端专用访问模式，表和函数权限均已核对。全库既有 RLS / 白板函数 search_path / 白板策略性能提示与本轮无关，未自动改变其访问模型。
 
 有关 advisor 提示的官方说明：[RLS 无 policy](https://supabase.com/docs/guides/database/database-linter?lint=0008_rls_enabled_no_policy)、[外键索引](https://supabase.com/docs/guides/database/database-linter?lint=0001_unindexed_foreign_keys)。

@@ -10,7 +10,7 @@
 | MCP / 图片 / 独立云端测试保护专项 | 13 / 13 通过，包含最后的衣物详情链接改动 |
 | client `npm test -- --maxWorkers=2 --reporter=dot` | 851 / 851 通过 |
 | client `npm run build` | TypeScript + Vite 生产构建通过 |
-| client `npm run test:wardrobe:e2e` | 10 / 10 通过，桌面与 Pixel 7 各五个场景 |
+| client `npm run test:wardrobe:e2e` | 12 / 12 通过，桌面与 Pixel 7 各六个场景，含原生授权表单 |
 | 文档示例 JSON | 使用生产共享校验器验证通过 |
 | server `npm ci --dry-run --ignore-scripts` / `npm ls zod` | 锁文件可解析、依赖树有效 |
 | `git diff --check` | 通过 |

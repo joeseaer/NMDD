@@ -59,6 +59,72 @@ async function authorize(request: APIRequestContext) {
   expect(response.status()).toBe(200);
   return (await response.json()).access_token as string;
 }
+test("OAuth consent submits through a real browser form and completes PKCE without injected Origin headers", async ({
+  page,
+}) => {
+  const redirectUri = "http://localhost:3101/callback";
+  const registered = await page.request.post(`${api}/register`, {
+    data: {
+      client_name: "Native browser OAuth test",
+      redirect_uris: [redirectUri],
+      token_endpoint_auth_method: "none",
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+    },
+  });
+  expect(registered.status()).toBe(201);
+  const client = await registered.json(),
+    verifier = "b".repeat(64);
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const authorization = new URL(`${api}/authorize`);
+  for (const [name, value] of Object.entries({
+    client_id: client.client_id,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    code_challenge_method: "S256",
+    code_challenge: challenge,
+    resource: `${api}/mcp`,
+    scope: "wardrobe:read inspiration:read inspiration:write",
+    state: "native-browser-state",
+  }))
+    authorization.searchParams.set(name, value as string);
+  await page.context().clearCookies();
+  await page.goto(authorization.toString());
+  await expect(
+    page.getByRole("heading", { name: "授权连接 NMDD" }),
+  ).toBeVisible();
+  await page.getByLabel("账号", { exact: true }).fill("wardrobe-e2e");
+  await page.getByLabel("密码", { exact: true }).fill("wardrobe-e2e-password");
+  const submitted = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url() === `${api}/oauth/consent`,
+  );
+  await page.getByRole("button", { name: "同意并连接", exact: true }).click();
+  const result = await submitted;
+  expect(await result.request().headerValue("origin")).toBe(api);
+  expect(result.status()).toBe(302);
+  await expect(
+    page.getByRole("heading", { name: "OAuth callback reached" }),
+  ).toBeVisible();
+  const callback = new URL(page.url());
+  expect(callback.searchParams.get("state")).toBe("native-browser-state");
+  const code = callback.searchParams.get("code");
+  expect(code).toBeTruthy();
+  const token = await page.request.post(`${api}/token`, {
+    form: {
+      grant_type: "authorization_code",
+      client_id: client.client_id,
+      code: code!,
+      code_verifier: verifier,
+      redirect_uri: redirectUri,
+      resource: `${api}/mcp`,
+    },
+  });
+  expect(token.status()).toBe(200);
+  expect((await token.json()).access_token).toBeTruthy();
+});
+
 test.beforeEach(async ({ page }) => {
   await page.request.post("/api/auth/login", {
     data: { username: "wardrobe-e2e", password: "wardrobe-e2e-password" },

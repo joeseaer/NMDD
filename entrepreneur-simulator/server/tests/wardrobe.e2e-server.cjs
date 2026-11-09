@@ -25,6 +25,7 @@ async function start() {
   const config=configuration({NMDD_MCP_PUBLIC_URL:'http://127.0.0.1:3101',NMDD_SITE_URL:'http://127.0.0.1:5178',NMDD_MCP_SECRET:'isolated-browser-test-secret-over-32-chars'});
   await app.register(require('../routes/mcp'),{oauth:createOAuthService(database.client,config),wardrobe,inspirations:createInspirationService(database.client,{wardrobe,siteUrl:config.site})});
   app.get('/__test/health',()=>({ready:true,storage:cloud?.mode||'isolated-postgresql'}));
+  app.get('/callback',(_request,reply)=>reply.type('text/html').send('<h1>OAuth callback reached</h1>'));
   app.post('/__test/reset',async (request,reply)=>{
     if (!require('../routes/auth').isAuthenticated(request)) return reply.code(401).send();
     await reset(); return {reset:true};
