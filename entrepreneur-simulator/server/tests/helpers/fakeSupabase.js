@@ -12,6 +12,7 @@ const clone = (value) => (
 const createFakeSupabase = ({
   rows = [],
   supportsReliability = true,
+  missingColumns = [],
   failVersionInsert = false,
   updateErrorOnce = null,
 } = {}) => {
@@ -19,6 +20,7 @@ const createFakeSupabase = ({
     rows: new Map(rows.map((row) => [row.id, clone(row)])),
     calls: [],
     supportsReliability,
+    missingColumns: new Set(missingColumns),
     failVersionInsert,
     updateErrorOnce: updateErrorOnce ? clone(updateErrorOnce) : null,
     updateErrorConsumed: false,
@@ -61,6 +63,19 @@ const createFakeSupabase = ({
       return this;
     }
 
+    contains(field, values) {
+      this.filters.push([field, values, 'contains']);
+      return this;
+    }
+
+    or(expression) {
+      if (expression !== 'tags.is.null,tags.not.cs.{domain:research}') {
+        throw new Error(`Unsupported test OR expression: ${expression}`);
+      }
+      this.filters.push(['tags', 'domain:research', 'null-or-not-contains']);
+      return this;
+    }
+
     order() {
       return this;
     }
@@ -92,7 +107,11 @@ const createFakeSupabase = ({
     }
 
     matches(row) {
-      return this.filters.every(([field, value]) => row?.[field] === value);
+      return this.filters.every(([field, value, operator]) => {
+        if (operator === 'contains') return value.every(item => (row?.[field] || []).includes(item));
+        if (operator === 'null-or-not-contains') return !(row?.[field] || []).includes(value);
+        return row?.[field] === value;
+      });
     }
 
     project(row) {
@@ -121,6 +140,9 @@ const createFakeSupabase = ({
         filters: clone(this.filters),
         selection: this.selection,
       });
+
+      const missingField = this.filters.find(([field]) => state.missingColumns.has(field))?.[0];
+      if (missingField) return { data: null, error: { code: '42703', message: `column sops.${missingField} does not exist` } };
 
       if (!state.supportsReliability && this.referencesReliabilityFields()) {
         return {

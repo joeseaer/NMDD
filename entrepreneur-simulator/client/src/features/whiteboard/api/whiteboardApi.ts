@@ -1,4 +1,5 @@
 import { CURRENT_USER_ID, parseApiErrorMessage } from '../../../services/api';
+import { apiFetch as fetch } from '../../../services/apiFetch';
 import type {
   Whiteboard,
   WhiteboardAsset,

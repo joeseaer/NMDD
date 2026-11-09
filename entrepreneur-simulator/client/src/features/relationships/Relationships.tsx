@@ -1,14 +1,24 @@
-import { useState } from 'react';
+import { lazy, Suspense, useRef, useState } from 'react';
 import { CalendarCheck2, Compass, Lightbulb, MessageSquarePlus, TrendingUp, Users } from 'lucide-react';
 import { Navigate, NavLink, Route, Routes, useLocation } from 'react-router-dom';
-import TodayPage from './TodayPage';
-import PeoplePage from './PeoplePage';
-import OpportunitiesPage from './OpportunitiesPage';
-import WeeklyReviewPage from './WeeklyReviewPage';
-import GrowthPage from './GrowthPage';
-import LegacyArchivePage from './LegacyArchivePage';
-import { cn } from './RelationshipUi';
+import { cn, LoadingState } from './RelationshipUi';
 import { QuickCaptureSheet } from './QuickCaptureSheet';
+import { useIntentPreload } from '../../routes/useIntentPreload';
+
+const loaders = {
+  today: () => import('./TodayPage'),
+  people: () => import('./PeoplePage'),
+  opportunities: () => import('./OpportunitiesPage'),
+  review: () => import('./WeeklyReviewPage'),
+  growth: () => import('./GrowthPage'),
+  legacy: () => import('./LegacyArchivePage'),
+};
+const TodayPage = lazy(loaders.today);
+const PeoplePage = lazy(loaders.people);
+const OpportunitiesPage = lazy(loaders.opportunities);
+const WeeklyReviewPage = lazy(loaders.review);
+const GrowthPage = lazy(loaders.growth);
+const LegacyArchivePage = lazy(loaders.legacy);
 
 const NAV_ITEMS = [
   { to: '/relationships/today', label: '罗盘', icon: Compass },
@@ -21,6 +31,11 @@ const NAV_ITEMS = [
 export default function Relationships() {
   const location = useLocation();
   const [captureOpen, setCaptureOpen] = useState(false);
+  const hoveredSection = useRef<keyof typeof loaders | null>(null);
+  const preloadEvents = useIntentPreload(() => {
+    const section = hoveredSection.current;
+    return section ? loaders[section]?.() : undefined;
+  });
   const splitWorkspace = location.pathname.startsWith('/relationships/people')
     || location.pathname.startsWith('/relationships/opportunities')
     || location.pathname.startsWith('/relationships/legacy');
@@ -34,6 +49,19 @@ export default function Relationships() {
             <NavLink
               key={item.to}
               to={item.to}
+              {...preloadEvents}
+              onMouseEnter={() => {
+                hoveredSection.current = item.to.split('/').pop() as keyof typeof loaders;
+                preloadEvents.onMouseEnter();
+              }}
+              onFocus={() => {
+                hoveredSection.current = item.to.split('/').pop() as keyof typeof loaders;
+                preloadEvents.onFocus();
+              }}
+              onTouchStart={() => {
+                hoveredSection.current = item.to.split('/').pop() as keyof typeof loaders;
+                preloadEvents.onTouchStart();
+              }}
               className={({ isActive }) => cn(
                 'inline-flex min-h-10 shrink-0 items-center gap-2 rounded-lg px-3 text-sm font-medium transition',
                 isActive || (item.to.endsWith('/people') && location.pathname.startsWith('/relationships/legacy'))
@@ -55,20 +83,22 @@ export default function Relationships() {
         </button>
       </nav>
       <div className={cn('min-h-0 flex-1', splitWorkspace ? 'overflow-hidden' : 'overflow-y-auto')}>
-        <Routes>
-          <Route index element={<Navigate to="today" replace />} />
-          <Route path="today" element={<TodayPage />} />
-          <Route path="people" element={<PeoplePage />} />
-          <Route path="people/:personId" element={<PeoplePage />} />
-          <Route path="people/:personId/:tab" element={<PeoplePage />} />
-          <Route path="opportunities" element={<OpportunitiesPage />} />
-          <Route path="opportunities/:opportunityId" element={<OpportunitiesPage />} />
-          <Route path="review" element={<WeeklyReviewPage />} />
-          <Route path="growth" element={<GrowthPage />} />
-          <Route path="legacy" element={<LegacyArchivePage />} />
-          <Route path="legacy/:legacyPersonId" element={<LegacyArchivePage />} />
-          <Route path="*" element={<Navigate to="today" replace />} />
-        </Routes>
+        <Suspense fallback={<LoadingState />}>
+          <Routes>
+            <Route index element={<Navigate to="today" replace />} />
+            <Route path="today" element={<TodayPage />} />
+            <Route path="people" element={<PeoplePage />} />
+            <Route path="people/:personId" element={<PeoplePage />} />
+            <Route path="people/:personId/:tab" element={<PeoplePage />} />
+            <Route path="opportunities" element={<OpportunitiesPage />} />
+            <Route path="opportunities/:opportunityId" element={<OpportunitiesPage />} />
+            <Route path="review" element={<WeeklyReviewPage />} />
+            <Route path="growth" element={<GrowthPage />} />
+            <Route path="legacy" element={<LegacyArchivePage />} />
+            <Route path="legacy/:legacyPersonId" element={<LegacyArchivePage />} />
+            <Route path="*" element={<Navigate to="today" replace />} />
+          </Routes>
+        </Suspense>
       </div>
       <QuickCaptureSheet open={captureOpen} onClose={() => setCaptureOpen(false)} />
     </div>

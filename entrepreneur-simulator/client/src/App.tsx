@@ -2,27 +2,30 @@ import React, { Suspense, lazy, useState, useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Brain, MessageSquare, User, Settings, LayoutDashboard, Users, FileText, Menu, X, Notebook, ChevronLeft, ChevronRight, Calendar, Microscope, Palette, Shirt } from 'lucide-react'
 
-// Pages
-import Dashboard from './pages/Dashboard'
-import Training from './pages/Training'
-import Review from './pages/Review'
-import NoteManager from './pages/NoteManager'
-import RealReview from './pages/RealReview'
-import ChatAssistant from './pages/ChatAssistant'
-import EvolutionTree from './pages/EvolutionTree'
-import SettingsPage from './pages/Settings'
-import Planner from './pages/Planner'
-import ResearchWorkspace from './pages/ResearchWorkspace'
-import EditorLab from './pages/EditorLab'
-import Relationships from './features/relationships/Relationships'
 import FloatingAssistant from './components/FloatingAssistant'
 import { CURRENT_USER_ID } from './config/currentUser'
 import { GuardedLink } from './features/document-editor/navigation/DocumentNavigationGuard'
 import { WhiteboardPickerHost } from './features/whiteboard/embed/WhiteboardPickerHost'
+import { pageLoaders, preloadPage } from './routes/pageLoaders'
+import { useIntentPreload } from './routes/useIntentPreload'
 
-const Whiteboards = lazy(() => import('./pages/Whiteboards'))
-const Wardrobe = lazy(() => import('./pages/Wardrobe'))
-const WhiteboardEditorPage = lazy(() => import('./pages/WhiteboardEditorPage'))
+// Load only the current page so editors, charts, and their dependencies do
+// not block the initial render or the login session check.
+const Dashboard = lazy(pageLoaders.dashboard)
+const Training = lazy(pageLoaders.training)
+const Review = lazy(pageLoaders.review)
+const NoteManager = lazy(pageLoaders.notes)
+const RealReview = lazy(pageLoaders['real-review'])
+const ChatAssistant = lazy(pageLoaders.assistant)
+const EvolutionTree = lazy(pageLoaders['evolution-tree'])
+const SettingsPage = lazy(pageLoaders.settings)
+const Planner = lazy(pageLoaders.planner)
+const ResearchWorkspace = lazy(pageLoaders.research)
+const EditorLab = lazy(pageLoaders['editor-lab'])
+const Relationships = lazy(pageLoaders.relationships)
+const Whiteboards = lazy(pageLoaders.whiteboards)
+const Wardrobe = lazy(pageLoaders.wardrobe)
+const WhiteboardEditorPage = lazy(pageLoaders.whiteboardEditor)
 
 function App() {
   const location = useLocation();
@@ -94,9 +97,11 @@ function App() {
   if (location.pathname === '/editor-lab') {
     return (
       <>
-        <Routes>
-          <Route path="/editor-lab" element={<EditorLab />} />
-        </Routes>
+        <Suspense fallback={<div className="flex h-screen items-center justify-center text-sm text-gray-500">正在加载…</div>}>
+          <Routes>
+            <Route path="/editor-lab" element={<EditorLab />} />
+          </Routes>
+        </Suspense>
         <WhiteboardPickerHost />
       </>
     );
@@ -238,8 +243,10 @@ function App() {
 }
 
 function SidebarLink({ to, icon, label, active = false, collapsed = false }: { to: string; icon: React.ReactNode; label: string; active?: boolean; collapsed?: boolean }) {
+  const preloadEvents = useIntentPreload(() => preloadPage(to));
   return (
     <GuardedLink
+      {...preloadEvents}
       to={to}
       title={collapsed ? label : undefined}
       className={`

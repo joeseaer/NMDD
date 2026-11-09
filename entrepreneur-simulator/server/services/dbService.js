@@ -990,6 +990,12 @@ const buildSopListSelect = (includeDocumentReliability) => `
   )
 `;
 
+// Remember missing columns briefly, rather than paying for the same failed
+// PostgREST probes on every page load. Reprobe after a minute for deployments
+// that add the newer columns while the server is running.
+const SOP_LIST_SCHEMA_RETRY_MS = 60_000;
+const sopListSchema = { metadataRetryAt: 0, reliabilityRetryAt: 0, domainRetryAt: 0 };
+
 const getSOPs = async (userId, filters = {}) => {
   if (!supabase) return [];
 
@@ -997,8 +1003,9 @@ const getSOPs = async (userId, filters = {}) => {
   // Note: This relies on foreign key relationships being detected by Supabase/PostgREST
   const domain = filters.domain && VALID_SOP_DOMAINS.has(String(filters.domain)) ? String(filters.domain) : null;
   const researchType = filters.researchType && VALID_RESEARCH_TYPES.has(String(filters.researchType)) ? String(filters.researchType) : null;
-  let metadataSupported = true;
-  let documentReliabilitySupported = true;
+  let metadataSupported = Date.now() >= sopListSchema.metadataRetryAt;
+  let documentReliabilitySupported = Date.now() >= sopListSchema.reliabilityRetryAt;
+  let domainColumnMissing = Date.now() < sopListSchema.domainRetryAt;
   let data = null;
   let error = null;
 
@@ -1009,15 +1016,27 @@ const getSOPs = async (userId, filters = {}) => {
       .eq('user_id', userId);
     if (metadataSupported && domain) query = query.eq('domain', domain);
     if (metadataSupported && researchType) query = query.eq('research_type', researchType);
+    if (!metadataSupported && domainColumnMissing) {
+      // Legacy records encode the workspace in system tags. Filter before
+      // downloading their full document bodies and joined history.
+      if (domain === 'research') query = query.contains('tags', ['domain:research']);
+      if (domain === 'life') query = query.or('tags.is.null,tags.not.cs.{domain:research}');
+    }
 
     ({ data, error } = await query.order('updated_at', { ascending: false }));
     if (!error) break;
     if (metadataSupported && isMissingSopMetadataColumn(error)) {
       metadataSupported = false;
+      sopListSchema.metadataRetryAt = Date.now() + SOP_LIST_SCHEMA_RETRY_MS;
+      if (errorMentionsColumn(error, 'domain')) {
+        domainColumnMissing = true;
+        sopListSchema.domainRetryAt = sopListSchema.metadataRetryAt;
+      }
       continue;
     }
     if (documentReliabilitySupported && isMissingDocumentReliabilityColumn(error)) {
       documentReliabilitySupported = false;
+      sopListSchema.reliabilityRetryAt = Date.now() + SOP_LIST_SCHEMA_RETRY_MS;
       continue;
     }
     break;
@@ -2311,6 +2330,9 @@ const getMindMapImage = async (objectKey) => {
 const __setSupabaseClientForTests = (client) => {
   supabase = client;
   managedImageStorageReady = false;
+  sopListSchema.metadataRetryAt = 0;
+  sopListSchema.reliabilityRetryAt = 0;
+  sopListSchema.domainRetryAt = 0;
 };
 
 module.exports = { 

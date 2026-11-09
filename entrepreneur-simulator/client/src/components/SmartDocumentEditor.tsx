@@ -2195,7 +2195,10 @@ export const SmartDocumentEditor = ({
     const initialContentRecoveryRef = React.useRef(false);
     const recoveryBlockedRef = React.useRef(initiallyRequiresRecovery);
     const mmSigRef = React.useRef<string>('');
-    const externalSigRef = React.useRef<string>(getContentSignature(contentJson, content));
+    const externalSigRef = React.useRef<string | null>(null);
+    if (externalSigRef.current === null) {
+        externalSigRef.current = getContentSignature(contentJson, content);
+    }
     const onChangeRef = React.useRef(onChange);
     const serializationTimerRef = React.useRef<number | null>(null);
     const pointerFrameRef = React.useRef<number | null>(null);
@@ -2303,6 +2306,9 @@ export const SmartDocumentEditor = ({
     }, []);
 
     const editor = useEditor({
+        // Suspense may pause the first render. Create the editor after mount
+        // so Tiptap cannot destroy an instance while that render is pending.
+        immediatelyRender: false,
         editable: mode === 'edit',
         extensions: createSmartDocumentExtensions({
             codeBlock: SmartCodeBlock,
@@ -2590,7 +2596,7 @@ export const SmartDocumentEditor = ({
             if (editor.isFocused) return;
 
             if (isValidDocJson(contentJson)) {
-                const currentSignature = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
+                const currentSignature = getContentSignature(editor.getJSON(), '');
                 if (currentSignature !== nextSignature) {
                     try {
                         editor.commands.setContent(contentJson, {
@@ -2610,7 +2616,7 @@ export const SmartDocumentEditor = ({
                         setContentRecoveryWarning(true);
                     }
                 }
-                externalSigRef.current = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
+                externalSigRef.current = getContentSignature(editor.getJSON(), '');
                 return;
             }
 
@@ -2625,7 +2631,7 @@ export const SmartDocumentEditor = ({
             const hasInvalidStructuredSource = contentJson !== null && contentJson !== undefined;
             recoveryBlockedRef.current = hasInvalidStructuredSource;
             setContentRecoveryWarning(hasInvalidStructuredSource);
-            externalSigRef.current = getContentSignature(editor.getJSON(), editorToMarkdown(editor));
+            externalSigRef.current = getContentSignature(editor.getJSON(), '');
         }, 0);
         return () => window.clearTimeout(timeoutId);
     }, [content, contentJson, editor]);

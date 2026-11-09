@@ -1,4 +1,5 @@
 import { CURRENT_USER_ID } from '../config/currentUser';
+import { apiFetch as fetch } from './apiFetch';
 import { truncateGraphemes } from '../features/document-editor/text/graphemes';
 import {
     mindMapImageAssetUrl,

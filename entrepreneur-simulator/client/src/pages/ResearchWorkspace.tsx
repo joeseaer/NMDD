@@ -280,6 +280,7 @@ export default function ResearchWorkspace() {
   const activeEditorFlushRef = React.useRef<(() => Promise<void>) | null>(null);
   const urlSyncTargetRef = React.useRef<string | undefined>(undefined);
   const documentSwitchRequestRef = React.useRef(0);
+  const peopleLoadSequence = React.useRef(0);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -347,13 +348,22 @@ export default function ResearchWorkspace() {
   useDocumentNavigationGuard(flushBeforeNavigation, Boolean(selectedItemId));
 
   const fetchData = async () => {
+    // Relation choices load in parallel, including on a manual retry, but
+    // never hold up documents that have already arrived.
+    const sequence = ++peopleLoadSequence.current;
+    void api.getAllPeople(CURRENT_USER_ID).then((rawPeople) => {
+      if (peopleLoadSequence.current !== sequence) return;
+      setPeople((Array.isArray(rawPeople) ? rawPeople : []).map((person: any) => ({
+        id: String(person?.id || ''),
+        name: String(person?.name || ''),
+        role: String(person?.identity || person?.role || ''),
+        identity: String(person?.identity || ''),
+      })).filter((person) => person.id && person.name));
+    }).catch((error) => console.error('Failed to load research relation choices', error));
     try {
       setLoading(true);
       setLoadError(null);
-      const [rawItems, rawPeople] = await Promise.all([
-        api.getSOPs(CURRENT_USER_ID, { domain: 'research' }),
-        api.getAllPeople(CURRENT_USER_ID),
-      ]);
+      const rawItems = await api.getSOPs(CURRENT_USER_ID, { domain: 'research' });
       const normalizedItems = (Array.isArray(rawItems) ? rawItems : [])
         .map(normalizeResearchItem)
         .filter((item) => item.id);
@@ -369,12 +379,6 @@ export default function ResearchWorkspace() {
         return restored;
       });
       setItems(restoredItems);
-      setPeople((Array.isArray(rawPeople) ? rawPeople : []).map((person: any) => ({
-        id: String(person?.id || ''),
-        name: String(person?.name || ''),
-        role: String(person?.identity || person?.role || ''),
-        identity: String(person?.identity || ''),
-      })).filter((person) => person.id && person.name));
     } catch (error) {
       console.error('Failed to load research workspace', error);
       setLoadError('科研记录加载失败。请检查本地服务或网络连接后重试。');
@@ -385,6 +389,7 @@ export default function ResearchWorkspace() {
 
   useEffect(() => {
     fetchData();
+    return () => { peopleLoadSequence.current += 1; };
   }, []);
 
   useEffect(() => {

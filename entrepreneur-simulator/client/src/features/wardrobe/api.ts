@@ -1,4 +1,5 @@
 import { parseApiErrorMessage } from '../../services/api';
+import { apiFetch as fetch } from '../../services/apiFetch';
 import type { BundleItem, ImportReport, ItemList, Outfit, OutfitInput, WardrobeItem } from './types';
 export class WardrobeApiError extends Error { constructor(message: string, public report?: ImportReport) { super(message); } }
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
