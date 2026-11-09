@@ -4,15 +4,17 @@ import { categories, colors, fits, patterns, seasons, occasions, type BundleItem
 export const inputClass = 'mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100';
 export const buttonClass = 'inline-flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm hover:bg-gray-50 disabled:opacity-50 disabled:cursor-wait';
 export const primaryClass = 'inline-flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm text-white hover:opacity-90 disabled:opacity-50 disabled:cursor-wait';
-export function Modal({ title, close, busy = false, children, wide = false }: { title: string; close: () => void; busy?: boolean; children: ReactNode; wide?: boolean }) {
+export function Modal({ title, close, busy = false, children, wide = false, layout = 'drawer' }: { title: string; close: () => void; busy?: boolean; children: ReactNode; wide?: boolean; layout?: 'drawer' | 'workspace' }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     ref.current?.focus();
     return () => previous?.focus();
   }, []);
-  return <div className="fixed inset-0 z-[70] flex justify-end bg-black/30" onMouseDown={event => { if (event.target === event.currentTarget && !busy) close(); }}>
-    <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={`h-full w-full ${wide ? 'max-w-4xl' : 'max-w-xl'} overflow-y-auto bg-white p-4 shadow-xl sm:p-6`} onKeyDown={event => {
+  return <div className={`fixed inset-0 z-[70] flex bg-black/30 ${layout === 'workspace' ? 'items-center justify-center sm:p-3 lg:p-5' : 'justify-end'}`} onMouseDown={event => { if (event.target === event.currentTarget && !busy) close(); }}>
+    <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={layout === 'workspace'
+      ? 'flex h-[100dvh] w-full min-w-0 max-w-[1600px] flex-col overflow-hidden bg-white shadow-xl sm:h-[calc(100dvh-1.5rem)] sm:rounded-2xl lg:h-[calc(100dvh-2.5rem)]'
+      : `h-full w-full ${wide ? 'max-w-4xl' : 'max-w-xl'} overflow-y-auto bg-white p-4 shadow-xl sm:p-6`} onKeyDown={event => {
       if (event.key === 'Escape' && !busy) close();
       if (event.key === 'Tab') {
         const elements = ref.current?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),a[href]');
@@ -22,7 +24,7 @@ export function Modal({ title, close, busy = false, children, wide = false }: { 
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
       }
     }}>
-      <div className="mb-5 flex items-center justify-between gap-3"><h2 className="text-xl font-semibold">{title}</h2><button disabled={busy} className={buttonClass} onClick={close} aria-label="关闭"><X size={18} /></button></div>
+      <div className={`flex items-center justify-between gap-3 ${layout === 'workspace' ? 'shrink-0 border-b px-4 py-3 sm:px-6' : 'mb-5'}`}><h2 className="text-xl font-semibold">{title}</h2><button disabled={busy} className={buttonClass} onClick={close} aria-label="关闭"><X size={18} /></button></div>
       {children}
     </div>
   </div>;
