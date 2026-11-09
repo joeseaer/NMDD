@@ -13,6 +13,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 const json = (method: string, data: unknown) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
 export const wardrobeApi = {
+  get: (id: string) => request<WardrobeItem>(`/items/${encodeURIComponent(id)}`),
   list: (filters: Record<string, string>) => request<ItemList>(`/items?${new URLSearchParams(filters)}`),
   patch: (id: string, data: Partial<BundleItem>) => request<WardrobeItem>(`/items/${id}`, json('PATCH', data)),
   remove: (id: string) => request(`/items/${id}`, { method: 'DELETE' }),

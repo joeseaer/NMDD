@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
-  testDir:'./e2e',testMatch:'wardrobe.spec.ts',fullyParallel:false,workers:1,
+  globalTimeout:240000,
+  testDir:'./e2e',testMatch:['wardrobe.spec.ts','inspirations.spec.ts'],fullyParallel:false,workers:1,
   reporter:[['list'],['html',{outputFolder:'playwright-report/wardrobe',open:'never'}]],
   use:{baseURL:'http://127.0.0.1:5178',trace:'retain-on-failure',screenshot:'only-on-failure'},
   webServer:[

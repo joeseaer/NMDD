@@ -27,6 +27,7 @@ module.exports = async function wardrobeRoutes(app, options) {
     return { file, data };
   }
   app.get('/items', request => service.listItems(request.query));
+  app.get('/items/:id', request => service.getItemDetails(request.params.id));
   app.post('/items', async (request, reply) => { const { file, data } = await upload(request, LIMITS.image, true); return reply.code(201).send(await service.createItem(data, file)); });
   app.patch('/items/:id', request => service.patchItem(request.params.id, request.body));
   app.delete('/items/:id', request => service.deleteItem(request.params.id));

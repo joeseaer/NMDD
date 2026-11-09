@@ -1,0 +1,47 @@
+{
+  "format": "nmdd-inspiration",
+  "schema_version": 1,
+  "inspiration": {
+    "title": "白蓝配色的日常灵感",
+    "source_image_id": null,
+    "source_url": null,
+    "overall_style": "简约日常",
+    "color_palette": ["白色", "蓝色"],
+    "occasions": ["daily"],
+    "styling_notes": "白蓝配色保持简洁，具体版型和衣物材质需要结合原图确认。",
+    "analysis_status": "ready",
+    "analysis_error": null,
+    "reference_items": [
+      {
+        "category": "tops",
+        "subcategory": null,
+        "primary_color": "白色",
+        "color_family": "white",
+        "pattern": "unknown",
+        "design_features": [],
+        "style_tags": ["简约"],
+        "bounding_box": null,
+        "visibility": "partial",
+        "matched_wardrobe_item_id": null,
+        "match_reason": null,
+        "match_score": null,
+        "needs_review": true
+      },
+      {
+        "category": "bottoms",
+        "subcategory": null,
+        "primary_color": "蓝色",
+        "color_family": "blue",
+        "pattern": "unknown",
+        "design_features": [],
+        "style_tags": ["日常"],
+        "bounding_box": null,
+        "visibility": "unclear",
+        "matched_wardrobe_item_id": null,
+        "match_reason": null,
+        "match_score": null,
+        "needs_review": true
+      }
+    ]
+  }
+}

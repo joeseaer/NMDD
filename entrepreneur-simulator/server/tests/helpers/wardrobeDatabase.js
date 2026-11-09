@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const migrationsDirectory = path.resolve(__dirname, '../../../../supabase/migrations');
 const wardrobeMigrationFiles = ['20261109_add_wardrobe.sql', ...fs.readdirSync(migrationsDirectory)
-  .filter(name => name.endsWith('_index_wardrobe_outfit_item_id.sql')).sort()];
+  .filter(name => name.endsWith('_index_wardrobe_outfit_item_id.sql') || name.endsWith('_wardrobe_inspirations_and_mcp.sql')).sort()];
 const migration = wardrobeMigrationFiles.map(name => fs.readFileSync(path.join(migrationsDirectory, name), 'utf8')).join('\n');
 
 // Executes production SQL in an embedded PostgreSQL engine; only PostgREST transport
@@ -14,7 +14,7 @@ async function createWardrobeDatabase() {
   await pg.exec(migration);
   const objects = new Map(); const state = { objects, uploads: 0, failUploadAt: 0, failRpc: false };
   class Query {
-    constructor(table) { if (!['wardrobe_items','wardrobe_outfits','wardrobe_outfit_items'].includes(table)) throw new Error('Unexpected table'); this.table = table; this.filters = []; this.values = []; this.operation = 'select'; this.orders = []; }
+    constructor(table) { if (!['wardrobe_items','wardrobe_outfits','wardrobe_outfit_items','nmdd_oauth_clients','nmdd_oauth_grants','nmdd_oauth_tokens','nmdd_write_requests','nmdd_tool_audit','wardrobe_inspiration_images','wardrobe_inspirations','wardrobe_inspiration_items'].includes(table)) throw new Error('Unexpected table'); this.table = table; this.filters = []; this.values = []; this.operation = 'select'; this.orders = []; }
     select(fields = '*') { this.fields = fields; return this; }
     eq(key,value) { this.values.push(value); this.filters.push(`"${key}"=$${this.values.length}`); return this; }
     is(key,value) { if (value !== null) throw new Error('Expected null'); this.filters.push(`"${key}" IS NULL`); return this; }
@@ -23,6 +23,7 @@ async function createWardrobeDatabase() {
     range(start,end) { this.start = start; this.take = end-start+1; return this; }
     limit(limit) { this.take = limit; return this; }
     insert(input) { this.operation = 'insert'; this.input = input; return this; }
+    update(input) { this.operation = 'update'; this.input = input; return this; }
     delete() { this.operation = 'delete'; return this; }
     single() { this.one = true; return this; }
     maybeSingle() { this.one = true; return this; }
@@ -33,6 +34,9 @@ async function createWardrobeDatabase() {
         if (this.operation === 'insert') {
           const keys = Object.keys(this.input); values = keys.map(k => this.input[k]);
           sql = `INSERT INTO ${this.table}(${keys.map(k => `"${k}"`).join(',')}) VALUES(${keys.map((_,i) => `$${i+1}`).join(',')}) RETURNING *`;
+        } else if(this.operation==='update') {
+          const set=Object.entries(this.input).map(([k,v])=>{values.push(v);return `"${k}"=$${values.length}`;});
+          sql=`UPDATE ${this.table} SET ${set.join(',')}${where} RETURNING *`;
         } else if (this.operation === 'delete') sql = `DELETE FROM ${this.table}${where} RETURNING *`;
         else sql = `SELECT * FROM ${this.table}${where}${this.orders.length ? ' ORDER BY '+this.orders.join(',') : ''}${this.take != null ? ` LIMIT ${this.take}` : ''}${this.start ? ` OFFSET ${this.start}` : ''}`;
         const { rows } = await pg.query(sql,values);
@@ -47,7 +51,7 @@ async function createWardrobeDatabase() {
     async rpc(name, args) {
       if (state.failRpc) return { error: { code: 'XX000', message: 'simulated failure with SECRET' } };
       try {
-        const casts = { wardrobe_import: ['text','jsonb','text'], wardrobe_patch_item: ['text','uuid','jsonb'], wardrobe_save_outfit: ['text','uuid','text','text','text','uuid[]'] };
+        const casts = { wardrobe_import: ['text','jsonb','text'], wardrobe_patch_item: ['text','uuid','jsonb'], wardrobe_save_outfit: ['text','uuid','text','text','text','uuid[]'],nmdd_oauth_exchange:['text','text','text','text','text','text','text','text'],nmdd_inspiration_mutate:['text','text','uuid','integer','jsonb','text','text','text'],nmdd_wardrobe_mutate:['text','text','uuid','jsonb','text','text','text'],nmdd_inspiration_image:['text','jsonb','text','text','text'] };
         const cast = casts[name]; if (!cast) throw new Error('unexpected RPC');
         const values = Object.values(args).map((v,i) => cast[i] === 'jsonb' ? JSON.stringify(v) : v);
         const result = await pg.query(`SELECT ${name}(${cast.map((type,i) => `$${i+1}::${type}`).join(',')}) AS result`,values);
@@ -55,7 +59,7 @@ async function createWardrobeDatabase() {
       } catch (error) { return { data: null, error }; }
     },
     storage: { from(name) {
-      if (name !== 'wardrobe-images') throw new Error('Unexpected bucket');
+      if (!['wardrobe-images','wardrobe-inspiration-images'].includes(name)) throw new Error('Unexpected bucket');
       return {
         async upload(key,bytes) { state.uploads++; if (state.uploads === state.failUploadAt) return { error: { message: 'simulated upload failure' } }; if (objects.has(key)) return { error: new Error('duplicate') }; objects.set(key,Buffer.from(bytes)); return { data: { path: key },error: null }; },
         async download(key) { return objects.has(key) ? { data: new Blob([objects.get(key)]),error: null } : { error: new Error('missing') }; },

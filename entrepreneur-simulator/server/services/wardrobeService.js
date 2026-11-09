@@ -86,17 +86,30 @@ function createWardrobeService(client) {
       return { ...result, warnings: bundle.warnings };
     } finally { await cleanup(staged).catch(() => {}); }
   }
-  async function createItem(input, file) {
+  async function mutationReplay(operation,mutation) {
+    if(!mutation) return null;
+    const { idempotencyKey, checkResult }=require('./inspirationContract'); idempotencyKey(mutation.key);
+    const row=checkResult(await db().from('nmdd_write_requests').select('*').eq('owner_id',OWNER).eq('operation',operation).eq('idempotency_key',mutation.key).maybeSingle());
+    if(row && row.request_hash!==mutation.hash) throw new WardrobeError('相同幂等键对应的内容不同，请使用新键',409);
+    return row ? publicItem(row.response_json) : null;
+  }
+  async function mutateItem(operation,id,payload,mutation) {
+    return require('./inspirationContract').checkResult(await db().rpc('nmdd_wardrobe_mutate',{p_owner:OWNER,p_operation:operation,p_id:id,p_payload:payload,p_key:mutation.key,p_hash:mutation.hash,p_actor:mutation.actor}));
+  }
+  async function createItem(input, file, mutation) {
+    const prior=await mutationReplay('wardrobe_create',mutation); if(prior)return prior;
     ensure(file, '请上传衣物照片');
-    const item = normalizeItem({ ...input, external_id: `manual_${crypto.randomUUID()}` }, { image: false });
+    const externalId=mutation ? `mcp_${crypto.createHash('sha256').update(`${OWNER}:${mutation.key}`).digest('hex')}` : `manual_${crypto.randomUUID()}`;
+    const item = normalizeItem({ ...input, external_id: externalId }, { image: false });
     const staged = [];
     try {
       const image = await stageImage(file.bytes, file.filename, file.mimetype, staged);
-      const row = check(await table().insert({ ...item, ...image, user_id: OWNER, manual_fields: FIELDS.filter(k => k !== 'external_id') }).select('*').single());
+      const row = mutation ? await mutateItem('wardrobe_create',null,{...item,...image},mutation) : check(await table().insert({ ...item, ...image, user_id: OWNER, manual_fields: FIELDS.filter(k => k !== 'external_id') }).select('*').single());
       return publicItem(row);
     } finally { await cleanup(staged).catch(() => {}); }
   }
-  async function patchItem(id, patch) {
+  async function patchItem(id, patch, mutation) {
+    const prior=await mutationReplay('wardrobe_update',mutation); if(prior)return prior;
     ensure(patch && typeof patch === 'object' && !Array.isArray(patch), '编辑内容必须是对象');
     const old = await getItem(id);
     const allowed = FIELDS.filter(key => key !== 'external_id');
@@ -104,7 +117,7 @@ function createWardrobeService(client) {
     ensure(Object.keys(input).length, '没有可更新的衣物字段');
     const normalized = normalizeItem({ ...old, ...input }, { image: false });
     const values = Object.fromEntries(Object.keys(input).map(key => [key, normalized[key]]));
-    return publicItem(check(await db().rpc('wardrobe_patch_item', { p_owner: OWNER, p_id: id, p_patch: values })));
+    return publicItem(mutation ? await mutateItem('wardrobe_update',id,values,mutation) : check(await db().rpc('wardrobe_patch_item', { p_owner: OWNER, p_id: id, p_patch: values })));
   }
   async function deleteItem(id) {
     await getItem(id);
@@ -164,7 +177,7 @@ function createWardrobeService(client) {
     if (!rows.length) throw new WardrobeError('搭配不存在', 404);
     return { deleted: true };
   }
-  return { listItems, importBundle, createItem, patchItem, deleteItem, replaceImage, getImage, exportBundle, listOutfits, saveOutfit, deleteOutfit };
+  return { listItems, importBundle, createItem, patchItem, deleteItem, replaceImage, getImage, exportBundle, listOutfits, saveOutfit, deleteOutfit, getItemDetails: async id => publicItem(await getItem(id)), mutationReplay };
 }
 const client = process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY
   ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_KEY, { auth: { autoRefreshToken: false, persistSession: false } }) : null;

@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nmdd.local/schemas/inspiration-v1",
+  "title": "NMDD Inspiration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["title"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S"
+    },
+    "source_image_id": { "type": ["string", "null"], "format": "uuid" },
+    "source_url": {
+      "type": ["string", "null"],
+      "maxLength": 2000,
+      "pattern": "^https?://"
+    },
+    "overall_style": { "type": ["string", "null"], "maxLength": 1000 },
+    "color_palette": { "$ref": "#/definitions/tags" },
+    "occasions": {
+      "type": "array",
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["academic_conference", "business_social", "daily", "other"]
+      }
+    },
+    "styling_notes": { "type": ["string", "null"], "maxLength": 10000 },
+    "analysis_status": { "enum": ["pending", "analyzing", "ready", "failed"] },
+    "analysis_error": { "type": ["string", "null"], "maxLength": 1000 },
+    "reference_items": {
+      "type": "array",
+      "maxItems": 30,
+      "items": { "$ref": "#/definitions/referenceItem" }
+    }
+  },
+  "definitions": {
+    "tags": {
+      "type": "array",
+      "maxItems": 30,
+      "items": { "type": "string", "minLength": 1, "maxLength": 100 }
+    },
+    "referenceItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "category": {
+          "enum": [
+            "tops",
+            "bottoms",
+            "outerwear",
+            "shoes",
+            "accessories",
+            "other"
+          ]
+        },
+        "subcategory": { "type": ["string", "null"], "maxLength": 200 },
+        "primary_color": { "type": ["string", "null"], "maxLength": 200 },
+        "color_family": {
+          "enum": [
+            null,
+            "black",
+            "white",
+            "gray",
+            "blue",
+            "brown",
+            "beige",
+            "green",
+            "red",
+            "yellow",
+            "purple",
+            "orange",
+            "pink",
+            "multicolor",
+            "other"
+          ]
+        },
+        "pattern": {
+          "enum": [
+            null,
+            "solid",
+            "striped",
+            "checked",
+            "printed",
+            "other",
+            "unknown"
+          ]
+        },
+        "design_features": { "$ref": "#/definitions/tags" },
+        "style_tags": { "$ref": "#/definitions/tags" },
+        "bounding_box": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["x", "y", "width", "height"],
+          "properties": {
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 },
+            "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },
+            "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 }
+          }
+        },
+        "visibility": { "enum": ["visible", "partial", "unclear"] },
+        "matched_wardrobe_item_id": {
+          "type": ["string", "null"],
+          "format": "uuid"
+        },
+        "match_reason": { "type": ["string", "null"], "maxLength": 2000 },
+        "match_score": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "needs_review": { "type": "boolean" }
+      }
+    }
+  }
+}
