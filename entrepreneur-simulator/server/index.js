@@ -72,6 +72,7 @@ fastify.register(async function (fastify) {
 fastify.register(require('./routes/auth'), { prefix: '/api/auth' });
 fastify.register(require('./routes/api'), { prefix: '/api' });
 fastify.register(require('./routes/relationshipSystem'), { prefix: '/api/relationship-system' });
+fastify.register(require('./routes/wardrobe'), { prefix: '/api/wardrobe' });
 
 const start = async () => {
   try {
