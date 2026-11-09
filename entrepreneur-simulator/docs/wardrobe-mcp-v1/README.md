@@ -2,6 +2,8 @@
 
 本模块在原有 React / Fastify / Supabase 衣橱上增量实现，不改衣橱 ZIP v1 格式。图片由 ChatGPT 或用户整理，网站负责校验、持久化、匹配候选和最终确认；不会在后端自动调用视觉模型。
 
+2026-11-09 已获用户授权并完成生产上线，真实云端验证通过。网站：https://nmdd-z8ry.vercel.app/wardrobe；MCP：https://nmdd.up.railway.app/mcp。复制给 ChatGPT 的说明见 [CHATGPT_GUIDE.md](CHATGPT_GUIDE.md)，上线证据见 [PRODUCTION.md](PRODUCTION.md)。
+
 ## 使用流程
 
 1. 「我的衣橱 → 穿搭灵感 → 上传参考图」，创建等待整理的草稿。详情中可复制图片编号、灵感编号。
@@ -95,7 +97,7 @@ NMDD_MCP_SECRET=<至少32字符的独立随机密钥>
 
 两项 URL 都必须是 origin，不带路径、query 或 fragment。密钥不入库、不提交 Git，所有实例使用相同值，重启时保持稳定。缺少任何一项时 `/mcp` 返回 503，网页和 JSON 入口仍可独立使用。开发环境只允许 localhost / 127.0.0.1 使用 HTTP；生产必须 HTTPS。
 
-部署后预期 MCP 地址：**`https://nmdd.up.railway.app/mcp`**。本次开发未部署，不能将这个地址视为已启用。直接使用 Railway 后端域名，不要用当前只代理 `/api` 的 Vercel SPA 地址访问 MCP。
+已启用 MCP 地址：**`https://nmdd.up.railway.app/mcp`**。直接使用 Railway 后端域名，Vercel 网站继续代理 `/api`。当前 `NMDD_SITE_URL` 为 `https://nmdd-z8ry.vercel.app`。
 
 OAuth 使用官方 MCP SDK 标准路由：`/.well-known/oauth-authorization-server`、`/.well-known/oauth-protected-resource/mcp`、`/register`、`/authorize`、`/token`、`/revoke`。授权页面为 `/oauth/consent`。
 
@@ -139,4 +141,4 @@ npm run test:wardrobe:e2e
 
 此模式使用真实 Supabase REST / Storage / RPC，仍通过 OAuth、MCP 和网页执行相同流程。测试服务不读应用 `.env`，强制独立 owner `nmdd-mcp-acceptance`，只清理该 owner 的记录及对象；项目 ref 必须与 URL 精确一致，且硬性禁止当前生产项目 `vhbyauefgjhlfjbikdek`。不要将测试服务部署到公网。测试开始时按 owner 清理，正常退出时也清理；若进程被强制杀死，可在同一测试项目重新跑测试清理遗留 fixture。
 
-当前已连接 Supabase 仅发现现有 `NMDD_test` 项目，未提供独立云端测试项目；没有执行真实云端验收或迁移。首次生产上线前仍需在独立测试项目运行上述模式，并在真实 ChatGPT 账户验证连接。详细部署与回滚见 [DEPLOYMENT.md](DEPLOYMENT.md)，验证记录与文件清单见 [VALIDATION.md](VALIDATION.md)。
+独立云端测试模式继续用于未来开发。此次用户授权生产上线后，已通过真实生产服务执行并清理临时上线验证，原有 33 件衣物内容不变；详见 [PRODUCTION.md](PRODUCTION.md)。真实 ChatGPT 账户首次连接需用户本人完成授权。部署与回滚见 [DEPLOYMENT.md](DEPLOYMENT.md)，本地验证及文件清单见 [VALIDATION.md](VALIDATION.md)。

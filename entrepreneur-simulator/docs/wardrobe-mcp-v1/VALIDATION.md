@@ -1,6 +1,6 @@
 # 验证记录与交付清单
 
-日期：2026-11-09；工作区 `E:\Life\NMDD`；在现有 main 上增量开发。生产数据和部署未变更。
+日期：2026-11-09；工作区 `E:\Life\NMDD`；在现有 main 上增量开发。以下保留开发阶段的本地验收记录；随后用户授权的生产上线与真实云端验证见 [PRODUCTION.md](PRODUCTION.md)，原有 33 件衣物内容未变更。
 
 ## 测试结果
 
@@ -30,7 +30,7 @@
 
 本地持久化使用 PGlite PostgreSQL，PostgREST / Storage 传输为测试替身。没有使用真实用户衣物作 fixture，没有写入现有 Supabase 项目。
 
-真实 Supabase 验收模式已经实现，并要求显式提供独立可丢弃项目；硬性禁止现有 `vhbyauefgjhlfjbikdek`。当前连接仅发现现有 `NMDD_test`，因此**真实云端 Storage / REST 联调、真实 ChatGPT 账户连接、HTTPS 公开地址和生产迁移部署仍待进行**，不能将本地测试当作这些项目已完成的证明。
+真实 Supabase 开发验收模式已经实现，并要求显式提供独立可丢弃项目；硬性禁止现有 `vhbyauefgjhlfjbikdek`。最初本地验收时云端验证和部署尚未执行。随后经用户明确上线授权，使用单独的小规模上线验证核查真实 Railway / Storage / REST / MCP / 网页 API，并清理临时记录，详见 [PRODUCTION.md](PRODUCTION.md)。真实 ChatGPT 账户连接仍由用户首次授权完成，不将 SDK 测试冒称为已在其 ChatGPT 账户连接。
 
 依赖检查中更新了当前主版本范围内的 Fastify、multipart / busboy、fast-uri、路由及 yauzl 安全补丁；MCP SDK 运行时使用修复版 Zod 4.6.6，保留旧 OpenAI 客户端及 schema 转换适配器所需的兼容依赖。当前生产依赖 `npm audit --omit=dev` 仍报告已有 OpenAI 4 / Zod 3 链的两项 high，完整 audit 还包含开发工具链三项提示。没有为消除提示直接跨主版本升级旧 AI 客户端；这项既有依赖风险需要单独升级验证。
 
