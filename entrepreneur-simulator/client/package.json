@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:wardrobe": "vitest run tests/wardrobe",
+    "test:wardrobe:e2e": "playwright test --config playwright.wardrobe.config.ts",
     "test:mindmap": "vitest run src/features/mindmap",
     "test:mindmap:e2e": "playwright test e2e/mindmap-v2.spec.ts --project=chromium",
     "validate:mindmap:traceability": "node scripts/validate-mindmap-traceability.mjs",

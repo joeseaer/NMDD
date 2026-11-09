@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useState, useEffect } from 'react'
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
-import { Brain, MessageSquare, User, Settings, LayoutDashboard, Users, FileText, Menu, X, Notebook, ChevronLeft, ChevronRight, Calendar, Microscope, Palette } from 'lucide-react'
+import { Brain, MessageSquare, User, Settings, LayoutDashboard, Users, FileText, Menu, X, Notebook, ChevronLeft, ChevronRight, Calendar, Microscope, Palette, Shirt } from 'lucide-react'
 
 // Pages
 import Dashboard from './pages/Dashboard'
@@ -21,6 +21,7 @@ import { GuardedLink } from './features/document-editor/navigation/DocumentNavig
 import { WhiteboardPickerHost } from './features/whiteboard/embed/WhiteboardPickerHost'
 
 const Whiteboards = lazy(() => import('./pages/Whiteboards'))
+const Wardrobe = lazy(() => import('./pages/Wardrobe'))
 const WhiteboardEditorPage = lazy(() => import('./pages/WhiteboardEditorPage'))
 
 function App() {
@@ -40,6 +41,7 @@ function App() {
     else if (location.pathname.includes('/planner')) setActiveTab('planner');
     else if (location.pathname.includes('/research')) setActiveTab('research');
     else if (location.pathname.includes('/whiteboards')) setActiveTab('whiteboards');
+    else if (location.pathname === '/wardrobe') setActiveTab('wardrobe');
     else if (location.pathname.includes('/dashboard')) setActiveTab('dashboard');
     else if (location.pathname.includes('/notes')) setActiveTab('notes');
     else if (location.pathname.includes('/relationships') || location.pathname.includes('/personality')) setActiveTab('relationships');
@@ -162,6 +164,7 @@ function App() {
           <div className="pt-4 mt-4 border-t border-gray-100">
             {!isSidebarCollapsed && <h3 className="px-3 text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">个人中心</h3>}
             <SidebarLink collapsed={isSidebarCollapsed} to="/evolution-tree" icon={<User size={20} />} label="我的档案" />
+            <SidebarLink collapsed={isSidebarCollapsed} to="/wardrobe" icon={<Shirt size={20} />} label="我的衣橱" active={activeTab === 'wardrobe'} />
             <SidebarLink collapsed={isSidebarCollapsed} to="/settings" icon={<Settings size={20} />} label="系统设置" />
           </div>
         </nav>
@@ -214,6 +217,7 @@ function App() {
               <Route path="/notes" element={<NoteManager />} />
               <Route path="/research" element={<ResearchWorkspace />} />
               <Route path="/whiteboards" element={<Whiteboards />} />
+              <Route path="/wardrobe" element={<Wardrobe />} />
               <Route path="/whiteboards/:whiteboardId" element={<WhiteboardEditorPage />} />
               <Route path="/relationships/*" element={<Relationships />} />
               <Route path="/personality" element={<Navigate to="/relationships/people" replace />} />
