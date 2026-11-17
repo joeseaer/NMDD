@@ -6,6 +6,7 @@ const {
   createOAuthMetadata,
 } = require("@modelcontextprotocol/sdk/server/auth/router.js");
 const { createWardrobeMcp } = require("../services/wardrobeMcp");
+const { researchDocumentsForOwner } = require('../services/researchDocumentService');
 const { defaultOAuth, SCOPES } = require("../services/mcpOAuth");
 module.exports = async function mcpRoutes(app, options) {
   const oauth = options.oauth === undefined ? defaultOAuth() : options.oauth;
@@ -57,7 +58,7 @@ module.exports = async function mcpRoutes(app, options) {
           issuerUrl: new URL(oauth.config.issuer),
           resourceServerUrl: new URL(oauth.config.resource),
           scopesSupported: SCOPES,
-          resourceName: "NMDD 个人衣橱",
+          resourceName: "NMDD 个人衣橱与科研文档",
         }),
       );
       const attempts = new Map();
@@ -140,6 +141,7 @@ module.exports = async function mcpRoutes(app, options) {
           wardrobe,
           inspirations,
           auth,
+          researchDocuments: options.researchDocuments || researchDocumentsForOwner(auth.extra?.owner_id, oauth.config.site),
           siteUrl: oauth.config.site,
           download: options.download,
         }),

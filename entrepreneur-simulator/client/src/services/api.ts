@@ -140,6 +140,16 @@ const uploadFileRequest = async (
 };
 
 export const api = {
+    setResearchDocumentChatGPTAccess: async (id: string, enabled: boolean): Promise<{ id: string; chatgpt_access: boolean }> => {
+        const response = await fetch(`${API_BASE_URL}/research/documents/${encodeURIComponent(id)}/chatgpt-access`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'ChatGPT 授权保存失败');
+        return data;
+    },
     // SOPs
     getSOPs: async (
         userId: string = CURRENT_USER_ID,

@@ -17,12 +17,16 @@ const SCOPES = [
   "wardrobe:write",
   "inspiration:read",
   "inspiration:write",
+  "research:read",
+  "research:write",
 ];
 const SCOPE_LABELS = {
   "wardrobe:read": "读取我的衣橱和衣物照片",
   "wardrobe:write": "新增和修改我的衣物",
   "inspiration:read": "查看我的穿搭灵感和参考图",
   "inspiration:write": "上传参考图，创建和修改灵感草稿",
+  "research:read": "读取我逐篇开放给 ChatGPT 的科研文档",
+  "research:write": "修改我逐篇开放给 ChatGPT 的科研文档",
 };
 const random = () => crypto.randomBytes(32).toString("base64url");
 const escape = (value) =>

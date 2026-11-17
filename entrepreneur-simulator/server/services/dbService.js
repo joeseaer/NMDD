@@ -683,6 +683,9 @@ const saveSOP = async (sopData, options = {}) => {
           content_json: contentJson,
           content_schema_version: contentSchemaVersion,
           content_revision: 1,
+          ...(Object.prototype.hasOwnProperty.call(insertData, 'chatgpt_access')
+            ? { chatgpt_access: insertData.domain === 'research' && insertData.chatgpt_access === true }
+            : {}),
           ...buildSopMetadataPayload(insertData),
           parent_id: requestedParentId,
           sort_order: requestedSortOrder,
@@ -1115,6 +1118,7 @@ const getSOPs = async (userId, filters = {}) => {
       category: sop.category,
       domain: sopDomain,
       research_type: researchType,
+      chatgpt_access: sop.chatgpt_access === true,
       research_status: normalizeResearchStatus(sop.research_status || taggedResearchStatus, researchType),
       promoted_to_life: !!sop.promoted_to_life || getSopTagValue(rawTags, 'promoted_to_life:') === 'true',
       promoted_at: sop.promoted_at || null,

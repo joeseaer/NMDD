@@ -66,6 +66,7 @@ type ResearchItem = {
   category: 'note' | 'people' | 'business' | 'brand';
   domain: 'research';
   research_type: ResearchType;
+  chatgpt_access?: boolean;
   research_status?: ResearchStatus | null;
   promoted_to_life?: boolean;
   promoted_at?: string | null;
@@ -149,6 +150,7 @@ const normalizeResearchItem = (raw: any): ResearchItem => {
     category: raw?.category === 'people' || raw?.category === 'business' || raw?.category === 'brand' ? raw.category : 'note',
     domain: 'research',
     research_type: researchType,
+    chatgpt_access: raw?.chatgpt_access === true,
     research_status: researchType === 'idea' ? (isResearchStatus(raw?.research_status) ? raw.research_status : 'seed') : null,
     promoted_to_life: !!raw?.promoted_to_life,
     promoted_at: raw?.promoted_at || null,
@@ -282,6 +284,17 @@ export default function ResearchWorkspace() {
   const documentSwitchRequestRef = React.useRef(0);
   const peopleLoadSequence = React.useRef(0);
   const [showMobileSidebar, setShowMobileSidebar] = useState(false);
+  const [creationRequest, setCreationRequest] = useState<{ parentId: string | null } | null>(null);
+  const [newChatGPTAccess, setNewChatGPTAccess] = useState(false);
+  const [accessSaving, setAccessSaving] = useState(false);
+  const [accessError, setAccessError] = useState<{ id: string; message: string } | null>(null);
+  const creationDialogRef = React.useRef<HTMLDialogElement | null>(null);
+  useEffect(() => {
+    const dialog = creationDialogRef.current;
+    if (!creationRequest || !dialog) return;
+    dialog.showModal();
+    return () => dialog.close();
+  }, [creationRequest]);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const activeType: ResearchType = isResearchType(searchParams.get('type')) ? searchParams.get('type') as ResearchType : 'document';
@@ -321,6 +334,7 @@ export default function ResearchWorkspace() {
       ? {
           ...item,
           ...updatedItem,
+          chatgpt_access: item.chatgpt_access,
           related: updatedItem.related ?? item.related,
         }
       : item));
@@ -368,7 +382,8 @@ export default function ResearchWorkspace() {
         .map(normalizeResearchItem)
         .filter((item) => item.id);
       const restoredItems = normalizedItems.map((item) => {
-        const restored = restoreLocalDocumentDraft(item);
+        const draft = restoreLocalDocumentDraft(item);
+        const restored = draft === item ? item : { ...draft, chatgpt_access: item.chatgpt_access };
         if (restored !== item && normalizeDocumentRevision(item.content_revision) !== null) {
           // A recovered draft may contain an explicit relation edit, so its
           // one-time retry must preserve the complete stored payload. Legacy
@@ -493,7 +508,7 @@ export default function ResearchWorkspace() {
     }), result);
   }, [items, saveQueue]);
 
-  const handleCreateItem = async (parentId: string | null = null) => {
+  const handleCreateItem = async (parentId: string | null = null, chatgptAccess = false) => {
     if (!await flushBeforeNavigation()) return;
     setLoading(true);
     const content = makeTemplate(activeType);
@@ -502,6 +517,7 @@ export default function ResearchWorkspace() {
       category: 'note',
       domain: 'research',
       research_type: activeType,
+      chatgpt_access: chatgptAccess,
       research_status: activeType === 'idea' ? 'seed' : null,
       promoted_to_life: false,
       parent_id: parentId,
@@ -531,11 +547,30 @@ export default function ResearchWorkspace() {
       urlSyncTargetRef.current = result.id;
       setSelectedItemId(result.id);
       setSearchParams({ type: activeType, doc: result.id });
+      setCreationRequest(null);
     } catch (error: any) {
       console.error('Failed to create research item', error);
       alert(`创建失败：${error.message || 'Unknown error'}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const requestCreateItem = async (parentId: string | null = null) => {
+    setNewChatGPTAccess(false);
+    setCreationRequest({ parentId });
+  };
+
+  const handleChatGPTAccessChange = async (id: string, enabled: boolean) => {
+    setAccessSaving(true);
+    setAccessError(null);
+    try {
+      const result = await api.setResearchDocumentChatGPTAccess(id, enabled);
+      setItems(current => current.map(item => item.id === id ? { ...item, chatgpt_access: result.chatgpt_access } : item));
+    } catch (error) {
+      setAccessError({ id, message: error instanceof Error ? error.message : 'ChatGPT 授权保存失败' });
+    } finally {
+      setAccessSaving(false);
     }
   };
 
@@ -707,7 +742,7 @@ export default function ResearchWorkspace() {
           </div>
           <button
             type="button"
-            onClick={() => void handleCreateItem()}
+            onClick={() => void requestCreateItem()}
             className="flex w-full items-center justify-center rounded-lg bg-primary px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-primary/90"
           >
             <Plus className="mr-2 h-4 w-4" />
@@ -741,7 +776,7 @@ export default function ResearchWorkspace() {
               storageKey={`nmdd.research.page-tree.expanded.${activeType}`}
               emptyMessage="暂无记录"
               onSelect={(item) => void handleOpenItem(item)}
-              onCreateChild={(item) => void handleCreateItem(item.id)}
+              onCreateChild={(item) => void requestCreateItem(item.id)}
               renderIcon={(item, active) => {
                 const Icon = item.research_type === 'idea'
                   ? Lightbulb
@@ -770,7 +805,10 @@ export default function ResearchWorkspace() {
             ancestors={selectedAncestors}
             childPages={selectedChildren}
             moveTargets={moveTargets}
-            onCreateChild={() => handleCreateItem(selectedItem.id)}
+            onCreateChild={() => requestCreateItem(selectedItem.id)}
+            accessSaving={accessSaving}
+            accessError={accessError?.id === selectedItem.id ? accessError.message : null}
+            onChatGPTAccessChange={(enabled) => handleChatGPTAccessChange(selectedItem.id, enabled)}
             onMove={(parentId) => handleMoveItem(selectedItem.id, parentId)}
             libraryCollapsed={desktopLibraryHidden}
             onOpenLibrary={() => setLibraryCollapsed(false)}
@@ -808,6 +846,20 @@ export default function ResearchWorkspace() {
           </div>
         )}
       </main>
+      {creationRequest ? (
+        <dialog ref={creationDialogRef} aria-labelledby="research-create-title" className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl backdrop:bg-black/30"
+          onCancel={event => { event.preventDefault(); if (!loading) setCreationRequest(null); }}>
+            <h2 id="research-create-title" className="text-lg font-semibold">新建{RESEARCH_TYPES.find(type => type.key === activeType)?.label || '记录'}</h2>
+            <label className="mt-5 flex items-start gap-3 text-sm">
+              <input autoFocus type="checkbox" checked={newChatGPTAccess} onChange={event => setNewChatGPTAccess(event.target.checked)} className="mt-1" />
+              <span>允许 ChatGPT 读取和修改<span className="mt-1 block text-xs leading-5 text-gray-500">仅开放这篇记录，子页面需单独授权。创建后可随时关闭。</span></span>
+            </label>
+            <div className="mt-6 flex justify-end gap-3">
+              <button type="button" disabled={loading} onClick={() => setCreationRequest(null)} className="rounded-lg border px-4 py-2 text-sm">取消</button>
+              <button type="button" disabled={loading} onClick={() => void handleCreateItem(creationRequest.parentId, newChatGPTAccess)} className="rounded-lg bg-primary px-4 py-2 text-sm text-white disabled:opacity-50">{loading ? '创建中…' : '创建'}</button>
+            </div>
+        </dialog>
+      ) : null}
     </div>
   );
 }
@@ -821,6 +873,9 @@ function ResearchDetail({
   childPages,
   moveTargets,
   onCreateChild,
+  accessSaving,
+  accessError,
+  onChatGPTAccessChange,
   onMove,
   libraryCollapsed,
   onOpenLibrary,
@@ -843,6 +898,9 @@ function ResearchDetail({
   childPages: ResearchItem[];
   moveTargets: ResearchItem[];
   onCreateChild: () => Promise<void>;
+  accessSaving: boolean;
+  accessError: string | null;
+  onChatGPTAccessChange: (enabled: boolean) => Promise<void>;
   onMove: (parentId: string | null) => Promise<void>;
   libraryCollapsed: boolean;
   onOpenLibrary: () => void;
@@ -1115,6 +1173,17 @@ function ResearchDetail({
         )}
         properties={(
           <DocumentProperties>
+            <DocumentProperty label="ChatGPT 访问" icon={<FileText />}>
+              <div>
+                <label className="inline-flex items-center gap-2">
+                  <input type="checkbox" role="switch" checked={item.chatgpt_access === true} disabled={accessSaving}
+                    onChange={event => void onChatGPTAccessChange(event.target.checked)} />
+                  <span>允许 ChatGPT 读取和修改</span>
+                </label>
+                <p className="mt-1 text-xs text-gray-500">{accessSaving ? '正在保存授权…' : item.chatgpt_access ? '已开放这篇记录，可随时关闭。子页面需单独授权。' : '未开放，ChatGPT 无法通过接口查看或修改这篇记录。'}</p>
+                {accessError ? <p role="alert" className="mt-1 text-xs text-red-600">{accessError}</p> : null}
+              </div>
+            </DocumentProperty>
             <DocumentProperty label="标签" icon={<Tag />}>
               <input
                 type="text"

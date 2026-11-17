@@ -35,6 +35,8 @@ const permissionLabels: Record<string, string> = {
   "wardrobe:write": "新增和修改衣物",
   "inspiration:read": "查看灵感和参考图",
   "inspiration:write": "上传图片、创建和修改草稿",
+  "research:read": "读取逐篇授权的科研文档",
+  "research:write": "修改逐篇授权的科研文档",
 };
 const statusText = (row: Inspiration) =>
   row.status === "published"
