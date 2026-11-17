@@ -4,7 +4,7 @@
 
 ## 部署与连接
 
-1. 数据库先执行 `supabase/migrations/20261117052522_research_document_chatgpt_access.sql`。依赖原有科研字段、content_json 和文档版本迁移。
+1. 数据库先执行 `supabase/migrations/20261117052522_research_document_chatgpt_access.sql`。旧数据库需先依次补齐 `20260628_add_sop_content_json.sql`、`20260701_add_research_workspace_fields.sql`、`20260712_add_document_editor_reliability.sql`，再执行 `20260809_add_document_page_hierarchy.sql` 更新层级触发器。旧格式内嵌 JSON 在读取时解包，迁移不重写原始正文。
 2. 部署后端与前端。沿用数字衣橱的 MCP 地址 `/mcp` 和 OAuth 配置，无需新增密钥。接口未迁移时拒绝文档访问，不降级为无权限检查。
 3. 旧 ChatGPT 连接需重新授权 `research:read`、`research:write` 并刷新工具列表；只有衣橱权限的旧 token 无法访问科研文档。
 4. 在网站为需要共享的记录打开开关。关闭后，同一连接的后续读取和修改立即被拒绝；已进入聊天的内容无法收回。

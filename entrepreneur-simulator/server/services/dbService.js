@@ -2347,6 +2347,7 @@ module.exports = {
   createPlannerItem, updatePlannerItem, deletePlannerItem, listPlannerItems,
   saveNPCRelation, getNPCRelations, updateNPCRelation, getAllUserData, uploadFile,
   putMindMapImage, getMindMapImage,
+  unpackSmartDocumentContent,
   SopRevisionConflictError,
   SopHierarchyError,
   __setSupabaseClientForTests,

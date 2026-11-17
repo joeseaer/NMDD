@@ -1,6 +1,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const { WardrobeError } = require('./wardrobeBundle');
 const { DEFAULT_USER_ID } = require('../config/currentUser');
+const { unpackSmartDocumentContent } = require('./dbService');
 
 const SUMMARY = 'id,title,research_type,content_revision,content_schema_version,updated_at';
 const DETAIL = `${SUMMARY},content,content_json`;
@@ -38,7 +39,10 @@ function createResearchDocumentService(client, { owner, siteUrl = '' } = {}) {
       if (!uuid.test(id)) fail('文档编号无效');
       const row = check(await allowed(DETAIL).eq('id', id).maybeSingle());
       if (!row) fail('文档不存在或未开放给 ChatGPT', 404);
-      return present(row);
+      // Legacy databases stored editor JSON in a Markdown envelope. Decode it
+      // just as the website does, without rewriting the original stored body.
+      const unpacked = unpackSmartDocumentContent(row.content);
+      return present({ ...row, content: unpacked.content, content_json: row.content_json || unpacked.contentJson });
     },
     async update({ id, expected_revision, patch }) {
       if (!uuid.test(id) || !Number.isSafeInteger(expected_revision) || expected_revision < 1) fail('文档编号或版本无效');

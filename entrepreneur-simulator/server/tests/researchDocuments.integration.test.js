@@ -113,6 +113,20 @@ test('research documents: real migration + website permissions + HTTP MCP + revi
     await assert.rejects(createResearchDocumentService(client).list(), error => error.statusCode === 503);
   });
 
+  await t.test('legacy packed editor JSON is readable without rewriting the original, and title edits preserve its backup', async () => {
+    const id = await create('Legacy shared document', true);
+    const json = doc('Legacy body');
+    const packed = `<!-- smart-document-json:${Buffer.from(JSON.stringify(json)).toString('base64')}-->\nLegacy body`;
+    await pg.query('UPDATE sops SET content=$1, content_json=NULL WHERE id=$2', [packed, id]);
+    const read = await service.get(id);
+    assert.equal(read.content, 'Legacy body');
+    assert.deepEqual(read.content_json, json);
+    await service.update({ id, expected_revision: read.content_revision, patch: { title: 'Legacy renamed' } });
+    assert.equal((await pg.query('SELECT content FROM sops WHERE id=$1', [id])).rows[0].content, packed);
+    assert.equal((await pg.query('SELECT content FROM sop_versions WHERE sop_id=$1', [id])).rows[0].content, packed);
+    await service.setAccess(id, false);
+  });
+
   const app = require('fastify')();
   t.after(() => app.close());
   const config = configuration({ NMDD_MCP_PUBLIC_URL: 'http://127.0.0.1:3000', NMDD_SITE_URL: 'http://127.0.0.1:3000', NMDD_MCP_SECRET: 'isolated-research-tests-secret-at-least-32' });
