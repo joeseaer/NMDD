@@ -668,6 +668,8 @@ const FormatButton = ({ label, icon: Icon, active, onActivate }: FormatButtonPro
 const EDITOR_COLORS = ['#111827', '#DC2626', '#2563EB', '#059669', '#7C3AED'] as const;
 
 export interface TopicRichTextEditorProps {
+  readonly compact?: boolean;
+  readonly selectAllOnFocus?: boolean;
   readonly initialValue: RichText;
   readonly ariaLabel?: string;
   readonly className?: string;
@@ -677,11 +679,15 @@ export interface TopicRichTextEditorProps {
   /** Tables are intended for long-form Notes, not compact topic titles. */
   readonly allowTables?: boolean;
   onCommit(value: RichText): void;
+  /** Restore the canvas only after keyboard submission; blur preserves the clicked destination. */
+  onKeyboardCommit?(): void;
   onCancel(): void;
 }
 
 /** One editing session. Enter/blur commit and Escape cancels exactly once. */
 export const TopicRichTextEditor = ({
+  compact = false,
+  selectAllOnFocus = false,
   initialValue,
   ariaLabel = '编辑主题文本',
   className,
@@ -689,6 +695,7 @@ export const TopicRichTextEditor = ({
   submitShortcut = 'enter',
   allowTables = false,
   onCommit,
+  onKeyboardCommit,
   onCancel,
 }: TopicRichTextEditorProps) => {
   const completedRef = useRef(false);
@@ -697,6 +704,7 @@ export const TopicRichTextEditor = ({
   const onCommitRef = useRef(onCommit);
   const onCancelRef = useRef(onCancel);
   const [, setRevision] = useState(0);
+  const [formattingOpen, setFormattingOpen] = useState(!compact);
 
   onCommitRef.current = onCommit;
   onCancelRef.current = onCancel;
@@ -735,6 +743,7 @@ export const TopicRichTextEditor = ({
         if ((submitOnEnter || submitOnModifier) && !composing) {
           event.preventDefault();
           finishCommit(view.state.doc.toJSON());
+          onKeyboardCommit?.();
           return true;
         }
         if (event.key === 'Escape' && !composing) {
@@ -754,8 +763,10 @@ export const TopicRichTextEditor = ({
   }, [submitShortcut]);
 
   useEffect(() => {
-    if (editor && autoFocus) editor.commands.focus('end');
-  }, [autoFocus, editor]);
+    if (!editor || !autoFocus) return;
+    if (selectAllOnFocus) editor.chain().focus().selectAll().run();
+    else editor.commands.focus('end');
+  }, [autoFocus, selectAllOnFocus, editor]);
 
   if (!editor) return null;
 
@@ -804,10 +815,20 @@ export const TopicRichTextEditor = ({
       onBlurCapture={commitWhenFocusLeaves}
       onKeyDown={stopKeyboardPropagation}
       onMouseDown={stopMousePropagation}
+      onClick={(event) => event.stopPropagation()}
     >
+      {compact ? <button
+        type="button"
+        className="mb-2 flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-50"
+        aria-label="显示文本格式"
+        aria-expanded={formattingOpen}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => setFormattingOpen(open => !open)}
+      ><Palette size={13} aria-hidden="true" />文本格式</button> : null}
       <div
         role="toolbar"
         aria-label="主题文本格式"
+        hidden={!formattingOpen}
         className="mb-1 flex flex-wrap items-center gap-1 rounded border border-slate-200 bg-slate-50 p-1"
       >
         <FormatButton label="粗体" icon={Bold} active={editor.isActive('bold')} onActivate={() => toggle('bold')} />
@@ -916,7 +937,7 @@ export const TopicRichTextEditor = ({
         </button>
       </div>
       <EditorContent editor={editor} />
-      <p className="mt-1 text-[10px] leading-none text-slate-400" aria-hidden="true">
+      <p className="mt-2 px-1 text-[10px] leading-normal text-slate-400" aria-hidden="true">
         {submitShortcut === 'enter'
           ? 'Enter 提交 · Shift+Enter 换行 · Esc 取消'
           : 'Ctrl/Cmd+Enter 提交 · Enter 换段 · Esc 取消'}

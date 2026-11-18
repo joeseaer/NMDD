@@ -226,6 +226,7 @@ export const createReactFlowCanvasNavigationHandlers = <NodeData, EdgeData>(
 };
 
 export interface CanvasNavigationControlsProps {
+  readonly compact?: boolean;
   readonly zoom: number;
   readonly minZoom?: number;
   readonly maxZoom?: number;
@@ -247,6 +248,7 @@ const buttonClass = 'inline-flex h-7 items-center justify-center rounded px-2 te
 
 /** XMind-style, keyboard-accessible canvas navigation toolbar. */
 export const CanvasNavigationControls = ({
+  compact = false,
   zoom,
   minZoom = MIN_CANVAS_ZOOM,
   maxZoom = MAX_CANVAS_ZOOM,
@@ -381,7 +383,7 @@ export const CanvasNavigationControls = ({
         onClick={onFitView}
       >
         <Maximize2 size={13} aria-hidden="true" />
-        <span>Fit</span>
+        <span>适配</span>
       </button>
       <button
         type="button"
@@ -392,6 +394,7 @@ export const CanvasNavigationControls = ({
       >
         100%
       </button>
+      {!compact ? <>
       <span className="mx-0.5 h-5 w-px bg-slate-200" aria-hidden="true" />
       <button
         type="button"
@@ -407,6 +410,7 @@ export const CanvasNavigationControls = ({
           : <Focus size={13} aria-hidden="true" />}
         <span>{focusLabel}</span>
       </button>
+      </> : null}
     </div>
   );
 };

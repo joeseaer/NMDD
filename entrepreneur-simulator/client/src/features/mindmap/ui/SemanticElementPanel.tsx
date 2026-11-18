@@ -1,5 +1,5 @@
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { BoxSelect, Link2, MessageSquareText, Sigma, Trash2 } from 'lucide-react';
+import { BoxSelect, Link2, MessageSquareText, Sigma, Trash2, X } from 'lucide-react';
 
 import type { ElementRef } from '../domain/types';
 import type {
@@ -39,6 +39,7 @@ export interface SemanticElementPanelProps {
   readonly boundaryPreview?: BoundaryCreationPreview;
   readonly summaryPreview?: SummaryCreationPreview;
   readonly readOnly: boolean;
+  onClose?(): void;
   onCreate(kind: SemanticCreateKind): void;
   onSelect(reference: ElementRef): void;
   onDelete(reference: DeletableSemanticElementRef): void;
@@ -58,6 +59,7 @@ export const SemanticElementPanel = ({
   boundaryPreview,
   summaryPreview,
   readOnly,
+  onClose,
   onCreate,
   onSelect,
   onDelete,
@@ -113,6 +115,7 @@ export const SemanticElementPanel = ({
         <div className="text-[10px] text-slate-400">
           {topicSelectionCount > 0 ? `已选 ${topicSelectionCount} 个主题` : '先选择主题'}
         </div>
+        {onClose ? <button type="button" className="rounded-md p-1 text-slate-400 hover:bg-slate-100" aria-label="关闭关系与概要" onClick={onClose}><X size={14} aria-hidden="true" /></button> : null}
       </div>
 
       <div className="mb-2 grid grid-cols-4 gap-1" aria-label="新增语义元素">

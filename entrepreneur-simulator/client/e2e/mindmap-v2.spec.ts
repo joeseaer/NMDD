@@ -17,8 +17,6 @@ const topicNode = (page: Page, title: string) =>
   mindMapV2(page).locator('.react-flow__node').filter({
     has: page.getByRole('button', { name: title, exact: true }),
   });
-const topicDragHandle = (page: Page, title: string) =>
-  topicNode(page, title).locator('.mindmap-topic-drag-handle');
 const topicButtonById = (page: Page, topicId: string) =>
   mindMapV2(page)
     .locator(`[data-entity-id="${topicId}"][data-topic-role]`)
@@ -31,6 +29,19 @@ const enterMindMapWorkspace = async (page: Page) => {
   if (await page.getByTestId('mindmap-v2-fullscreen-layer').count()) return;
   await page.getByTestId('mindmap-v2-enter-fullscreen').click();
   await expect(page.getByTestId('mindmap-v2-fullscreen-layer')).toBeVisible();
+};
+
+
+const openInsertMenu = async (page: Page) => {
+  const toggle = page.getByRole('button', { name: '插入', exact: true });
+  if (await toggle.evaluate(element => element.parentElement?.hasAttribute('open'))) return;
+  await toggle.click();
+};
+
+const openSemanticPanel = async (page: Page) => {
+  if (await page.getByTestId('mindmap-semantic-panel').isVisible()) return;
+  await openInsertMenu(page);
+  await page.getByRole('button', { name: '关系与概要', exact: true }).click();
 };
 
 const exitMindMapWorkspace = async (page: Page) => {
@@ -537,6 +548,61 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     });
   });
 
+  test('workspace menus dismiss without leaving fullscreen and keyboard creation continues after commit', async ({ page }) => {
+    await page.goto('/editor-lab?fixture=mindmap-v1-small');
+    await enterMindMapWorkspace(page);
+    await expect(page.getByTestId('mindmap-semantic-panel')).toHaveCount(0);
+    await openInsertMenu(page);
+    await expect(page.getByRole('button', { name: '打开主题笔记' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('button', { name: '打开主题笔记' })).toBeHidden();
+    await expect(page.getByTestId('mindmap-v2-fullscreen-layer')).toBeVisible();
+    expect(await mindMapData(page)).toMatchObject({ contentRevision: 0 });
+
+    await topicButton(page, '主主题 2').click();
+    await page.getByTitle('新增同级主题 (Enter)').click();
+    const editor = page.getByLabel('编辑主题标题');
+    await expect(editor).toBeFocused();
+    await page.keyboard.type('下一步');
+    await page.keyboard.press('Enter');
+    await expect(topicButton(page, '下一步')).toBeVisible();
+    await expect(canvas(page)).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(editor).toBeFocused();
+    await page.keyboard.type('执行');
+    await page.keyboard.press('Enter');
+    await expect(topicButton(page, '执行')).toBeVisible();
+    await expect.poll(async () => {
+      const saved = await canonicalData(page);
+      return saved ? parentTitleInCanonicalData(saved, '执行') : undefined;
+    }).toBe('下一步');
+    await page.keyboard.press('Control+z');
+    await expect(topicButton(page, '执行')).toHaveCount(0);
+  });
+
+  test('narrow workspace starts readable and keeps commands, menus, and formatting separate', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/editor-lab?fixture=mindmap-v1-small');
+    await enterMindMapWorkspace(page);
+    const zoom = page.getByRole('textbox', { name: '缩放百分比' });
+    await expect(zoom).toHaveValue('85%');
+    for (const label of ['子主题', '同级主题', '插入', '布局', '操作指南']) {
+      const bounds = await page.getByRole('toolbar', { name: '建图工具' }).getByRole('button', { name: label, exact: true }).boundingBox();
+      expect(bounds).not.toBeNull();
+      expect(bounds!.x).toBeGreaterThanOrEqual(0);
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390);
+    }
+    await openInsertMenu(page);
+    const image = page.getByRole('button', { name: '插入本地图片', exact: true });
+    await expect(image).toBeVisible();
+    const imageBounds = await image.boundingBox();
+    expect(imageBounds!.x).toBeGreaterThanOrEqual(0);
+    expect(imageBounds!.x + imageBounds!.width).toBeLessThanOrEqual(390);
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: '适应安全画布' }).click();
+    await expect.poll(async () => Number((await zoom.inputValue()).replace('%', ''))).toBeLessThan(85);
+  });
+
   test('embedded preview expands into a true viewport fullscreen layer and restores its place', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/editor-lab?fixture=mindmap-v1-small');
@@ -565,7 +631,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await expect(page.getByTestId('mindmap-semantic-panel')).toHaveCount(0);
     await expect(page.getByTestId('mindmap-semantic-properties')).toHaveCount(0);
     await expect(page.getByTestId('mindmap-search-outliner-panel')).toHaveCount(0);
-    await expect(page.getByTestId('mindmap-canvas-navigation')).toHaveCount(0);
+    await expect(page.getByTestId('mindmap-canvas-navigation')).toBeVisible();
 
     for (const viewport of [
       { width: 1024, height: 625 },
@@ -593,7 +659,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
           && inner.x + inner.width <= outer.x + outer.width
           && inner.y + inner.height <= outer.y + outer.height;
         return inside(topicBounds, flowBounds)
-          && inside(addChildBounds, topbarBounds)
+          && inside(addChildBounds, (await page.getByTestId('mindmap-v2-action-strip').boundingBox())!)
           && inside(enterBounds, topbarBounds);
       }).toBe(true);
     }
@@ -767,6 +833,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     const titleEditor = page.getByLabel('编辑主题标题');
     await titleEditor.fill('富文本标题');
     await titleEditor.press('Control+a');
+    await page.getByRole('button', { name: '显示文本格式' }).click();
     const topicTextToolbar = page.getByRole('toolbar', { name: '主题文本格式' });
     await topicTextToolbar.getByRole('button', { name: '粗体', exact: true }).click();
     await topicTextToolbar
@@ -946,6 +1013,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     test.setTimeout(120_000);
     await page.goto('/editor-lab?fixture=mindmap-v1-small');
     await enterMindMapWorkspace(page);
+    await openSemanticPanel(page);
     const createBoundary = page.getByTestId('mindmap-create-boundary');
 
     await topicButton(page, '创业模拟器').click();
@@ -1224,7 +1292,15 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     expect(typeof viewOnlyData).toBe('object');
     expect(viewOnlyData).toMatchObject({ contentRevision: 0 });
 
-    await topicDragHandle(page, '分支 1.1').dragTo(topicNode(page, '主主题 2'));
+    // Exercise the card itself with a real pointer path past the drag threshold.
+    const sourceBounds = await topicButton(page, '分支 1.1').boundingBox();
+    const targetBounds = await topicButton(page, '主主题 2').boundingBox();
+    expect(sourceBounds).not.toBeNull();
+    expect(targetBounds).not.toBeNull();
+    await page.mouse.move(sourceBounds!.x + sourceBounds!.width / 2, sourceBounds!.y + sourceBounds!.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(targetBounds!.x + targetBounds!.width / 2, targetBounds!.y + targetBounds!.height / 2, { steps: 24 });
+    await page.mouse.up();
     await expect.poll(async () => canonicalData(page)).not.toBeNull();
     const moved = await canonicalData(page);
     expect(moved).not.toBeNull();
@@ -1326,6 +1402,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await topicButton(page, '主主题 1').click();
     await enterMindMapWorkspace(page);
 
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开主题标签' }).click();
     const panel = page.getByTestId('mindmap-topic-enrichment-panel');
     await panel.getByLabel('新标签').fill('  产品  ');
@@ -1416,6 +1493,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await page.goto('/editor-lab?fixture=mindmap-v1-small');
     await topicButton(page, '主主题 2').click();
     await enterMindMapWorkspace(page);
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开主题待办' }).click();
     const panel = page.getByTestId('mindmap-topic-enrichment-panel');
     await panel.getByRole('button', { name: '添加待办' }).click();
@@ -1469,6 +1547,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await expect(mindMapV2(page).locator('.react-flow__node.selected')).toHaveCount(2);
     await enterMindMapWorkspace(page);
 
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开主题待办' }).click();
     const panel = page.getByTestId('mindmap-topic-enrichment-panel');
     const bulk = panel.getByTestId('mindmap-bulk-todo-controls');
@@ -1531,6 +1610,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await page.goto('/editor-lab?fixture=mindmap-v1-small');
     await topicButton(page, '主主题 3').click();
     await enterMindMapWorkspace(page);
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开主题任务' }).click();
     const panel = page.getByTestId('mindmap-topic-enrichment-panel');
     await expect(panel.getByRole('tab', { name: '任务' })).toHaveAttribute('aria-selected', 'true');
@@ -1608,6 +1688,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
 
     for (const title of ['主主题 1', '主主题 2']) {
       await topicButton(page, title).click();
+      await openInsertMenu(page);
       await page.getByRole('button', { name: '打开主题任务' }).click();
       await panel.getByRole('button', { name: '添加任务' }).click();
       await panel.getByRole('button', { name: '保存任务' }).click();
@@ -1720,6 +1801,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await page.goto('/editor-lab?fixture=mindmap-v1-small');
     await topicButton(page, '主主题 1').click();
     await enterMindMapWorkspace(page);
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开标记与图例' }).click();
     const panel = page.getByTestId('mindmap-marker-legend-panel');
     await expect(panel).toBeVisible();
@@ -1900,6 +1982,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
 
     await topicButton(page, '主主题 1').click();
     await enterMindMapWorkspace(page);
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开主题链接' }).click();
     const panel = page.getByTestId('mindmap-topic-enrichment-panel');
     await panel.getByRole('button', { name: '添加内部链接' }).click();
@@ -2034,6 +2117,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
   test('exports outlines and applies Markdown import as one undoable transaction', async ({ page }) => {
     await page.goto('/editor-lab?fixture=mindmap-v1-small');
     await enterMindMapWorkspace(page);
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开导入与导出' }).click();
     const panel = page.getByTestId('mindmap-import-export-panel');
     await expect(panel).toBeVisible();
@@ -2146,12 +2230,14 @@ test.describe('Mind map V2 compatibility and persistence', () => {
 
     await topicButton(page, '主主题 1').click();
     const chooserPromise = page.waitForEvent('filechooser');
+    await openInsertMenu(page);
     await page.getByTestId('mindmap-insert-local-image').click();
     const chooser = await chooserPromise;
     await chooser.setFiles({ name: 'durable.png', mimeType: 'image/png', buffer: png });
     await expect(mindMapV2(page).locator('[data-topic-image-source="ready"]')).toHaveCount(1);
 
     await enterMindMapWorkspace(page);
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开导入与导出' }).click();
     const panel = page.getByTestId('mindmap-import-export-panel');
     const firstDownloadPromise = page.waitForEvent('download');
@@ -2204,6 +2290,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await expect(mindMapV2(page).locator('[data-topic-image-source="ready"]')).toHaveCount(1);
     expect(uploadCount).toBe(1);
 
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开导入与导出' }).click();
     const reexportPanel = page.getByTestId('mindmap-import-export-panel');
     const downloadPromise = page.waitForEvent('download');
@@ -2272,6 +2359,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
   test('switches advanced structures with persisted, undoable layout variants', async ({ page }) => {
     await page.goto('/editor-lab?fixture=mindmap-v1-small');
     await enterMindMapWorkspace(page);
+    await page.getByRole('button', { name: '布局', exact: true }).click();
     const structure = page.getByLabel('导图结构');
     const direction = page.getByLabel('布局方向');
     await expect(structure).toBeVisible();
@@ -2356,6 +2444,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await topicButton(page, '分支 1.1').click();
     await topicButton(page, '分支 2.1').click({ modifiers: ['Control'] });
     await enterMindMapWorkspace(page);
+    await openSemanticPanel(page);
 
     const summaryPreview = page.getByTestId('mindmap-summary-preview');
     await expect(summaryPreview).toHaveText('将因跨分支拆分为 2 个概要。');
@@ -2426,6 +2515,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await topicButton(page, '分支 1.1').click();
     await topicButton(page, '分支 1.2').click({ modifiers: ['Control'] });
     await enterMindMapWorkspace(page);
+    await openSemanticPanel(page);
     await page.getByTestId('mindmap-create-summary').click();
 
     await expect.poll(async () => {
@@ -2597,7 +2687,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     expect(await canonicalData(page)).toEqual(flushed);
 
     await exitMindMapWorkspace(page);
-    await page.getByRole('button', { name: '编辑', exact: true }).click();
+    await page.getByTestId('mode-edit').click();
     await enterMindMapWorkspace(page);
     await expect(canvas(page)).toHaveAttribute('data-read-only', 'false');
     await expect.poll(async () => canonicalData(page)).toEqual(flushed);
@@ -2611,6 +2701,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await topicButton(page, '分支 1.1').click();
     await topicButton(page, '分支 1.2').click({ modifiers: ['Control'] });
     await enterMindMapWorkspace(page);
+    await openSemanticPanel(page);
     await page.getByTestId('mindmap-create-summary').click();
 
     await expect.poll(async () => {
@@ -2779,9 +2870,10 @@ test.describe('Mind map V2 compatibility and persistence', () => {
   test('system clipboard preserves a subtree across remount, cut, paste, and one-step undo', async ({
     context,
     page,
+    baseURL,
   }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
-      origin: 'http://127.0.0.1:5173',
+      origin: new URL(baseURL!).origin,
     });
     await page.goto('/editor-lab?fixture=mindmap-v1-small');
     const fixture = canonicalFixtureBranch(await mindMapData(page));
@@ -2829,9 +2921,10 @@ test.describe('Mind map V2 compatibility and persistence', () => {
   test('plain-text clipboard falls back to one topic and read-only paste does not write', async ({
     context,
     page,
+    baseURL,
   }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
-      origin: 'http://127.0.0.1:5173',
+      origin: new URL(baseURL!).origin,
     });
     await page.goto('/editor-lab?fixture=mindmap-v1-small');
     const fixture = canonicalFixtureBranch(await mindMapData(page));
@@ -2940,6 +3033,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
 
     await targetButton.click();
     const chooserPromise = page.waitForEvent('filechooser');
+    await openInsertMenu(page);
     await page.getByTestId('mindmap-insert-local-image').click();
     const chooser = await chooserPromise;
     await chooser.setFiles({ name: 'road map.png', mimeType: 'image/png', buffer: png });
@@ -3289,6 +3383,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await page.goto('/editor-lab?fixture=mindmap-v1-small');
     await topicButton(page, '主主题 1').click();
     await enterMindMapWorkspace(page);
+    await openInsertMenu(page);
     await page.getByTestId('mindmap-open-sticker-catalog').click();
     const catalog = page.getByTestId('mindmap-sticker-catalog');
     await expect(catalog).toContainText('468 项许可素材 · 13 类 · 同源安全导出');
@@ -3370,6 +3465,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     const exportFontEditor = page.getByLabel('编辑主题标题');
     await exportFontEditor.fill('A中');
     await exportFontEditor.press('Control+a');
+    await page.getByRole('button', { name: '显示文本格式' }).click();
     const exportFontToolbar = page.getByRole('toolbar', { name: '主题文本格式' });
     await exportFontToolbar.getByRole('button', { name: '斜体', exact: true }).click();
     await exportFontEditor.press('Enter');
@@ -3379,6 +3475,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     const exportCodeEditor = page.getByLabel('编辑主题标题');
     await exportCodeEditor.fill('Code');
     await exportCodeEditor.press('Control+a');
+    await page.getByRole('button', { name: '显示文本格式' }).click();
     await page.getByRole('toolbar', { name: '主题文本格式' })
       .getByRole('button', { name: '行内代码', exact: true })
       .click();
@@ -3395,6 +3492,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await expect(page.getByTestId('mindmap-open-sticker-catalog')).toBeDisabled();
     expect(uploadCount).toBe(1);
 
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开导入与导出' }).click();
     const exportPanel = page.getByTestId('mindmap-import-export-panel');
     await expect(exportPanel.getByRole('button', { name: '导出 SVG' })).toBeEnabled();
@@ -3494,6 +3592,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await page.getByTestId('mode-edit').click();
     await enterMindMapWorkspace(page);
     await expect(canvas(page)).toHaveAttribute('data-read-only', 'false');
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开导入与导出' }).click();
     await expect(exportPanel).toHaveCount(0);
     const editableSticker = page.getByTestId(`topic-image-${stickerId}`);
@@ -3502,6 +3601,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     await expect(page.locator('[data-topic-image-role="sticker"]')).toHaveCount(0);
 
     uploadCount = 0;
+    await openInsertMenu(page);
     await page.getByRole('button', { name: '打开导入与导出' }).click();
     const importPanel = page.getByTestId('mindmap-import-export-panel');
     await importPanel.getByLabel('选择 XMind 文件').setInputFiles({
@@ -3535,6 +3635,7 @@ test.describe('Mind map V2 compatibility and persistence', () => {
     expect(uploadCount).toBe(1);
 
     if (await page.getByTestId('mindmap-import-export-panel').count() === 0) {
+      await openInsertMenu(page);
       await page.getByRole('button', { name: '打开导入与导出' }).click();
     }
     const reexportPanel = page.getByTestId('mindmap-import-export-panel');

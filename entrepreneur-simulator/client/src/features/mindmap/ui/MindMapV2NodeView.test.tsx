@@ -83,7 +83,7 @@ describe('MindMapV2NodeView presentation contracts', () => {
     expect(within(preview).queryByTestId('mindmap-semantic-panel')).not.toBeInTheDocument();
     expect(within(preview).queryByTestId('mindmap-semantic-properties')).not.toBeInTheDocument();
     expect(within(preview).queryByTestId('mindmap-search-outliner-panel')).not.toBeInTheDocument();
-    expect(within(preview).queryByTestId('mindmap-canvas-navigation')).not.toBeInTheDocument();
+    expect(within(preview).getByTestId('mindmap-canvas-navigation')).toBeVisible();
     expect(
       within(preview).getAllByRole('button', { name: '中心主题' })
         .some((element) => element.getAttribute('title') === '中心主题'),
@@ -102,10 +102,18 @@ describe('MindMapV2NodeView presentation contracts', () => {
     expect(editor).toHaveClass('text-slate-900');
     expect(rootButton).toBeVisible();
     expect(screen.getByTestId('mindmap-topic-title-editor-popover')).toBeInTheDocument();
+    expect(screen.queryByRole('toolbar', { name: '主题文本格式' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '显示文本格式' }));
+    expect(screen.getByRole('toolbar', { name: '主题文本格式' })).toBeVisible();
+    expect(editor).toBeVisible();
+    fireEvent.keyDown(editor, { key: 'Escape' });
+    expect(screen.queryByLabelText('编辑主题标题')).not.toBeInTheDocument();
+    expect(screen.getByTestId('mindmap-v2-canvas')).toHaveFocus();
   });
 
   it('routes local image insertion to the root topic when nothing is selected', () => {
     render(<MindMapV2NodeView {...createNodeViewProps('root-image-map', '0000000014')} />);
+    fireEvent.click(screen.getByText('插入', { exact: true }));
     const input = screen.getByTestId('mindmap-local-image-input') as HTMLInputElement;
     const openChooser = vi.spyOn(input, 'click').mockImplementation(() => undefined);
     const insertImage = screen.getByTestId('mindmap-insert-local-image');
@@ -122,6 +130,7 @@ describe('MindMapV2NodeView presentation contracts', () => {
   it('keeps image and tree-table actions available from an embedded mind map', () => {
     render(<MindMapV2NodeView {...createNodeViewProps('embedded-table-map', '0000000016')} />);
 
+    fireEvent.click(screen.getByText('插入', { exact: true }));
     expect(screen.getByTestId('mindmap-insert-local-image')).toBeEnabled();
     expect(screen.getByTestId('mindmap-toggle-tree-table')).toBeEnabled();
     expect(screen.getByLabelText('转换为树形表格')).toBeInTheDocument();
@@ -239,6 +248,8 @@ describe('MindMapV2NodeView diagnostics', () => {
 
     expect(screen.getByTestId('mindmap-v2-canvas')).toHaveAttribute('data-read-only', 'true');
     enterMindMapWorkspace();
+    fireEvent.click(screen.getByText('插入', { exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: '关系与概要' }));
     expect(screen.getByTestId('mindmap-create-boundary')).toBeDisabled();
     expect(screen.getByTitle('新增子主题 (Tab)')).toBeDisabled();
   });
@@ -265,6 +276,7 @@ describe('MindMapV2NodeView diagnostics', () => {
     expect(topicTitle).toBeDefined();
     fireEvent.click(topicTitle!);
     enterMindMapWorkspace();
+    fireEvent.click(screen.getByText('插入', { exact: true }));
     const toolbarEntry = screen.getByRole('button', { name: '打开主题待办' });
     expect(toolbarEntry).toBeEnabled();
     fireEvent.click(toolbarEntry);
@@ -315,6 +327,7 @@ describe('MindMapV2NodeView diagnostics', () => {
     expect(topicTitle).toBeDefined();
     fireEvent.click(topicTitle!);
     enterMindMapWorkspace();
+    fireEvent.click(screen.getByText('插入', { exact: true }));
     const toolbarEntry = screen.getByRole('button', { name: '打开主题任务' });
     expect(toolbarEntry).toBeEnabled();
     fireEvent.click(toolbarEntry);
@@ -384,6 +397,7 @@ describe('MindMapV2NodeView diagnostics', () => {
       .find((element) => element.getAttribute('title') === '中心主题');
     fireEvent.click(topicTitle!);
     enterMindMapWorkspace();
+    fireEvent.click(screen.getByText('插入', { exact: true }));
     const toolbarEntry = screen.getByRole('button', { name: '打开标记与图例' });
     fireEvent.click(toolbarEntry);
     expect(screen.getByTestId('mindmap-marker-legend-panel')).toHaveAccessibleName('标记与图例');

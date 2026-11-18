@@ -38,6 +38,7 @@ import {
   Sparkles,
   Tags,
   Table2,
+  Shapes,
   Trash2,
   Undo2,
 } from 'lucide-react';
@@ -54,6 +55,8 @@ import ReactFlow, {
   type Viewport as ReactFlowViewport,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import './mindmap-workspace.css';
+import { MindMapToolbar } from './MindMapToolbar';
 
 import {
   decodeMindMapClipboard,
@@ -345,6 +348,7 @@ const VARIANT_LABELS: Readonly<Record<string, string>> = {
 
 interface TopicNodeActions {
   readonly readOnly: boolean;
+  focusCanvas(): void;
   readonly selectedImageId?: ImageId;
   select(topicId: TopicId, modifiers?: SelectionModifiers): void;
   beginEdit(topicId: TopicId): void;
@@ -398,10 +402,10 @@ const TopicFlowNode = memo(({
     opacity: data.visualStyle.opacity,
     textDecoration: data.visualStyle.textDecoration,
     boxShadow: selected
-      ? '0 0 0 3px rgba(37, 99, 235, 0.18), 0 8px 24px rgba(15, 23, 42, 0.12)'
+      ? '0 0 0 2px #007aff, 0 4px 12px rgba(15, 23, 42, 0.08)'
       : data.searchState === 'match'
         ? '0 0 0 3px rgba(245, 158, 11, 0.42), 0 8px 24px rgba(15, 23, 42, 0.12)'
-        : '0 6px 18px rgba(15, 23, 42, 0.10)',
+        : '0 2px 6px rgba(15, 23, 42, 0.05)',
   };
 
   return (
@@ -499,7 +503,9 @@ const TopicFlowNode = memo(({
         className="col-start-1 row-start-2"
       />
       <div
-        className="relative col-start-2 row-start-2 flex h-full w-full flex-col items-center justify-center gap-2 border px-4 py-2 text-center transition-shadow"
+        className={`relative col-start-2 row-start-2 flex h-full w-full flex-col items-center justify-center gap-2 border px-4 py-2 text-center transition-shadow ${
+          !actions.readOnly && data.role !== 'central' ? 'mindmap-topic-drag-surface cursor-grab active:cursor-grabbing' : ''
+        }`}
         style={visualStyle}
         data-testid={`mindmap-topic-card-${data.entityId}`}
       >
@@ -537,9 +543,12 @@ const TopicFlowNode = memo(({
         >
           <TopicRichTextEditor
             initialValue={data.title}
+            compact
+            selectAllOnFocus={data.label === '新主题'}
             ariaLabel="编辑主题标题"
             className="w-[min(22rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-2 text-left text-slate-900 shadow-2xl"
             onCommit={(title) => actions.commitTitle(data.entityId, title)}
+            onKeyboardCommit={actions.focusCanvas}
             onCancel={actions.cancelEdit}
           />
         </NodeToolbar>
@@ -547,7 +556,7 @@ const TopicFlowNode = memo(({
       <div
         role="button"
         aria-label={data.label}
-        className={`nodrag flex w-full min-w-0 flex-1 cursor-default items-center justify-center overflow-hidden whitespace-pre-wrap break-words bg-transparent ${
+        className={`flex w-full min-w-0 flex-1 select-none items-center justify-center overflow-hidden whitespace-pre-wrap break-words bg-transparent ${
           visibleBadges && visibleBadges.length > 0 ? 'pb-4' : ''
         }`}
         onClick={(event) => {
@@ -894,6 +903,7 @@ const MindMapV2Canvas = ({
   const [editingSheetId, setEditingSheetId] = useState<SheetId | null>(null);
   const [sheetTitleDraft, setSheetTitleDraft] = useState('');
   const [fullScreen, setFullScreen] = useState(false);
+  const [elementsPanelOpen, setElementsPanelOpen] = useState(false);
   const [importExportOpen, setImportExportOpen] = useState(false);
   const [pendingImport, setPendingImport] = useState<PendingMindMapImport | null>(null);
   const [importApplyBusy, setImportApplyBusy] = useState(false);
@@ -956,14 +966,14 @@ const MindMapV2Canvas = ({
       element.setAttribute('aria-hidden', 'true');
     });
     const closeOnEscape = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
       event.preventDefault();
       event.stopPropagation();
       setFullScreen(false);
     };
-    globalThis.document.addEventListener('keydown', closeOnEscape, true);
+    globalThis.document.addEventListener('keydown', closeOnEscape);
     return () => {
-      globalThis.document.removeEventListener('keydown', closeOnEscape, true);
+      globalThis.document.removeEventListener('keydown', closeOnEscape);
       body.style.overflow = previousOverflow;
       body.style.overscrollBehavior = previousOverscrollBehavior;
       backgroundState.forEach(({ element, inert, ariaHidden }) => {
@@ -1317,24 +1327,34 @@ const MindMapV2Canvas = ({
     || markerLegendPanelOpen
     || stickerCatalogOpen
     || Boolean(topicEnrichmentPanel)
+    || elementsPanelOpen
     || isSemanticPropertiesElementRef(currentSelection)
     || formatPanelExpanded
   );
   const canvasSafeArea = useMemo<CanvasSafeArea>(() => ({
-    top: focusedBranchRootId ? 52 : 16,
+    top: focusedBranchRootId ? 136 : 88,
     right: hasRightWorkspacePanel ? 340 : 28,
-    bottom: workspaceChromeVisible ? 56 : 28,
+    bottom: 68,
     left: workspaceChromeVisible ? (searchPanelCollapsed ? 64 : 332) : 28,
   }), [focusedBranchRootId, hasRightWorkspacePanel, searchPanelCollapsed, workspaceChromeVisible]);
   const fitProjection = useCallback((duration = 220) => {
     const instance = flowInstanceRef.current;
     if (!instance) return;
+    const viewportRect = flowViewportRef.current?.getBoundingClientRect();
+    // Start small screens at a readable scale; the explicit Fit action still shows the whole map.
+    const readableRoot = duration === 0 && viewportRect && viewportRect.width < 600 && !focusedBranchRootId
+      ? instance.getNode(activeSheet?.rootTopicId ?? '')
+      : undefined;
     createReactFlowCanvasNavigationHandlers(instance, {
       safeArea: canvasSafeArea,
       duration,
       minZoom: MIN_CANVAS_ZOOM,
-      maxZoom: MAX_CANVAS_ZOOM,
-      getContentBounds: () => projectionBounds,
+      maxZoom: readableRoot ? 0.85 : MAX_CANVAS_ZOOM,
+      getContentBounds: () => readableRoot ? {
+        ...readableRoot.position,
+        width: readableRoot.width ?? 184,
+        height: readableRoot.height ?? 56,
+      } : projectionBounds,
       getViewportSize: () => {
         const rect = flowViewportRef.current?.getBoundingClientRect();
         return rect && rect.width > 0 && rect.height > 0
@@ -1342,7 +1362,7 @@ const MindMapV2Canvas = ({
           : null;
       },
     }).onFitView();
-  }, [canvasSafeArea, projectionBounds]);
+  }, [activeSheet?.rootTopicId, canvasSafeArea, focusedBranchRootId, projectionBounds]);
   const fitProjectionRef = useRef(fitProjection);
   fitProjectionRef.current = fitProjection;
   const workspaceLayoutMountedRef = useRef(false);
@@ -1396,6 +1416,31 @@ const MindMapV2Canvas = ({
       if (secondFrame) cancelAnimationFrame(secondFrame);
     };
   }, [activeSheetId, fullScreen]);
+  // Keep both the title and its editor in view when growing a branch near an edge.
+  useEffect(() => {
+    if (!editingTopicId) return;
+    const frame = requestAnimationFrame(() => {
+      const instance = flowInstanceRef.current;
+      const node = instance?.getNode(editingTopicId);
+      const rect = flowViewportRef.current?.getBoundingClientRect();
+      if (!instance || !node || !rect) return;
+      const viewport = instance.getViewport();
+      const editorWidth = Math.min(352, rect.width - 32);
+      const center = viewport.x + (node.position.x + (node.width ?? 184) / 2) * viewport.zoom;
+      const minimumCenter = Math.min(canvasSafeArea.left + editorWidth / 2, rect.width / 2);
+      const maximumCenter = Math.max(rect.width - canvasSafeArea.right - editorWidth / 2, rect.width / 2);
+      const dx = Math.max(minimumCenter, Math.min(maximumCenter, center)) - center;
+      const top = viewport.y + node.position.y * viewport.zoom;
+      const bottom = top + (node.height ?? 56) * viewport.zoom + 144;
+      const dy = top < canvasSafeArea.top
+        ? canvasSafeArea.top - top
+        : Math.min(0, rect.height - 60 - bottom);
+      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) {
+        instance.setViewport({ ...viewport, x: viewport.x + dx, y: viewport.y + dy }, { duration: 160 });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeSheetId, canvasSafeArea, editingTopicId]);
   const selectedTopicIdList = useMemo(() =>
     currentSelections
       .filter((reference): reference is Extract<ElementRef, { kind: 'topic' }> =>
@@ -1446,7 +1491,7 @@ const MindMapV2Canvas = ({
       return {
         ...flowNode,
         draggable: !readOnly,
-        dragHandle: '.mindmap-topic-drag-handle',
+        dragHandle: '.mindmap-topic-drag-surface, .mindmap-topic-drag-handle',
         selected: selectedTopicIds.has(topicId),
         data: {
           ...flowNode.data,
@@ -1844,6 +1889,7 @@ const MindMapV2Canvas = ({
     focusLinkInput = false,
   ) => {
     if (!isTopicSelection(currentSelection)) return;
+    setFullScreen(true);
     setImportExportOpen(false);
     setMarkerLegendPanelOpen(false);
     setStickerCatalogOpen(false);
@@ -1891,6 +1937,7 @@ const MindMapV2Canvas = ({
 
   const beginEdit = useCallback((topicId: TopicId) => {
     if (readOnly) return;
+    focusRestoreCleanupRef.current?.();
     setSelection({ kind: 'topic', id: topicId });
     setEditingTopicId(topicId);
   }, [readOnly, setSelection]);
@@ -2094,6 +2141,7 @@ const MindMapV2Canvas = ({
   }, [activeSheetId, readOnly, store]);
 
   const addChild = useCallback((parentTopicId?: TopicId) => {
+    focusRestoreCleanupRef.current?.();
     const currentDocument = store.getSnapshot();
     if (readOnly || !currentDocument || !activeSheetId) return;
     const sheet = currentDocument.sheets[activeSheetId];
@@ -2121,6 +2169,7 @@ const MindMapV2Canvas = ({
     topicId: TopicId,
     position: 'before' | 'after' = 'after',
   ) => {
+    focusRestoreCleanupRef.current?.();
     const currentDocument = store.getSnapshot();
     if (readOnly || !currentDocument || !activeSheetId) return;
     const sheet = currentDocument.sheets[activeSheetId];
@@ -2239,6 +2288,7 @@ const MindMapV2Canvas = ({
       setSelection(createdElementRef(command));
       setEditingTopicId(null);
       setStatus(null);
+      requestAnimationFrame(() => requestAnimationFrame(() => fitProjectionRef.current(0)));
     } catch (error) {
       setStatus(errorMessage(error));
     }
@@ -2756,11 +2806,15 @@ const MindMapV2Canvas = ({
 
   const topicActions = useMemo<TopicNodeActions>(() => ({
     readOnly,
+    focusCanvas,
     selectedImageId: selectedLocalImageId,
     select: selectTopic,
     beginEdit,
     commitTitle,
-    cancelEdit: () => setEditingTopicId(null),
+    cancelEdit: () => {
+      setEditingTopicId(null);
+      focusCanvas();
+    },
     toggleCollapse,
     activateEnrichment: activateTopicEnrichment,
     selectImage: selectLocalImage,
@@ -2779,6 +2833,7 @@ const MindMapV2Canvas = ({
     activateTopicEnrichment,
     beginEdit,
     commitTitle,
+    focusCanvas,
     deleteLocalImage,
     dropLocalImage,
     ingestBuiltInSticker,
@@ -3110,7 +3165,8 @@ const MindMapV2Canvas = ({
       if (!readOnly) deleteLocalImage(selectedLocalImageId);
       return;
     }
-    if (target.matches('input, textarea, select, button, [contenteditable="true"]')) return;
+    const interactiveTarget = target.closest('input, textarea, select, button, summary, [contenteditable="true"]');
+    if (interactiveTarget && event.currentTarget.contains(interactiveTarget)) return;
     const commandModifier = event.ctrlKey || event.metaKey;
     const lowerKey = event.key.toLowerCase();
 
@@ -3309,7 +3365,7 @@ const MindMapV2Canvas = ({
     : `relative ${EMBEDDED_PRESENTATION_HEIGHT_CLASS} w-full overflow-hidden rounded-2xl border bg-slate-50 shadow-[0_12px_36px_rgba(15,23,42,0.08)] ${
         nodeViewSelected ? 'border-blue-500' : 'border-slate-200'
       }`;
-  const canvasClassName = 'relative h-full w-full overflow-hidden bg-slate-50';
+  const canvasClassName = 'mindmap-workspace relative h-full w-full overflow-hidden';
   const localViewport = sheetViews[activeSheetId]?.viewport;
   const layoutCapability = getCoreLayoutCapability(
     activeSheet.defaultBranchLayout.structure,
@@ -3341,22 +3397,15 @@ const MindMapV2Canvas = ({
           }}
           className="nodrag pointer-events-none fixed h-px w-px resize-none opacity-0"
         />
-        <header
-          className="absolute inset-x-0 top-0 z-20 flex h-12 items-center gap-1.5 border-b border-slate-200 bg-white/95 px-2 py-2 shadow-sm backdrop-blur sm:gap-2 sm:px-3"
-          data-testid={fullScreen
-            ? 'mindmap-v2-fullscreen-topbar'
-            : 'mindmap-v2-embedded-topbar'}
-          data-mindmap-chrome={fullScreen ? 'compact' : 'preview'}
-        >
-          <div
-            className={`${workspaceChromeVisible ? 'hidden sm:flex' : 'hidden'} shrink-0 items-center gap-1.5 pr-1`}
-            aria-label="思维导图工作区"
-          >
-            <span className="h-2 w-2 rounded-full bg-indigo-500 shadow-[0_0_0_3px_rgba(99,102,241,0.12)]" />
-            <span className="whitespace-nowrap text-xs font-semibold text-slate-700">
-              思维导图
-            </span>
-          </div>
+        <MindMapToolbar
+          fullScreen={fullScreen}
+          readOnly={readOnly}
+          canEdit={isTopicSelection(currentSelection)}
+          canAddSibling={isTopicSelection(currentSelection) && !isRootSelected}
+          onAddChild={() => addChild()}
+          onAddSibling={() => isTopicSelection(currentSelection) && addSibling(currentSelection.id)}
+          onEdit={() => isTopicSelection(currentSelection) && beginEdit(currentSelection.id)}
+          sheetTabs={(
           <div
             className="flex min-w-[7rem] max-w-[38%] shrink-0 items-center gap-1 overflow-x-auto sm:min-w-[9rem]"
             aria-label="Sheet 切换"
@@ -3426,11 +3475,9 @@ const MindMapV2Canvas = ({
               <Trash2 size={13} />
             </button>
           </div>
-          {workspaceChromeVisible ? <div
-            className="hidden min-w-0 items-center gap-1 border-l border-slate-200 pl-2 xl:flex"
-            aria-label="布局结构"
-          >
-            <select
+          )}
+          layoutControls={<div className="mindmap-layout-controls">
+            <label>结构<select
               className="nodrag max-w-28 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 shadow-sm outline-none focus:border-blue-400 disabled:opacity-45"
               aria-label="导图结构"
               title="导图结构"
@@ -3450,9 +3497,9 @@ const MindMapV2Canvas = ({
                   {STRUCTURE_LABELS[structure]}
                 </option>
               ))}
-            </select>
+            </select></label>
             {layoutCapability ? (
-              <select
+              <label>方向<select
                 className="nodrag max-w-24 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 shadow-sm outline-none focus:border-blue-400 disabled:opacity-45"
                 aria-label="布局方向"
                 title="布局方向"
@@ -3467,10 +3514,10 @@ const MindMapV2Canvas = ({
                     {DIRECTION_LABELS[direction]}
                   </option>
                 ))}
-              </select>
+              </select></label>
             ) : null}
             {layoutCapability && layoutCapability.variantIds.length > 1 ? (
-              <select
+              <label>样式<select
                 className="nodrag max-w-24 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 shadow-sm outline-none focus:border-blue-400 disabled:opacity-45"
                 aria-label="结构变体"
                 title="结构变体"
@@ -3483,16 +3530,289 @@ const MindMapV2Canvas = ({
                     {VARIANT_LABELS[variantId] ?? variantId}
                   </option>
                 ))}
-              </select>
+              </select></label>
             ) : null}
-          </div> : null}
-          <div className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1">
-            <div
-              className={`flex min-w-0 items-center gap-1 overflow-x-auto overscroll-x-contain pr-1 [&>button]:shrink-0 ${
-                workspaceChromeVisible ? '' : '[&>[data-fullscreen-only=true]]:hidden'
-              }`}
-              data-testid="mindmap-v2-action-strip"
+          </div>}
+          insertActions={<div className="mindmap-insert-grid">
+            <button
+              type="button"
+              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => {
+                const targetTopicId = isTopicSelection(currentSelection)
+                  && activeSheet?.topics[currentSelection.id]
+                  ? currentSelection.id
+                  : activeSheet?.rootTopicId;
+                if (!targetTopicId) {
+                  setStatus('当前画布没有可添加图片的主题。');
+                  return;
+                }
+                localImageTargetTopicRef.current = targetTopicId;
+                currentSelectionRef.current = { kind: 'topic', id: targetTopicId };
+                setSelection({ kind: 'topic', id: targetTopicId });
+                localImageInputRef.current?.click();
+              }}
+              disabled={readOnly || localImageBusy || !activeSheet}
+              title="插入本地图片"
+              aria-label="插入本地图片"
+              data-testid="mindmap-insert-local-image"
+              data-local-image-busy={localImageBusy ? 'true' : 'false'}
             >
+              <ImagePlus size={15} aria-hidden="true" /><span>图片</span>
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+                activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
+                  ? 'border-blue-300 text-blue-700'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => changeLayoutStructure(
+                activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
+                  ? 'core:mind-map'
+                  : 'core:tree-table',
+              )}
+              disabled={readOnly || !activeSheet}
+              title={activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
+                ? '切换为思维导图'
+                : '转换为树形表格'}
+              aria-label={activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
+                ? '切换为思维导图'
+                : '转换为树形表格'}
+              data-testid="mindmap-toggle-tree-table"
+            >
+              <Table2 size={15} aria-hidden="true" /><span>树形表格</span>
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:cursor-not-allowed disabled:opacity-40 ${
+                stickerCatalogOpen
+                  ? 'border-amber-300 text-amber-700'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => {
+                setFullScreen(true);
+                setStickerCatalogOpen((open) => {
+                  if (!open) {
+                    setImportExportOpen(false);
+                    setMarkerLegendPanelOpen(false);
+                    setTopicEnrichmentPanel(null);
+                  }
+                  return !open;
+                });
+              }}
+              disabled={readOnly || stickerBusy}
+              title="贴纸与插画"
+              aria-label="打开贴纸与插画"
+              aria-expanded={stickerCatalogOpen}
+              data-testid="mindmap-open-sticker-catalog"
+            >
+              <Sparkles size={15} aria-hidden="true" /><span>贴纸与插画</span>
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border bg-white p-1.5 shadow-sm ${
+                markerLegendPanelOpen
+                  ? 'border-orange-300 text-orange-700'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => {
+                setFullScreen(true);
+                setMarkerLegendPanelOpen((open) => {
+                  if (!open) {
+                    setImportExportOpen(false);
+                    setStickerCatalogOpen(false);
+                    setTopicEnrichmentPanel(null);
+                  }
+                  return !open;
+                });
+              }}
+              title="标记与图例"
+              aria-label="打开标记与图例"
+              aria-expanded={markerLegendPanelOpen}
+            >
+              <Flag size={15} aria-hidden="true" /><span>标记与图例</span>
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:opacity-40 ${
+                topicEnrichmentPanel?.section === 'labels'
+                  ? 'border-violet-300 text-violet-700'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => openSelectedTopicEnrichment('labels')}
+              disabled={!isTopicSelection(currentSelection)}
+              title="标签"
+              aria-label="打开主题标签"
+              aria-expanded={topicEnrichmentPanel?.section === 'labels'}
+            >
+              <Tags size={15} aria-hidden="true" /><span>标签</span>
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:opacity-40 ${
+                topicEnrichmentPanel?.section === 'note'
+                  ? 'border-blue-300 text-blue-700'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => openSelectedTopicEnrichment('note')}
+              disabled={!isTopicSelection(currentSelection)}
+              title="笔记"
+              aria-label="打开主题笔记"
+              aria-expanded={topicEnrichmentPanel?.section === 'note'}
+            >
+              <NotebookPen size={15} aria-hidden="true" /><span>笔记</span>
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:opacity-40 ${
+                topicEnrichmentPanel?.section === 'links'
+                  ? 'border-blue-300 text-blue-700'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => openSelectedTopicEnrichment('links', true)}
+              disabled={!isTopicSelection(currentSelection)}
+              title="链接 (Ctrl/Cmd+K)"
+              aria-label="打开主题链接"
+              aria-expanded={topicEnrichmentPanel?.section === 'links'}
+            >
+              <Link2 size={15} aria-hidden="true" /><span>链接</span>
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:opacity-40 ${
+                topicEnrichmentPanel?.section === 'todo'
+                  ? 'border-emerald-300 text-emerald-700'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => openSelectedTopicEnrichment('todo')}
+              disabled={!isTopicSelection(currentSelection)}
+              title="待办"
+              aria-label="打开主题待办"
+              aria-expanded={topicEnrichmentPanel?.section === 'todo'}
+            >
+              <ListTodo size={15} aria-hidden="true" /><span>待办</span>
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:opacity-40 ${
+                topicEnrichmentPanel?.section === 'task'
+                  ? 'border-indigo-300 text-indigo-700'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => openSelectedTopicEnrichment('task')}
+              disabled={!isTopicSelection(currentSelection)}
+              title="任务"
+              aria-label="打开主题任务"
+              aria-expanded={topicEnrichmentPanel?.section === 'task'}
+            >
+              <ClipboardList size={15} aria-hidden="true" /><span>任务</span>
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+              onClick={() => isTopicSelection(currentSelection) && toggleCollapse(currentSelection.id)}
+              disabled={readOnly || !isTopicSelection(currentSelection)}
+              title="折叠/展开"
+              aria-label="折叠或展开选中主题"
+            >
+              <ChevronDown size={15} /><span>折叠 / 展开</span>
+            </button>
+
+            <button type="button" onClick={() => {
+              setFullScreen(true);
+              setElementsPanelOpen(value => !value);
+            }} aria-label="关系与概要" aria-expanded={elementsPanelOpen}>
+              <Shapes size={15} aria-hidden="true" /><span>关系与概要</span>
+            </button>
+            <button
+              type="button"
+              className={`rounded-md border bg-white p-1.5 shadow-sm ${
+                importExportOpen
+                  ? 'border-blue-300 text-blue-700'
+                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              onClick={() => {
+                setFullScreen(true);
+                setImportExportOpen((value) => !value);
+                setTopicEnrichmentPanel(null);
+                setMarkerLegendPanelOpen(false);
+                setStickerCatalogOpen(false);
+              }}
+              title="导入与导出"
+              aria-label="打开导入与导出"
+              aria-expanded={importExportOpen}
+            >
+              <FileInput size={15} /><span>导入与导出</span>
+            </button>
+          </div>}
+          historyActions={<>
+            <button
+              type="button"
+              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+              onClick={undo}
+              disabled={readOnly || !store.canUndo}
+              title="撤销 (Ctrl/Cmd+Z)"
+              aria-label="撤销"
+            >
+              <Undo2 size={15} />
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-40"
+              onClick={redo}
+              disabled={readOnly || !store.canRedo}
+              title="重做 (Ctrl/Cmd+Y)"
+              aria-label="重做"
+            >
+              <Redo2 size={15} />
+            </button>
+          </>}
+          workspaceActions={<>
+            <button
+              type="button"
+              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50"
+              onClick={() => {
+                if (workspaceChromeVisible) {
+                  searchPanelRef.current?.focusSearch();
+                  return;
+                }
+                setFullScreen(true);
+                requestAnimationFrame(() => requestAnimationFrame(() => {
+                  searchPanelRef.current?.focusSearch();
+                }));
+              }}
+              title="搜索与大纲 (Ctrl/Cmd+F)"
+              aria-label="打开搜索与大纲"
+            >
+              <Search size={15} />
+            </button>
+          </>}
+          viewportActions={<>
+            <button
+              type="button"
+              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50"
+              onClick={() => fitProjection()}
+              title="适配画布"
+              aria-label="适配画布"
+            >
+              <Focus size={15} />
+            </button>
+            <button
+              ref={fullScreenButtonRef}
+              type="button"
+              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50"
+              onClick={() => setFullScreen((value) => !value)}
+              title={fullScreen ? '返回文档 (Esc)' : '全屏编辑'}
+              aria-label={fullScreen ? '退出全屏' : '全屏'}
+              data-testid={fullScreen
+                ? 'mindmap-v2-exit-fullscreen'
+                : 'mindmap-v2-enter-fullscreen'}
+            >
+              {fullScreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              <span className="ml-1 hidden text-xs sm:inline">{fullScreen ? '完成' : '全屏编辑'}</span>
+            </button>
+          </>}
+        />
             <input
               ref={localImageInputRef}
               type="file"
@@ -3517,296 +3837,10 @@ const MindMapV2Canvas = ({
                 void ingestLocalImage(targetTopicId, files);
               }}
             />
-            <button
-              type="button"
-              className="rounded-md border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
-              onClick={() => addChild()}
-              disabled={readOnly}
-              title="新增子主题 (Tab)"
-            >
-              <Plus size={14} className="mr-1 inline" />子主题
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
-              onClick={() => {
-                const targetTopicId = isTopicSelection(currentSelection)
-                  && activeSheet?.topics[currentSelection.id]
-                  ? currentSelection.id
-                  : activeSheet?.rootTopicId;
-                if (!targetTopicId) {
-                  setStatus('当前画布没有可添加图片的主题。');
-                  return;
-                }
-                localImageTargetTopicRef.current = targetTopicId;
-                currentSelectionRef.current = { kind: 'topic', id: targetTopicId };
-                setSelection({ kind: 'topic', id: targetTopicId });
-                localImageInputRef.current?.click();
-              }}
-              disabled={readOnly || localImageBusy || !activeSheet}
-              title="插入本地图片"
-              aria-label="插入本地图片"
-              data-testid="mindmap-insert-local-image"
-              data-local-image-busy={localImageBusy ? 'true' : 'false'}
-            >
-              <ImagePlus size={15} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:cursor-not-allowed disabled:opacity-40 ${
-                activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
-                  ? 'border-blue-300 text-blue-700'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-              onClick={() => changeLayoutStructure(
-                activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
-                  ? 'core:mind-map'
-                  : 'core:tree-table',
-              )}
-              disabled={readOnly || !activeSheet}
-              title={activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
-                ? '切换为思维导图'
-                : '转换为树形表格'}
-              aria-label={activeSheet?.defaultBranchLayout.structure === 'core:tree-table'
-                ? '切换为思维导图'
-                : '转换为树形表格'}
-              data-testid="mindmap-toggle-tree-table"
-            >
-              <Table2 size={15} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              data-fullscreen-only="true"
-              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:cursor-not-allowed disabled:opacity-40 ${
-                stickerCatalogOpen
-                  ? 'border-amber-300 text-amber-700'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-              onClick={() => {
-                setStickerCatalogOpen((open) => {
-                  if (!open) {
-                    setImportExportOpen(false);
-                    setMarkerLegendPanelOpen(false);
-                    setTopicEnrichmentPanel(null);
-                  }
-                  return !open;
-                });
-              }}
-              disabled={readOnly || stickerBusy}
-              title="贴纸与插画"
-              aria-label="打开贴纸与插画"
-              aria-expanded={stickerCatalogOpen}
-              data-testid="mindmap-open-sticker-catalog"
-            >
-              <Sparkles size={15} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              data-fullscreen-only="true"
-              className={`rounded-md border bg-white p-1.5 shadow-sm ${
-                markerLegendPanelOpen
-                  ? 'border-orange-300 text-orange-700'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-              onClick={() => {
-                setMarkerLegendPanelOpen((open) => {
-                  if (!open) {
-                    setImportExportOpen(false);
-                    setStickerCatalogOpen(false);
-                    setTopicEnrichmentPanel(null);
-                  }
-                  return !open;
-                });
-              }}
-              title="标记与图例"
-              aria-label="打开标记与图例"
-              aria-expanded={markerLegendPanelOpen}
-            >
-              <Flag size={15} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              data-fullscreen-only="true"
-              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:opacity-40 ${
-                topicEnrichmentPanel?.section === 'labels'
-                  ? 'border-violet-300 text-violet-700'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-              onClick={() => openSelectedTopicEnrichment('labels')}
-              disabled={!isTopicSelection(currentSelection)}
-              title="标签"
-              aria-label="打开主题标签"
-              aria-expanded={topicEnrichmentPanel?.section === 'labels'}
-            >
-              <Tags size={15} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              data-fullscreen-only="true"
-              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:opacity-40 ${
-                topicEnrichmentPanel?.section === 'note'
-                  ? 'border-blue-300 text-blue-700'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-              onClick={() => openSelectedTopicEnrichment('note')}
-              disabled={!isTopicSelection(currentSelection)}
-              title="笔记"
-              aria-label="打开主题笔记"
-              aria-expanded={topicEnrichmentPanel?.section === 'note'}
-            >
-              <NotebookPen size={15} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              data-fullscreen-only="true"
-              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:opacity-40 ${
-                topicEnrichmentPanel?.section === 'links'
-                  ? 'border-blue-300 text-blue-700'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-              onClick={() => openSelectedTopicEnrichment('links', true)}
-              disabled={!isTopicSelection(currentSelection)}
-              title="链接 (Ctrl/Cmd+K)"
-              aria-label="打开主题链接"
-              aria-expanded={topicEnrichmentPanel?.section === 'links'}
-            >
-              <Link2 size={15} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              data-fullscreen-only="true"
-              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:opacity-40 ${
-                topicEnrichmentPanel?.section === 'todo'
-                  ? 'border-emerald-300 text-emerald-700'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-              onClick={() => openSelectedTopicEnrichment('todo')}
-              disabled={!isTopicSelection(currentSelection)}
-              title="待办"
-              aria-label="打开主题待办"
-              aria-expanded={topicEnrichmentPanel?.section === 'todo'}
-            >
-              <ListTodo size={15} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              data-fullscreen-only="true"
-              className={`rounded-md border bg-white p-1.5 shadow-sm disabled:opacity-40 ${
-                topicEnrichmentPanel?.section === 'task'
-                  ? 'border-indigo-300 text-indigo-700'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-              onClick={() => openSelectedTopicEnrichment('task')}
-              disabled={!isTopicSelection(currentSelection)}
-              title="任务"
-              aria-label="打开主题任务"
-              aria-expanded={topicEnrichmentPanel?.section === 'task'}
-            >
-              <ClipboardList size={15} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              data-fullscreen-only="true"
-              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-40"
-              onClick={() => isTopicSelection(currentSelection) && toggleCollapse(currentSelection.id)}
-              disabled={readOnly || !isTopicSelection(currentSelection)}
-              title="折叠/展开"
-              aria-label="折叠或展开选中主题"
-            >
-              <ChevronDown size={15} />
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-40"
-              onClick={undo}
-              disabled={readOnly || !store.canUndo}
-              title="撤销 (Ctrl/Cmd+Z)"
-              aria-label="撤销"
-            >
-              <Undo2 size={15} />
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-40"
-              onClick={redo}
-              disabled={readOnly || !store.canRedo}
-              title="重做 (Ctrl/Cmd+Y)"
-              aria-label="重做"
-            >
-              <Redo2 size={15} />
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50"
-              onClick={() => {
-                if (workspaceChromeVisible) {
-                  searchPanelRef.current?.focusSearch();
-                  return;
-                }
-                setFullScreen(true);
-                requestAnimationFrame(() => requestAnimationFrame(() => {
-                  searchPanelRef.current?.focusSearch();
-                }));
-              }}
-              title="搜索与大纲 (Ctrl/Cmd+F)"
-              aria-label="打开搜索与大纲"
-            >
-              <Search size={15} />
-            </button>
-            <button
-              type="button"
-              data-fullscreen-only="true"
-              className={`rounded-md border bg-white p-1.5 shadow-sm ${
-                importExportOpen
-                  ? 'border-blue-300 text-blue-700'
-                  : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-              onClick={() => {
-                setImportExportOpen((value) => !value);
-                setTopicEnrichmentPanel(null);
-                setMarkerLegendPanelOpen(false);
-                setStickerCatalogOpen(false);
-              }}
-              title="导入与导出"
-              aria-label="打开导入与导出"
-              aria-expanded={importExportOpen}
-            >
-              <FileInput size={15} />
-            </button>
-            </div>
-            <div
-              className="flex shrink-0 items-center gap-1 border-l border-slate-200 pl-1"
-              data-testid="mindmap-v2-viewport-actions"
-            >
-            <button
-              type="button"
-              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50"
-              onClick={() => fitProjection()}
-              title="适配画布"
-              aria-label="适配画布"
-            >
-              <Focus size={15} />
-            </button>
-            <button
-              ref={fullScreenButtonRef}
-              type="button"
-              className="rounded-md border border-slate-200 bg-white p-1.5 text-slate-600 shadow-sm hover:bg-slate-50"
-              onClick={() => setFullScreen((value) => !value)}
-              title={fullScreen ? '退出全屏' : '全屏'}
-              aria-label={fullScreen ? '退出全屏' : '全屏'}
-              data-testid={fullScreen
-                ? 'mindmap-v2-exit-fullscreen'
-                : 'mindmap-v2-enter-fullscreen'}
-            >
-              {fullScreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
-            </button>
-            </div>
-          </div>
-        </header>
 
         {store.parseResult.ok && store.parseResult.sourceFormat === 'legacy-v0' && (
           <div className="absolute left-3 top-14 z-20 rounded-md border border-blue-200 bg-blue-50 px-2 py-1 text-[11px] text-blue-700 shadow-sm">
-            已只读迁移 legacy payload；首次内容修改将仅写回 canonical V1。
+            已载入旧版导图，编辑后会自动升级保存。
           </div>
         )}
         {readOnly && (
@@ -3817,7 +3851,7 @@ const MindMapV2Canvas = ({
 
         <div
           ref={flowViewportRef}
-          className="absolute inset-x-0 bottom-0 top-12"
+          className="absolute inset-x-0 bottom-0 top-14"
           data-testid="mindmap-v2-flow-viewport"
         >
           <ReactFlow
@@ -3833,6 +3867,7 @@ const MindMapV2Canvas = ({
             panOnScroll
             zoomOnScroll={false}
             zoomOnDoubleClick={false}
+            nodeDragThreshold={5}
             defaultViewport={localViewport}
             onInit={(instance) => {
               flowInstanceRef.current = instance;
@@ -3900,7 +3935,7 @@ const MindMapV2Canvas = ({
             }}
             proOptions={{ hideAttribution: true }}
           >
-            <Background color="#CBD5E1" gap={22} size={1} />
+            <Background color="#dce1e8" gap={24} size={0.7} />
           </ReactFlow>
           <SemanticOverlaySvg
             geometry={flowProjection.semanticGeometry}
@@ -3956,7 +3991,7 @@ const MindMapV2Canvas = ({
           ) : null}
           {workspaceChromeVisible && focusedBranchContext ? (
             <nav
-              className="nowheel nodrag absolute left-1/2 top-3 z-30 flex max-w-[min(70%,720px)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-full border border-blue-200 bg-white/95 px-2 py-1 text-[11px] text-slate-600 shadow-lg backdrop-blur"
+              className="nowheel nodrag absolute left-1/2 top-[72px] z-30 flex max-w-[min(70%,720px)] -translate-x-1/2 items-center gap-1 overflow-x-auto rounded-full border border-blue-200 bg-white/95 px-2 py-1 text-[11px] text-slate-600 shadow-lg backdrop-blur"
               aria-label="聚焦分支路径"
               data-testid="mindmap-branch-breadcrumb"
             >
@@ -3980,15 +4015,16 @@ const MindMapV2Canvas = ({
                 ))}
             </nav>
           ) : null}
-          {workspaceChromeVisible ? <CanvasNavigationControls
+          <CanvasNavigationControls
             zoom={liveZoom}
             safeArea={{
               top: 16,
               right: canvasSafeArea.right,
               bottom: 16,
-              left: canvasSafeArea.left,
+              left: workspaceChromeVisible ? canvasSafeArea.left : 12,
             }}
             isBranchFocused={Boolean(focusedBranchRootId)}
+            compact={!workspaceChromeVisible}
             canFocusBranch={isTopicSelection(currentSelection)
               && currentSelection.id !== activeSheet.rootTopicId}
             focusedBranchLabel={focusedBranchRootId
@@ -3999,7 +4035,7 @@ const MindMapV2Canvas = ({
             onFitView={() => fitProjection()}
             onFocusBranch={focusSelectedBranch}
             onExitFocusBranch={leaveFocusedBranch}
-          /> : null}
+          />
         </div>
 
         {workspaceChromeVisible ? <SearchOutlinerPanel
@@ -4251,7 +4287,7 @@ const MindMapV2Canvas = ({
                 onClose={() => setSelection(null)}
               />
             </div>
-          ) : !formatPanelExpanded ? (
+          ) : !formatPanelExpanded && elementsPanelOpen ? (
             <SemanticElementPanel
               overlays={flowProjection.overlays}
               currentSelection={currentSelection}
@@ -4259,6 +4295,7 @@ const MindMapV2Canvas = ({
               boundaryPreview={boundaryCreationPreview}
               summaryPreview={summaryCreationPreview}
               readOnly={readOnly}
+              onClose={() => setElementsPanelOpen(false)}
               onCreate={createSemanticElement}
               onSelect={setSelection}
               onDelete={deleteSemanticElement}
@@ -4266,21 +4303,11 @@ const MindMapV2Canvas = ({
           ) : null
         ) : null}
 
-        {workspaceChromeVisible || status ? <footer className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2 rounded-full bg-white/90 px-3 py-1 text-[10px] text-slate-500 shadow-sm">
-          {status
-            ? (
-                <span
-                  role="status"
-                  data-testid="mindmap-status"
-                  className="text-red-600"
-                >
-                  {status}
-                </span>
-              )
-            : readOnly
-              ? '可选择、平移和缩放；内容修改已禁用'
-              : `Tab 子主题 · Enter 同级 · Space/F2 编辑 · Delete 删除${isRootSelected ? '（中心主题不可删）' : ''}`}
-        </footer> : null}
+        {status ? <footer
+          role="status"
+          data-testid="mindmap-status"
+          className="pointer-events-none absolute bottom-14 left-1/2 z-40 max-w-[calc(100%-2rem)] -translate-x-1/2 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-center text-xs text-slate-600 shadow-sm"
+        >{status}</footer> : null}
       </div>
   );
 
